@@ -1,0 +1,68 @@
+# Visual Studio and IDE state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# .NET build, test, coverage, and package output
+**/[Bb]in/
+**/[Oo]bj/
+TestResults/
+artifacts/
+coverage/
+*.coverage
+*.coveragexml
+*.trx
+*.nupkg
+*.snupkg
+
+# Local framework/dependency checkouts
+.mfn-*/
+.dependencies/
+
+# Codex/local automation artifacts
+.codex/
+**/.codex/
+.codex-pack/
+**/.codex-pack/
+.agents/
+Invoke-MtdInput.ps1
+Capture-MtdWindow.ps1
+Capture-MtdProcessWindow.ps1
+
+# Application runtime data (normally stored in %LOCALAPPDATA%)
+settings.json
+queue.json
+history.json
+metadata/
+thumbnails/
+logs/
+Tools/
+.staging/
+temp/
+downloads/
+output/
+
+# Managed external tools and their archives
+yt-dlp.exe
+ffmpeg.exe
+ffprobe.exe
+ffmpeg-*.zip
+yt-dlp*.zip
+
+# Download/process leftovers and local diagnostics
+*.log
+*.tmp
+*.temp
+*.part
+*.ytdl
+*.dmp
+*.stackdump
+
+# OS-generated files
+Thumbs.db
+Desktop.ini
+.DS_Store

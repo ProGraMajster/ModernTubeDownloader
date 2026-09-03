@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="ModernTubeDownloader/ModernTubeDownloader.csproj" />
+  <Project Path="ModernTubeDownloader.FakeTool/ModernTubeDownloader.FakeTool.csproj" />
+  <Project Path="ModernTubeDownloader.Tests/ModernTubeDownloader.Tests.csproj" />
+</Solution>

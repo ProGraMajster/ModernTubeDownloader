@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout ModernTubeDownloader
+        uses: actions/checkout@v4
+
+      - name: Verify public-release prerequisites
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath .\LICENSE -PathType Leaf)) {
+            throw 'Public release is blocked until the project license is selected and LICENSE is committed.'
+          }
+          [xml] $props = Get-Content -LiteralPath .\Directory.Build.props -Raw
+          $version = $props.SelectSingleNode('/Project/PropertyGroup/Version').InnerText.Trim()
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match application version v$version."
+          }
+
+      - name: Checkout pinned ModernFormsNext
+        uses: actions/checkout@v4
+        with:
+          repository: ProGraMajster/ModernFormsNext
+          ref: 1dce91b9740b3eba8d5f2f529017bebeffb88438
+          path: .dependencies/ModernFormsNext
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate and package
+        shell: pwsh
+        run: .\scripts\Build-Release.ps1 -ModernFormsNextRoot "$env:GITHUB_WORKSPACE\.dependencies\ModernFormsNext"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModernTubeDownloader-${{ github.ref_name }}-win-x64
+          path: |
+            artifacts/release/ModernTubeDownloader-*-win-x64.zip
+            artifacts/release/ModernTubeDownloader-*-win-x64.zip.sha256
+            artifacts/release/ModernTubeDownloader-*-win-x64-symbols.zip
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $mainZip = Get-Item -Path .\artifacts\release\ModernTubeDownloader-*-win-x64.zip
+          $checksum = Get-Item -LiteralPath "$($mainZip.FullName).sha256"
+          $symbols = Get-Item -Path .\artifacts\release\ModernTubeDownloader-*-win-x64-symbols.zip
+          gh release create $env:GITHUB_REF_NAME $mainZip.FullName $checksum.FullName $symbols.FullName --verify-tag --title "ModernTubeDownloader $env:GITHUB_REF_NAME" --generate-notes

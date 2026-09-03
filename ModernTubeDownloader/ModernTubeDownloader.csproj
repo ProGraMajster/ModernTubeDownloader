@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RootNamespace>ModernTubeDownloader</RootNamespace>
+    <AssemblyName>ModernTubeDownloader</AssemblyName>
+    <AssemblyTitle>ModernTubeDownloader</AssemblyTitle>
+    <Product>ModernTubeDownloader</Product>
+    <Description>Desktop application for analyzing and downloading media supported by yt-dlp.</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishReadyToRun>false</PublishReadyToRun>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext\ModernFormsNext.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Languages\*.json" />
+  </ItemGroup>
+</Project>

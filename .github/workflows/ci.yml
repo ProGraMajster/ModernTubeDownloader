@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout ModernTubeDownloader
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned ModernFormsNext
+        uses: actions/checkout@v4
+        with:
+          repository: ProGraMajster/ModernFormsNext
+          ref: 1dce91b9740b3eba8d5f2f529017bebeffb88438
+          path: .dependencies/ModernFormsNext
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore .\ModernTubeDownloader.slnx -p:ModernFormsNextRoot="$env:GITHUB_WORKSPACE\.dependencies\ModernFormsNext"
+
+      - name: Build Release
+        shell: pwsh
+        run: dotnet build .\ModernTubeDownloader.slnx -c Release --no-restore -m:1 /p:UseSharedCompilation=false -p:ModernFormsNextRoot="$env:GITHUB_WORKSPACE\.dependencies\ModernFormsNext"
+
+      - name: Test Release
+        shell: pwsh
+        run: dotnet test .\ModernTubeDownloader.slnx -c Release --no-build -m:1 /p:UseSharedCompilation=false -p:ModernFormsNextRoot="$env:GITHUB_WORKSPACE\.dependencies\ModernFormsNext"
