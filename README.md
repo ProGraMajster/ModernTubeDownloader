@@ -1,5 +1,7 @@
 # ModernTubeDownloader
 
+<img src="ModernTubeDownloader/Assets/AppIcon.png" alt="ModernTubeDownloader icon" width="96" height="96">
+
 ModernTubeDownloader is a Windows desktop application for analyzing and downloading media supported by [yt-dlp](https://github.com/yt-dlp/yt-dlp). The native interface is built with [ModernFormsNext](https://github.com/ProGraMajster/ModernFormsNext).
 
 The application follows the complete single-item flow:

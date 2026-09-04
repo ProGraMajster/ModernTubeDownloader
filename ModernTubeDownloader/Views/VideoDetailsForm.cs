@@ -18,6 +18,7 @@ internal sealed class VideoDetailsForm : Form
         ArgumentNullException.ThrowIfNull(text);
         this.metadata = metadata;
         this.text = text;
+        AppBranding.Apply(this);
         Size = new System.Drawing.Size(980, 740);
         MinimumSize = new System.Drawing.Size(760, 540);
         tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Padding(12) };

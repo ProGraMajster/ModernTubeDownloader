@@ -1,10 +1,11 @@
 # Current status
 
-Status date: 2026-09-03.
+Status date: 2026-09-04.
 
 ## Production-ready scope
 
 - Native ModernFormsNext Windows desktop UI on .NET 10.
+- Official multi-resolution Windows application icon shared by the executable and application windows.
 - URL analysis, metadata normalization, quality selection, single-item queueing, stream downloads, FFmpeg merge/remux, finalization, and persistent history.
 - Automatic yt-dlp and GPL-configured FFmpeg/ffprobe provisioning with validation, atomic activation, rollback preservation, and update checks.
 - Persistent queue with pause, cancellation, retry, ordering, removal, automatic vertical scrolling, and safe restart recovery.
@@ -29,8 +30,7 @@ See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for the exact current validatio
 ## Known limitations
 
 - The public project license is not selected; the generated package is a local release candidate, not an approved public release.
-- Repository visibility (Public or Private) has not been selected and no GitHub remote has been created.
-- No final branded `.ico` asset exists. The current executable therefore uses the platform/default icon pending an approved project icon.
+- The source repository is private at `ProGraMajster/ModernTubeDownloader`; no tag or GitHub Release has been published.
 - The application intentionally uses a pinned ModernFormsNext source checkout. NuGet 1.10.0 predates required scroll and windowing fixes.
 - ToolManager does not yet manage `yt-dlp-ejs` or a JavaScript runtime recommended by current yt-dlp guidance for full YouTube support.
 - Queue execution is intentionally single-worker. `MaxSimultaneousDownloads` is persisted but values above one do not yet create parallel workers.
@@ -41,8 +41,6 @@ See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for the exact current validatio
 ## Planned after 1.0.0 approval
 
 - Select and commit the application license.
-- Approve repository visibility and create `ProGraMajster/ModernTubeDownloader`.
-- Add an approved branded Windows icon.
 - Move to a compatible ModernFormsNext NuGet release when the required master changes are published.
 - Complete the remaining premiere/live-date, DPI, 20+ item queue, and history shell-action manual matrix before tagging.
-- Only after approval: push the repository, create tag `v1.0.0`, and allow the guarded release workflow to publish the GitHub Release.
+- Only after approval: create tag `v1.0.0` and allow the guarded release workflow to publish the GitHub Release.

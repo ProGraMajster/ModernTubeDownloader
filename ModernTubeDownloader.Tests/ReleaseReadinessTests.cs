@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using ModernTubeDownloader.Infrastructure;
+using ModernTubeDownloader.Theming;
 
 namespace ModernTubeDownloader.Tests;
 
@@ -38,6 +39,19 @@ public sealed class ReleaseReadinessTests : IDisposable
         Assert.Contains("[FTL] Fatal test message.", contents, StringComparison.Ordinal);
         Assert.Contains(nameof(InvalidOperationException), contents, StringComparison.Ordinal);
         Assert.Contains("release-readiness-sentinel", contents, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ApplicationBrandingLoadsTheEmbeddedIconForModernFormsWindows()
+    {
+        using var form = new ModernFormsNext.Form();
+
+        AppBranding.Apply(form);
+
+        Assert.NotNull(form.Image);
+        Assert.Same(form.Image, form.TitleBar.Image);
+        Assert.Equal(24, form.Image.Width);
+        Assert.Equal(24, form.Image.Height);
     }
 
     public void Dispose()

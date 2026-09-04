@@ -6,6 +6,7 @@ All notable changes to ModernTubeDownloader are documented in this file.
 
 ### Application
 
+- Added official multi-resolution Windows application branding for the executable, taskbar, title bar, Alt+Tab, and Details window.
 - Added a ModernFormsNext-native Windows desktop interface with responsive Downloads, History, Settings, and Details views.
 - Added runtime Polish/English localization and System/Light/Dark themes.
 - Added URL validation and structured yt-dlp metadata analysis.

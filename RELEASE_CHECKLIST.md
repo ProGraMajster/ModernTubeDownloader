@@ -10,8 +10,8 @@ This checklist distinguishes completed technical preparation from manual/public-
 - [x] Version, AssemblyVersion, FileVersion, and InformationalVersion set to 1.0.0 centrally.
 - [x] Product, description, author/company, copyright, and repository URL configured.
 - [ ] Application license selected and `LICENSE` committed.
-- [ ] Repository visibility approved and GitHub remote created.
-- [ ] Final branded Windows `.ico` approved and wired to executable/window/taskbar.
+- [x] Private repository approved and GitHub `origin` created.
+- [x] Final branded Windows `.ico` approved and wired to executable and application windows.
 
 ## Build and packaging
 
@@ -73,7 +73,7 @@ This checklist distinguishes completed technical preparation from manual/public-
 - [x] Tag-only release workflow prepared with a hard `LICENSE` prerequisite.
 - [x] Local release-candidate ZIP contents inspected (208 entries; no PDB, test, fake-tool, downloaded-tool, runtime-data, XML-doc, or build-helper files).
 - [ ] User approval for public release.
-- [ ] Push repository.
+- [x] Push `master` to the private repository.
 - [ ] Create and push `v1.0.0` tag.
 - [ ] Verify GitHub Actions release job.
 - [ ] Verify GitHub Release assets and checksum.

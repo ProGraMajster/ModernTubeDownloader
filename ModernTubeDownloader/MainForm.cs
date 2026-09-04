@@ -44,6 +44,7 @@ public sealed class MainForm : Form
 
         Text = text["App.Title"];
         Name = "MainForm";
+        AppBranding.Apply(this);
         Size = new System.Drawing.Size(1440, 900);
         MinimumSize = new System.Drawing.Size(1000, 700);
 

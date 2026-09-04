@@ -12,6 +12,7 @@
     <Product>ModernTubeDownloader</Product>
     <Description>Desktop application for analyzing and downloading media supported by yt-dlp.</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <PublishTrimmed>false</PublishTrimmed>
     <PublishSingleFile>false</PublishSingleFile>
@@ -21,6 +22,7 @@
     <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext\ModernFormsNext.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets\AppIcon.png" LogicalName="ModernTubeDownloader.Assets.AppIcon.png" />
     <EmbeddedResource Include="Resources\Languages\*.json" />
   </ItemGroup>
 </Project>
