@@ -312,6 +312,13 @@ public sealed class WorkflowIntegrationTests(ITestOutputHelper output) : IAsyncL
 
         var completed = await WaitForLiveTerminalAsync(services.Live, item.Id, TimeSpan.FromSeconds(20));
         Assert.Equal(LiveSessionState.Completed, completed.State);
+        // Completed is published before worker retirement and its final persistence save.
+        await services.ShutdownAsync();
+        Assert.Empty(services.LiveScheduler.ActiveIds);
+        var persisted = Assert.Single(await new LiveSessionPersistenceService(paths, new NullAppLogger()).LoadAsync());
+        Assert.Equal(item.Id, persisted.Id);
+        Assert.Equal(LiveSessionState.Completed, persisted.State);
+        Assert.Equal(completed.Parts, persisted.Parts);
         Assert.DoesNotContain("manifest_url", await File.ReadAllTextAsync(paths.LiveSessionsFile));
         Assert.True(File.Exists(completed.Parts.Last()));
         Assert.Equal(".mkv", Path.GetExtension(completed.Parts.Last()));
@@ -322,7 +329,6 @@ public sealed class WorkflowIntegrationTests(ITestOutputHelper output) : IAsyncL
         var arguments = await File.ReadAllTextAsync(argumentsPath);
         Assert.Equal(fromStartFlag, arguments.Contains("--live-from-start", StringComparison.Ordinal));
         Assert.Contains("--downloader", arguments);
-        await services.ShutdownAsync();
     }
 
     [Fact]
