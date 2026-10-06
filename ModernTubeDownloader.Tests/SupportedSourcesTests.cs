@@ -219,9 +219,9 @@ public sealed class SupportedSourcesUiTests
         var paths = AppPaths.Create(Path.Combine(Path.GetTempPath(), "mtd-sources-ui", Guid.NewGuid().ToString("N")));
         var settings = new SettingsService(paths, new NullAppLogger()); await settings.LoadAsync();
         settings.Current.ThemeMode = theme;
+        using var host = ModernFormsTestHost.Create();
         using var appearance = new AppAppearanceService(settings, new NullAppLogger()); appearance.Initialize();
         using var catalog = new SupportedSourcesService(new SupportedSourcesTests.FakeCatalogRuntime());
-        using var host = ModernFormsTestHost.Create();
         using var form = new SupportedSourcesForm(catalog, null!, new LocalizationService(language), loadOnShown: false);
         var sources = SupportedSourcesService.Parse(Enumerable.Range(0, 5000).Select(i => $"Platform{i:D4}"), []);
         form.PresentCatalog(new("test", false, "test", sources));

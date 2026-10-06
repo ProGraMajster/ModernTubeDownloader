@@ -1,10 +1,11 @@
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Services;
+using Xunit.Abstractions;
 
 namespace ModernTubeDownloader.Tests;
 
-public sealed class WorkflowIntegrationTests : IAsyncLifetime
+public sealed class WorkflowIntegrationTests(ITestOutputHelper output) : IAsyncLifetime
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "ModernTubeDownloader.Tests", Guid.NewGuid().ToString("N"));
 
@@ -272,7 +273,22 @@ public sealed class WorkflowIntegrationTests : IAsyncLifetime
             await WaitUntilAsync(() => services.Live.Snapshot().All(item => item.State == LiveSessionState.Completed), TimeSpan.FromSeconds(10));
             Assert.Equal(3, services.History.Snapshot().Count(entry => entry.WasLiveRecording));
         }
-        finally { await services.ShutdownAsync(); }
+        catch
+        {
+            output.WriteLine("VOD states: " + string.Join(", ", services.Queue.Snapshot().Select(item => $"{item.Id}:{item.Status}")));
+            output.WriteLine("LIVE states: " + string.Join(", ", services.Live.Snapshot().Select(item =>
+                $"{item.Id}:{item.State}:stop={item.StopRequested}:attempt={item.AttemptCount}:failure={item.FailureCategory}")));
+            output.WriteLine("Active VOD workers: " + string.Join(", ", services.Processor.ActiveItemIds));
+            output.WriteLine("Active LIVE workers: " + string.Join(", ", services.LiveScheduler.ActiveIds));
+            foreach (var log in Directory.EnumerateFiles(paths.LogDirectory, "*.log"))
+            {
+                using var stream = File.Open(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                output.WriteLine(string.Join(Environment.NewLine, reader.ReadToEnd().Split('\n').TakeLast(80)));
+            }
+            throw;
+        }
+        finally { await services.ShutdownAsync().WaitAsync(TimeSpan.FromSeconds(10)); }
     }
 
     [Theory]

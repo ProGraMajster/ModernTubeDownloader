@@ -1,5 +1,6 @@
 using ModernFormsNext;
 using ModernFormsNext.Animations;
+using ModernFormsNext.Testing;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Settings;
@@ -8,6 +9,7 @@ using SkiaSharp;
 
 namespace ModernTubeDownloader.Tests;
 
+[Collection("ModernFormsNext TestHost")]
 public sealed class SidebarNavigationStyleTests : IDisposable
 {
     private readonly string root = System.IO.Path.Combine(
@@ -34,6 +36,8 @@ public sealed class SidebarNavigationStyleTests : IDisposable
         await settings.LoadAsync();
         settings.Current.ThemeMode = themeMode;
 
+        // Theme application must use this test's owned dispatcher, not a previous pool thread's UI dispatcher.
+        using var host = ModernFormsTestHost.Create();
         using var appearance = new AppAppearanceService(settings, logger);
         appearance.Initialize();
         using var button = new NavigationButtonProbe

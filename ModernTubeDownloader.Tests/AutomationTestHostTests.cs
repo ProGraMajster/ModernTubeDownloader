@@ -29,6 +29,7 @@ public sealed class AutomationTestHostTests
             var settings = new SettingsService(paths, new NullAppLogger());
             await settings.LoadAsync();
             settings.Current.ThemeMode = mode;
+            using var host = ModernFormsTestHost.Create();
             using var appearance = new AppAppearanceService(settings, new NullAppLogger());
             appearance.Initialize();
             Assert.Equal(AppUi.GetColor(AppThemeTokens.Surface), Theme.ControlLowColor);
@@ -66,6 +67,7 @@ public sealed class AutomationTestHostTests
             var settings = new SettingsService(AppPaths.Create(root), new NullAppLogger());
             await settings.LoadAsync();
             settings.Current.ThemeMode = mode;
+            using var host = ModernFormsTestHost.Create();
             using var appearance = new AppAppearanceService(settings, new NullAppLogger());
             appearance.Initialize();
 
@@ -77,7 +79,6 @@ public sealed class AutomationTestHostTests
             combo.SelectedIndex = 0;
             using var number = new NumericUpDown { Value = 20 };
             AppUi.Input(number);
-            using var host = ModernFormsTestHost.Create();
             host.Show(number, 200, 40);
             host.ProcessPendingWork();
             var editorPeer = Assert.IsAssignableFrom<Control.ControlAccessibleObject>(number.AccessibilityObject.GetChild(0));
@@ -301,9 +302,9 @@ public sealed class AutomationTestHostTests
 
             using var services = AppServices.Create(paths);
             await services.Tools.Initialization;
-            services.Appearance.Initialize();
             using (var host = ModernFormsTestHost.Create())
             {
+                services.Appearance.Initialize();
                 var view = new DownloadsView(services);
                 host.Show(view, 1000, 720);
                 host.ProcessPendingWork();

@@ -50,4 +50,14 @@ jobs:
 
       - name: Test Release
         shell: pwsh
-        run: dotnet test .\ModernTubeDownloader.slnx -c Release --no-build -m:1 /p:UseSharedCompilation=false -p:ModernFormsNextRoot="$env:GITHUB_WORKSPACE\.mfn-master-worktree"
+        run: dotnet test .\ModernTubeDownloader.slnx -c Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=ci-validation.trx" --results-directory artifacts/ci-validation --blame-hang-timeout 3m --blame-hang-dump-type none -m:1 /p:UseSharedCompilation=false -p:ModernFormsNextRoot="$env:GITHUB_WORKSPACE\.mfn-master-worktree"
+
+      - name: Preserve test results and hang sequence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ci-test-results
+          path: |
+            artifacts/ci-validation/**/*.trx
+            artifacts/ci-validation/**/Sequence_*.xml
+          if-no-files-found: error

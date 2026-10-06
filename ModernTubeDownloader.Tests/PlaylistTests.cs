@@ -171,9 +171,9 @@ public sealed class PlaylistPreviewHostTests
             var settings = new SettingsService(paths, new NullAppLogger());
             await settings.LoadAsync();
             settings.Current.ThemeMode = themeMode;
+            using var host = ModernFormsTestHost.Create();
             using var appearance = new AppAppearanceService(settings, new NullAppLogger());
             appearance.Initialize();
-            using var host = ModernFormsTestHost.Create();
             using var preview = new PlaylistPreviewControl(new LocalizationService(language));
             host.Show(preview, 900, 380);
             preview.ShowPlaylist(new PlaylistMetadata("PL4", "Playlist", null, "https://example.test/playlist/PL4", null,

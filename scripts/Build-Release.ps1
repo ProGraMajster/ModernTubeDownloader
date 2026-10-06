@@ -84,7 +84,7 @@ $validationRun = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::
 foreach ($configuration in @('Debug', 'Release')) {
     Invoke-DotNet -Arguments (@('build', $buildTarget, '-c', $configuration, '--no-restore', '-warnaserror') + $serialBuildProperties)
     $resultsRoot = Join-Path $artifactsRoot "validation\$validationRun\$configuration"
-    Invoke-DotNet -Arguments (@('test', $testProject, '-c', $configuration, '--no-build', '--logger', 'trx;LogFileName=release-validation.trx', '--results-directory', $resultsRoot) + $serialBuildProperties)
+    Invoke-DotNet -Arguments (@('test', $testProject, '-c', $configuration, '--no-build', '--logger', 'console;verbosity=normal', '--logger', 'trx;LogFileName=release-validation.trx', '--results-directory', $resultsRoot, '--blame-hang-timeout', '3m', '--blame-hang-dump-type', 'none') + $serialBuildProperties)
     [xml] $testResults = Get-Content -LiteralPath (Join-Path $resultsRoot 'release-validation.trx') -Raw
     $counters = $testResults.TestRun.ResultSummary.Counters
     if ([int]$counters.total -eq 0 -or [int]$counters.total -ne [int]$counters.passed) {
