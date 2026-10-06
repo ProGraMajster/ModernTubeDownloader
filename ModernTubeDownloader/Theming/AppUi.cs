@@ -29,6 +29,16 @@ internal static class AppUi
         state.Refresh();
     }
 
+    public static void BindInteractiveSurface(Control control, string normalToken, string hoverToken)
+    {
+        var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
+        state.BackgroundToken = null;
+        state.InteractiveSurface = (normalToken, hoverToken);
+        control.ClearResourceReference(nameof(Control.BackgroundBrush));
+        control.BackgroundBrush = null;
+        state.Refresh();
+    }
+
     public static void Surface(Control control, bool secondary = false)
     {
         BindBackground(control, secondary ? AppThemeTokens.SurfaceSecondary : AppThemeTokens.Surface);
@@ -66,23 +76,57 @@ internal static class AppUi
 
     public static void NavigationButton(Button button, bool selected)
     {
+        button.Font = new Font(
+            "Segoe UI",
+            11f,
+            selected ? FontStyle.Bold : FontStyle.Regular);
         button.ClearResourceReference(nameof(Control.BackgroundBrush));
         button.ClearResourceReference(nameof(Control.TextBrush));
         button.BackgroundBrush = null;
         button.TextBrush = null;
-        button.Style.BackgroundColor = GetColor(selected ? AppThemeTokens.NavigationSelected : AppThemeTokens.Navigation);
-        button.Style.ForegroundColor = GetColor(selected ? AppThemeTokens.AccentText : AppThemeTokens.TextPrimary);
-        button.StyleHover.BackgroundColor = GetColor(selected ? AppThemeTokens.NavigationSelected : AppThemeTokens.NavigationHover);
-        button.StyleHover.ForegroundColor = GetColor(selected ? AppThemeTokens.AccentText : AppThemeTokens.TextPrimary);
-        button.StyleFocused.BackgroundColor = GetColor(selected ? AppThemeTokens.NavigationSelected : AppThemeTokens.NavigationHover);
-        button.StyleFocused.ForegroundColor = GetColor(selected ? AppThemeTokens.AccentText : AppThemeTokens.TextPrimary);
-        button.StylePressed.BackgroundColor = GetColor(AppThemeTokens.NavigationSelected);
-        button.StylePressed.ForegroundColor = GetColor(AppThemeTokens.AccentText);
-        button.Style.Border.Radius = 10;
-        button.Style.Border.Width = 0;
+        ApplyNavigationState(
+            button,
+            button.Style,
+            selected ? AppThemeTokens.NavigationSelected : AppThemeTokens.Navigation,
+            selected ? AppThemeTokens.NavigationSelectedText : AppThemeTokens.TextPrimary);
+        ApplyNavigationState(
+            button,
+            button.StyleHover,
+            selected ? AppThemeTokens.NavigationSelected : AppThemeTokens.NavigationHover,
+            selected ? AppThemeTokens.NavigationSelectedText : AppThemeTokens.TextPrimary);
+        ApplyNavigationState(
+            button,
+            button.StyleFocused,
+            selected ? AppThemeTokens.NavigationSelected : AppThemeTokens.NavigationHover,
+            selected ? AppThemeTokens.NavigationSelectedText : AppThemeTokens.TextPrimary);
+        ApplyNavigationState(
+            button,
+            button.StylePressed,
+            AppThemeTokens.NavigationSelected,
+            AppThemeTokens.NavigationSelectedText);
+        ApplyNavigationState(
+            button,
+            button.StyleDisabled,
+            selected ? AppThemeTokens.NavigationSelected : AppThemeTokens.Navigation,
+            AppThemeTokens.TextSecondary);
         button.Ripple ??= new RippleEffect { Enabled = true };
         button.PressEffect ??= new PressScaleEffect { Enabled = true, PressedScale = 0.98f };
         button.Invalidate();
+    }
+
+    private static void ApplyNavigationState(
+        Button button,
+        ControlStyle style,
+        string backgroundToken,
+        string foregroundToken)
+    {
+        style.BackgroundBrush = null;
+        style.ForegroundBrush = null;
+        style.BackgroundColor = GetColor(backgroundToken);
+        style.ForegroundColor = GetColor(foregroundToken);
+        style.Border.Radius = 10;
+        style.Border.Width = 0;
+        style.TextFont = button.Font;
     }
 
     public static void Input(Control control)
@@ -90,6 +134,18 @@ internal static class AppUi
         Surface(control);
         control.Style.Border.Radius = 10;
         control.Font = new Font("Segoe UI", 10.5f);
+        if (control is ComboBox)
+        {
+            var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
+            state.BackgroundToken = null;
+            state.ForegroundToken = null;
+            state.IsComboBox = true;
+            control.ClearResourceReference(nameof(Control.BackgroundBrush));
+            control.ClearResourceReference(nameof(Control.TextBrush));
+            control.BackgroundBrush = null;
+            control.TextBrush = null;
+            state.Refresh();
+        }
     }
 
     public static Label Heading(string text, float size = 22f)
@@ -153,6 +209,8 @@ internal static class AppUi
         public string? BackgroundToken { get; set; }
         public string? ForegroundToken { get; set; }
         public ButtonVariant? ButtonVariant { get; set; }
+        public bool IsComboBox { get; set; }
+        public (string Normal, string Hover)? InteractiveSurface { get; set; }
 
         public void Refresh()
         {
@@ -164,7 +222,42 @@ internal static class AppUi
                 control.SetResourceReference(nameof(Control.TextBrush), AppThemeTokens.BrushResource(ForegroundToken));
             if (control is Button button && ButtonVariant is { } variant)
                 RefreshButtonStates(button, variant);
+            if (IsComboBox)
+            {
+                ApplyInputState(control.Style, AppThemeTokens.Surface, AppThemeTokens.Border, AppThemeTokens.TextPrimary);
+                ApplyInputState(control.StyleHover, AppThemeTokens.SurfaceHover, AppThemeTokens.Accent, AppThemeTokens.TextPrimary);
+                ApplyInputState(control.StyleFocused, AppThemeTokens.SurfaceHover, AppThemeTokens.Accent, AppThemeTokens.TextPrimary);
+                ApplyInputState(control.StylePressed, AppThemeTokens.SurfaceSecondary, AppThemeTokens.Accent, AppThemeTokens.TextPrimary);
+                ApplyInputState(control.StyleDisabled, AppThemeTokens.SurfaceSecondary, AppThemeTokens.Border, AppThemeTokens.TextDisabled);
+            }
+            if (InteractiveSurface is { } surface)
+            {
+                ApplySurfaceState(control.Style, surface.Normal);
+                ApplySurfaceState(control.StyleHover, surface.Hover);
+                ApplySurfaceState(control.StyleFocused, surface.Hover);
+                ApplySurfaceState(control.StylePressed, surface.Hover);
+                ApplySurfaceState(control.StyleDisabled, surface.Normal);
+            }
             control.Invalidate();
+        }
+
+        private static void ApplySurfaceState(ControlStyle style, string token)
+        {
+            style.BackgroundBrush = null;
+            style.BackgroundColor = GetColor(token);
+            style.Border.Radius = 7;
+            style.Border.Width = 0;
+        }
+
+        private static void ApplyInputState(ControlStyle style, string background, string border, string foreground)
+        {
+            style.BackgroundBrush = null;
+            style.ForegroundBrush = null;
+            style.BackgroundColor = GetColor(background);
+            style.ForegroundColor = GetColor(foreground);
+            style.Border.Color = GetColor(border);
+            style.Border.Radius = 10;
+            style.Border.Width = 1;
         }
 
         private static void RefreshButtonStates(Button button, ButtonVariant variant)
@@ -181,7 +274,7 @@ internal static class AppUi
             ApplyButtonState(button, button.Style, AppThemeTokens.SurfaceSecondary, AppThemeTokens.TextPrimary);
             ApplyButtonState(button, button.StyleHover, AppThemeTokens.NavigationHover, AppThemeTokens.TextPrimary);
             ApplyButtonState(button, button.StyleFocused, AppThemeTokens.NavigationHover, AppThemeTokens.TextPrimary);
-            ApplyButtonState(button, button.StylePressed, AppThemeTokens.NavigationSelected, AppThemeTokens.AccentText);
+            ApplyButtonState(button, button.StylePressed, AppThemeTokens.NavigationSelected, AppThemeTokens.NavigationSelectedText);
         }
 
         private static void ApplyButtonState(Button button, ControlStyle style, string backgroundToken, string foregroundToken)

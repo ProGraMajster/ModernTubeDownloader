@@ -2,4 +2,15 @@
   <Project Path="ModernTubeDownloader/ModernTubeDownloader.csproj" />
   <Project Path="ModernTubeDownloader.FakeTool/ModernTubeDownloader.FakeTool.csproj" />
   <Project Path="ModernTubeDownloader.Tests/ModernTubeDownloader.Tests.csproj" />
+  <Folder Name="/ModernFormsNext source dependency/">
+    <Project Path=".mfn-master-worktree/ModernFormsNext/ModernFormsNext.csproj" />
+    <Project Path=".mfn-master-worktree/ModernFormsNext.Automation/ModernFormsNext.Automation.csproj" />
+    <Project Path=".mfn-master-worktree/ModernFormsNext.Automation.Windows/ModernFormsNext.Automation.Windows.csproj" />
+    <Project Path=".mfn-master-worktree/ModernFormsNext.Testing/ModernFormsNext.Testing.csproj" />
+    <Project Path=".mfn-master-worktree/ModernFormsNext.WindowKit/ModernFormsNext.WindowKit.csproj" />
+    <Project Path=".mfn-master-worktree/ModernFormsNext.WindowKit.Backend/ModernFormsNext.WindowKit.Backend.csproj" />
+    <Project Path=".mfn-master-worktree/ModernFormsNext.WindowKit.Backend.Windows/ModernFormsNext.WindowKit.Backend.Windows.csproj" />
+    <Project Path=".mfn-master-worktree/ModernFormsNext.WindowKit.Backend.Tools.MicroComGenerator/ModernFormsNext.WindowKit.Backend.Tools.MicroComGenerator.csproj" />
+    <Project Path=".mfn-master-worktree/ModernFormsNext.WindowKit.Backend.Tools.MicroComPatcher/ModernFormsNext.WindowKit.Backend.Tools.MicroComPatcher.csproj" />
+  </Folder>
 </Solution>

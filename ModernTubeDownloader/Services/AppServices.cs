@@ -1,6 +1,7 @@
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Localization;
 using ModernTubeDownloader.Theming;
+using ModernTubeDownloader.WebRemote;
 
 namespace ModernTubeDownloader.Services;
 
@@ -48,6 +49,11 @@ public sealed class AppServices : IDisposable
     public QueueProcessor Processor { get; }
     public HistoryService History { get; }
     public ThumbnailCacheService Thumbnails { get; }
+    public LiveSessionService Live { get; private set; } = null!;
+    public LiveRecordingScheduler LiveScheduler { get; private set; } = null!;
+    public WebRemoteHost WebRemote { get; private set; } = null!;
+    public SupportedSourcesService Sources { get; private set; } = null!;
+    public SourceCheckService SourceCheck { get; private set; } = null!;
 
     public static AppServices Create(
         AppPaths paths,
@@ -70,24 +76,40 @@ public sealed class AppServices : IDisposable
         var packageInstaller = new ToolPackageInstaller(paths, new ToolDownloadService(httpClient), toolValidator);
         var tools = new ToolManager(paths, settings, releaseSource, packageInstaller, toolValidator, logger);
         var ytDlpRunner = new YtDlpProcessRunner(processRunner, tools, logger);
-        var metadata = new YtDlpMetadataService(ytDlpRunner, logger);
+        var metadata = new YtDlpMetadataService(ytDlpRunner, settings, logger);
         var history = new HistoryService(paths, logger);
         history.LoadAsync().GetAwaiter().GetResult();
         var queueStore = new QueuePersistenceService(paths, logger);
-        var queue = new DownloadQueueService(queueStore, logger);
+        var liveStore = new LiveSessionPersistenceService(paths, logger);
+        liveStore.MigrateLegacyQueueAsync(settings).GetAwaiter().GetResult();
+        var live = new LiveSessionService(liveStore, settings, logger);
+        live.LoadAsync().GetAwaiter().GetResult();
+        var queue = new DownloadQueueService(queueStore, logger, settings);
         queue.LoadAsync().GetAwaiter().GetResult();
         var ffmpeg = new FfmpegService(processRunner, tools, logger);
-        var downloader = new DownloadJobExecutor(paths, settings, ytDlpRunner, ffmpeg, history, logger);
-        var processor = new QueueProcessor(queue, downloader, logger);
-        var thumbnails = new ThumbnailCacheService(paths, logger);
+        var downloader = new DownloadJobExecutor(paths, settings, ytDlpRunner, metadata, ffmpeg, history, logger);
+        var processor = new QueueProcessor(queue, downloader, settings, logger);
+        var liveScheduler = new LiveRecordingScheduler(live,
+            new LiveRecordingExecutor(settings, ytDlpRunner, metadata, ffmpeg, history, logger),
+            new YtDlpLiveAvailabilityProbe(metadata), settings, logger);
+        var thumbnails = new ThumbnailCacheService(paths, logger, () => settings.Current.DownloadThumbnail);
         processor.Start();
+        liveScheduler.Start();
         tools.Start();
-        return new AppServices(paths, logger, settings, localization, appearance, tools, metadata, queue, processor, history, thumbnails, httpClient);
+        var services = new AppServices(paths, logger, settings, localization, appearance, tools, metadata, queue, processor, history, thumbnails, httpClient);
+        services.Live = live;
+        services.LiveScheduler = liveScheduler;
+        services.Sources = new SupportedSourcesService(tools, processRunner, logger);
+        services.SourceCheck = new SourceCheckService(metadata, logger);
+        services.WebRemote = new WebRemoteHost(services);
+        services.WebRemote.ReconcileAsync().GetAwaiter().GetResult();
+        return services;
     }
 
     public async Task ShutdownAsync()
     {
-        await Processor.StopAsync().ConfigureAwait(false);
+        await WebRemote.StopAsync().ConfigureAwait(false);
+        await Task.WhenAll(Processor.StopAsync(), LiveScheduler.StopAsync()).ConfigureAwait(false);
         await Tools.StopAsync().ConfigureAwait(false);
         await Queue.SaveAsync().ConfigureAwait(false);
         await Settings.SaveAsync().ConfigureAwait(false);
@@ -100,8 +122,11 @@ public sealed class AppServices : IDisposable
             return;
 
         disposed = true;
+        WebRemote.Dispose();
         Thumbnails.Dispose();
         Processor.Dispose();
+        LiveScheduler.Dispose();
+        Sources.Dispose();
         Appearance.Dispose();
         httpClient.Dispose();
         if (Logger is IDisposable disposableLogger)

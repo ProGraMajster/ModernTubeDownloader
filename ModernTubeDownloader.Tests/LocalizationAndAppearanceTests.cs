@@ -40,6 +40,25 @@ public sealed class LocalizationAndAppearanceTests : IDisposable
         Assert.Equal(2, changes);
     }
 
+    [Fact]
+    public void QueueTechnicalStatesHaveLocalizedUserFacingDetails()
+    {
+        var polish = new LocalizationService("pl");
+        var english = new LocalizationService("en");
+
+        foreach (var key in new[]
+        {
+            "Queue.Detail.Recovered", "Queue.Detail.Retry", "Queue.Detail.Preparing",
+            "Queue.Detail.DownloadingVideo", "Queue.Detail.DownloadingAudio", "Queue.Detail.Merging",
+            "Queue.Detail.Finalizing", "Queue.Detail.Completed", "Queue.Detail.CompletedWarnings",
+            "Queue.Detail.Cancelled", "Queue.Detail.Failed"
+        })
+        {
+            Assert.False(polish[key].StartsWith("[", StringComparison.Ordinal));
+            Assert.NotEqual(english[key], polish[key]);
+        }
+    }
+
     [Theory]
     [InlineData(AppThemeMode.System)]
     [InlineData(AppThemeMode.Light)]
@@ -59,6 +78,26 @@ public sealed class LocalizationAndAppearanceTests : IDisposable
 
         Assert.Equal(themeMode, reloaded.Current.ThemeMode);
         Assert.Equal("pl", reloaded.Current.Language);
+    }
+
+    [Fact]
+    public async Task QueuePositionNumbers_DefaultOnAndPersistOff()
+    {
+        var paths = AppPaths.Create(root);
+        paths.EnsureCreated();
+        var settings = new SettingsService(paths, new NullAppLogger());
+        await settings.LoadAsync();
+        Assert.True(settings.Current.ShowQueuePositionNumbers);
+
+        var changes = 0;
+        settings.Changed += (_, _) => changes++;
+        settings.Current.ShowQueuePositionNumbers = false;
+        await settings.SaveAsync();
+        Assert.Equal(1, changes);
+
+        var reloaded = new SettingsService(paths, new NullAppLogger());
+        await reloaded.LoadAsync();
+        Assert.False(reloaded.Current.ShowQueuePositionNumbers);
     }
 
     public void Dispose()

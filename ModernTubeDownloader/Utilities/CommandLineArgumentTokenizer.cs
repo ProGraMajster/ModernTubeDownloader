@@ -9,7 +9,14 @@ public static class CommandLineArgumentTokenizer
         "-o", "--output", "-P", "--paths", "-f", "--format", "--progress-template",
         "--dump-json", "--dump-single-json", "--print", "-O", "--print-to-file",
         "--exec", "--exec-before-download", "--config-locations", "--load-info-json",
-        "--ffmpeg-location", "--no-simulate", "--simulate"
+        "--ffmpeg-location", "--no-simulate", "--simulate",
+        "--no-playlist", "--yes-playlist", "--flat-playlist", "--no-flat-playlist",
+        "--ignore-errors", "--no-ignore-errors",
+        "--cookies", "--no-cookies", "--cookies-from-browser", "--no-cookies-from-browser",
+        "--write-subs", "--no-write-subs", "--write-auto-subs", "--no-write-auto-subs",
+        "--sub-langs", "--sub-format", "--convert-subs", "--embed-subs", "--no-embed-subs",
+        "--sponsorblock-mark", "--sponsorblock-remove", "--no-sponsorblock",
+        "--sponsorblock-api", "--sponsorblock-chapter-title", "--embed-chapters"
     };
 
     public static IReadOnlyList<string> ParseSafeYtDlpArguments(string? commandLine)

@@ -15,6 +15,7 @@ public sealed class VideoMetadata
     private Dictionary<string, JsonElement>? additionalData = [];
 
     [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
+    [JsonPropertyName("_type")] public string? MediaType { get; set; }
     [JsonPropertyName("url")] public string? MediaUrl { get; set; }
     [JsonPropertyName("webpage_url")] public string WebpageUrl { get; set; } = string.Empty;
     [JsonPropertyName("original_url")] public string? OriginalUrl { get; set; }

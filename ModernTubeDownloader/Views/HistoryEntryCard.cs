@@ -4,6 +4,7 @@ using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Utilities;
+using SkiaSharp;
 
 namespace ModernTubeDownloader.Views;
 
@@ -13,13 +14,15 @@ internal sealed class HistoryEntryCard : UserControl
     private readonly LocalizationService text;
     private readonly ThumbnailCacheService thumbnails;
     private readonly Panel placeholder;
-    private readonly Label placeholderText;
+    private readonly PictureBox placeholderText;
     private readonly PictureBox thumbnail;
     private readonly Label title;
     private readonly Label facts;
     private readonly Label path;
     private readonly Button openFile;
     private readonly Button openFolder;
+    private readonly CancellationTokenSource lifetimeCancellation = new();
+    private bool disposed;
 
     public HistoryEntryCard(DownloadHistoryEntry entry, LocalizationService text, ThumbnailCacheService thumbnails)
     {
@@ -32,9 +35,8 @@ internal sealed class HistoryEntryCard : UserControl
 
         placeholder = new Panel();
         AppUi.Card(placeholder, secondary: true);
-        placeholderText = AppUi.Heading("MTD", 13f);
+        placeholderText = new PictureBox { Image = AppBranding.Icon, SizeMode = PictureBoxSizeMode.Zoom, Padding = new Padding(20) };
         placeholderText.Dock = DockStyle.Fill;
-        placeholderText.TextAlign = ContentAlignment.MiddleCenter;
         placeholder.Controls.Add(placeholderText);
         thumbnail = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom, Visible = false };
         thumbnail.Style.Border.Radius = 10;
@@ -91,17 +93,23 @@ internal sealed class HistoryEntryCard : UserControl
         var qualityId = entry.QualityPresetId ?? QualityPreset.All
             .FirstOrDefault(item => string.Equals(item.DisplayName, entry.Quality, StringComparison.OrdinalIgnoreCase))?.Id;
         var quality = qualityId is not null ? text[$"Quality.{qualityId}"] : entry.Quality;
-        facts.Text = $"{entry.Channel}  •  {quality}  •  {text.Get("History.CompletedAt", entry.CompletedAt.ToLocalTime().ToString("g", text.Culture))}";
+        facts.Text = $"{entry.Channel}  •  {quality}  •  {text.Get("History.CompletedAt", entry.CompletedAt.ToLocalTime().ToString("g", text.Culture))}" +
+            (entry.WasLiveRecording ? $"  •  LIVE{(entry.WasPartial ? " • " + text["Live.State.Partial"] : string.Empty)}" : string.Empty) +
+            (string.IsNullOrWhiteSpace(entry.PlaylistTitle) ? string.Empty : $"  •  {text.Get("Queue.PlaylistPart", entry.PlaylistTitle)}");
         path.Text = text.Get("History.Path", entry.FinalPath);
     }
 
     private async Task LoadThumbnailAsync()
     {
-        var image = await thumbnails.GetAsync(entry.ThumbnailUrl).ConfigureAwait(false);
+        SKBitmap? image;
+        try { image = await thumbnails.GetAsync(entry.ThumbnailUrl, lifetimeCancellation.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return; }
         if (image is null)
             return;
         Application.RunOnUIThread(() =>
         {
+            if (disposed || lifetimeCancellation.IsCancellationRequested)
+                return;
             thumbnail.Image = image;
             thumbnail.Visible = true;
             placeholder.Visible = false;
@@ -115,8 +123,11 @@ internal sealed class HistoryEntryCard : UserControl
     {
         if (disposing)
         {
+            disposed = true;
+            lifetimeCancellation.Cancel();
             SizeChanged -= CardSizeChanged;
             text.LanguageChanged -= LanguageChanged;
+            lifetimeCancellation.Dispose();
         }
         base.Dispose(disposing);
     }

@@ -1,6 +1,8 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using ModernFormsNext;
 using ModernFormsNext.Animations;
+using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Localization;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Services;
@@ -14,6 +16,7 @@ public sealed class MainForm : Form
     private readonly AppServices services;
     private readonly LocalizationService text;
     private readonly DownloadsView downloadsView;
+    private readonly LiveView liveView;
     private readonly HistoryView historyView;
     private readonly SettingsView settingsView;
     private readonly Panel sidebar;
@@ -27,23 +30,37 @@ public sealed class MainForm : Form
     private readonly Label preparationDetails;
     private readonly Label ytDlpPreparation;
     private readonly Label ffmpegPreparation;
+    private readonly Label denoPreparation;
     private readonly Button preparationRetry;
     private readonly ProgressBar preparationProgress;
     private readonly Dictionary<Control, Button> navigation = [];
     private readonly Dictionary<Button, AppVectorIcon> navigationIcons = [];
     private Control? currentView;
     private bool readyPresentationShown;
+    private bool uiLoopReady;
     private bool shutdownStarted;
     private bool shutdownCompleted;
+    private readonly ExternalMediaRequest? initialExternalRequest;
+    private readonly HashSet<Guid> externalRequestIds = [];
+    private readonly Queue<Guid> externalRequestOrder = [];
+#if DEBUG
+    private readonly DevelopmentAutomationHost? automation;
+#endif
 
-    public MainForm(AppServices services)
+    public MainForm(AppServices services, bool enableAutomation = false, ExternalMediaRequest? initialExternalRequest = null)
     {
         this.services = services;
+        this.initialExternalRequest = initialExternalRequest;
         text = services.Localization;
         services.Appearance.Initialize();
 
         Text = text["App.Title"];
         Name = "MainForm";
+        AccessibilityObject.AutomationId = "MainWindow";
+#if DEBUG
+        if (enableAutomation)
+            automation = new DevelopmentAutomationHost();
+#endif
         AppBranding.Apply(this);
         Size = new System.Drawing.Size(1440, 900);
         MinimumSize = new System.Drawing.Size(1000, 700);
@@ -51,12 +68,14 @@ public sealed class MainForm : Form
         sidebar = new Panel { Dock = DockStyle.Left, Width = 236, Padding = new Padding(18, 20, 18, 18) };
         AppUi.BindBackground(sidebar, AppThemeTokens.Navigation);
 
-        var logo = new Panel { Left = 18, Top = 18, Width = 56, Height = 56 };
+        var logo = new Panel { Left = 18, Top = 18, Width = 56, Height = 56, Padding = new Padding(6) };
         AppUi.Card(logo, secondary: true);
-        var logoText = AppUi.Heading("MTD", 15f);
-        logoText.Dock = DockStyle.Fill;
-        logoText.TextAlign = ContentAlignment.MiddleCenter;
-        logo.Controls.Add(logoText);
+        logo.Controls.Add(new PictureBox
+        {
+            Dock = DockStyle.Fill,
+            Image = AppBranding.Icon,
+            SizeMode = PictureBoxSizeMode.Zoom
+        });
         sidebar.Controls.Add(logo);
 
         brandLabel = AppUi.Heading("ModernTube\nDownloader", 12.5f);
@@ -67,9 +86,10 @@ public sealed class MainForm : Form
         brandLabel.Multiline = true;
         sidebar.Controls.Add(brandLabel);
 
-        var downloadsButton = AddNavigationButton(text["Nav.Downloads"], 120, AppIconKind.Download);
-        var historyButton = AddNavigationButton(text["Nav.History"], 174, AppIconKind.History);
-        var settingsButton = AddNavigationButton(text["Nav.Settings"], 228, AppIconKind.Settings);
+        var downloadsButton = AddNavigationButton(text["Nav.Downloads"], "NavDownloads", 120, AppIconKind.Download);
+        var liveButton = AddNavigationButton(text["Nav.Live"], "NavLive", 174, AppIconKind.Live);
+        var historyButton = AddNavigationButton(text["Nav.History"], "NavHistory", 228, AppIconKind.History);
+        var settingsButton = AddNavigationButton(text["Nav.Settings"], "NavSettings", 282, AppIconKind.Settings);
 
         header = new Panel { Dock = DockStyle.Top, Height = 12 };
         AppUi.BindBackground(header, AppThemeTokens.Surface);
@@ -83,9 +103,25 @@ public sealed class MainForm : Form
         content = new Panel { Dock = DockStyle.Fill };
         AppUi.BindBackground(content);
         downloadsView = new DownloadsView(services) { Visible = true };
+#if DEBUG
+        if (automation is not null)
+        {
+            downloadsView.RegisterDetailsForAutomation = automation.RegisterWindow;
+            downloadsView.RegisterAdvancedForAutomation = automation.RegisterWindow;
+        }
+#endif
         historyView = new HistoryView(services) { Visible = false };
+        liveView = new LiveView(services) { Visible = false };
+#if DEBUG
+        if (automation is not null) liveView.RegisterDetailsForAutomation = automation.RegisterWindow;
+#endif
+        downloadsView.LiveRequested += (_, request) => { ShowView(liveView); liveView.Present(request); };
+        liveView.OpenDownloadsRequested += async (_, url) =>
+        { ShowView(downloadsView); await downloadsView.AcceptDesktopUrlAsync(url); };
         settingsView = new SettingsView(services) { Visible = false };
-        content.Controls.AddRange([downloadsView, historyView, settingsView]);
+        downloadsView.SupportedSourcesRequested += OpenSupportedSources;
+        settingsView.SupportedSourcesRequested += OpenSupportedSources;
+        content.Controls.AddRange([downloadsView, liveView, historyView, settingsView]);
 
         preparationOverlay = new Panel { Dock = DockStyle.Fill, Visible = true };
         AppUi.BindBackground(preparationOverlay, AppThemeTokens.Background);
@@ -106,8 +142,9 @@ public sealed class MainForm : Form
         preparationDetails.TextAlign = ContentAlignment.TopCenter;
         ytDlpPreparation = CreatePreparationRow(148);
         ffmpegPreparation = CreatePreparationRow(190);
-        preparationProgress = new ProgressBar { Left = 54, Top = 244, Width = 552, Height = 8, Minimum = 0, Maximum = 100 };
-        preparationRetry = new Button { Left = 244, Top = 276, Width = 172, Height = 42, Visible = false };
+        denoPreparation = CreatePreparationRow(232);
+        preparationProgress = new ProgressBar { Left = 54, Top = 286, Width = 552, Height = 8, Minimum = 0, Maximum = 100 };
+        preparationRetry = new Button { Left = 244, Top = 308, Width = 172, Height = 42, Visible = false };
         AppUi.Primary(preparationRetry);
         preparationRetry.Click += RetryPreparation;
         preparationCard.Controls.AddRange([
@@ -115,6 +152,7 @@ public sealed class MainForm : Form
             preparationDetails,
             ytDlpPreparation,
             ffmpegPreparation,
+            denoPreparation,
             preparationProgress,
             preparationRetry]);
         preparationOverlay.Controls.Add(preparationCard);
@@ -130,12 +168,15 @@ public sealed class MainForm : Form
         Controls.Add(sidebar);
 
         navigation[downloadsView] = downloadsButton;
+        navigation[liveView] = liveButton;
         navigation[historyView] = historyButton;
         navigation[settingsView] = settingsButton;
         downloadsButton.Click += (_, _) => ShowView(downloadsView);
+        liveButton.Click += (_, _) => ShowView(liveView);
         historyButton.Click += (_, _) => ShowView(historyView);
         settingsButton.Click += (_, _) => ShowView(settingsView);
         currentView = downloadsView;
+        UiCrashDiagnostics.SetActiveView("Downloads");
         UpdateNavigationState();
 
         services.Queue.Changed += StateChanged;
@@ -151,7 +192,28 @@ public sealed class MainForm : Form
         _ = InitializeAsync();
     }
 
-    private Button AddNavigationButton(string label, int top, AppIconKind iconKind)
+    private async void OpenSupportedSources(object? sender, EventArgs e)
+    {
+        try
+        {
+            using var window = new SupportedSourcesForm(services.Sources, services.SourceCheck, text);
+#if DEBUG
+            using var registration = automation?.RegisterWindow(window);
+#endif
+            if (await window.ShowDialog(this) != DialogResult.OK || window.NavigationRequest is not { } request) return;
+            if (request.OpenLive)
+            {
+                ShowView(liveView);
+                if (request.Metadata is { } metadata)
+                    liveView.Present(new LiveNavigationRequest(request.SourceUrl, metadata, MediaAvailabilityPolicy.Classify(metadata)));
+                else await liveView.AcceptUrlAsync(request.SourceUrl);
+            }
+            else { ShowView(downloadsView); await downloadsView.AcceptCheckedSourceAsync(request); }
+        }
+        catch (Exception ex) { services.Logger.Error("Supported sources window failed.", ex); }
+    }
+
+    private Button AddNavigationButton(string label, string automationId, int top, AppIconKind iconKind)
     {
         var button = new Button
         {
@@ -166,6 +228,7 @@ public sealed class MainForm : Form
         AppUi.NavigationButton(button, selected: false);
         button.Font = new Font("Segoe UI", 11f);
         button.Name = $"Navigation{label}";
+        button.AccessibleAutomationId = automationId;
         var icon = new AppVectorIcon(iconKind, 24, AppThemeTokens.TextPrimary)
         {
             Left = 15,
@@ -190,15 +253,19 @@ public sealed class MainForm : Form
 
     private async void ShowView(Control view)
     {
+        UiCrashDiagnostics.VerifyUiThread("main.view-switch");
         if (ReferenceEquals(currentView, view))
             return;
 
         var previous = currentView;
         currentView = view;
+        UiCrashDiagnostics.SetActiveView(ReferenceEquals(view, downloadsView) ? "Downloads" :
+            ReferenceEquals(view, liveView) ? "Live" : ReferenceEquals(view, historyView) ? "History" : "Settings");
         view.Visible = true;
         view.Opacity = 0f;
         view.TranslationY = 8f;
         view.BringToFront();
+        UiCrashDiagnostics.Record("view.show", "content", content.Controls.Count);
         preparationOverlay.BringToFront();
         UpdateNavigationState();
         var selectedButton = navigation[view];
@@ -215,7 +282,10 @@ public sealed class MainForm : Form
         finally
         {
             if (previous is not null && !ReferenceEquals(previous, currentView))
+            {
                 previous.Visible = false;
+                UiCrashDiagnostics.Record("view.hide", "content", content.Controls.Count);
+            }
         }
     }
 
@@ -226,7 +296,7 @@ public sealed class MainForm : Form
             var selected = ReferenceEquals(view, currentView);
             AppUi.NavigationButton(button, selected);
             button.Font = new Font("Segoe UI", 11f, selected ? FontStyle.Bold : FontStyle.Regular);
-            navigationIcons[button].SetColorToken(selected ? AppThemeTokens.AccentText : AppThemeTokens.TextPrimary);
+            navigationIcons[button].SetColorToken(selected ? AppThemeTokens.NavigationSelectedText : AppThemeTokens.TextPrimary);
         }
     }
 
@@ -270,21 +340,29 @@ public sealed class MainForm : Form
     {
         var items = services.Queue.Snapshot();
         var queued = items.Count(item => item.Status is DownloadStatus.Queued or DownloadStatus.Waiting);
-        var active = items.Count(item => item.Status is DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing);
+        var active = items.Count(item =>
+            item.Status is (DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing));
         var completed = items.Count(item => item.Status == DownloadStatus.Completed);
-        queueStatus.Text = string.Join("     ", new[]
+        var segments = new List<string>
         {
             text.Get("Footer.Queue", queued),
             text.Get("Footer.Downloading", active),
             text.Get("Footer.Completed", completed)
-        }) + (services.Queue.IsPaused ? $"     • {text["Footer.Paused"]}" : string.Empty);
+        };
+        queueStatus.Text = string.Join("  •  ", segments) +
+            (services.Queue.IsPaused ? $"  •  {text["Footer.Paused"]}" : string.Empty);
 
         var engine = services.Tools.EngineStatus;
 
-        if (engine == DownloadEngineStatus.Ready)
+        if (services.Tools.CanAnalyze)
         {
-            if (!readyPresentationShown)
+            if (engine == DownloadEngineStatus.Ready && !readyPresentationShown && uiLoopReady)
                 _ = ShowReadyThenDismissAsync();
+            else if (engine == DownloadEngineStatus.Degraded)
+            {
+                preparationOverlay.Visible = false;
+                currentView?.BringToFront();
+            }
             return;
         }
 
@@ -301,7 +379,8 @@ public sealed class MainForm : Form
             : text["Provisioning.Body"];
         ytDlpPreparation.Text = $"yt-dlp     {FormatPreparationStatus(services.Tools.YtDlp)}";
         ffmpegPreparation.Text = $"FFmpeg     {FormatPreparationStatus(services.Tools.Ffmpeg)}";
-        var percentages = new[] { services.Tools.YtDlp.ProgressPercent, services.Tools.Ffmpeg.ProgressPercent }
+        denoPreparation.Text = $"Deno     {FormatPreparationStatus(services.Tools.Deno)}";
+        var percentages = new[] { services.Tools.YtDlp.ProgressPercent, services.Tools.Ffmpeg.ProgressPercent, services.Tools.Deno.ProgressPercent }
             .Where(value => value.HasValue)
             .Select(value => value!.Value)
             .ToArray();
@@ -322,10 +401,11 @@ public sealed class MainForm : Form
         preparationDetails.Text = text["Provisioning.ReadyBody"];
         ytDlpPreparation.Text = $"yt-dlp     {FormatPreparationStatus(services.Tools.YtDlp)}";
         ffmpegPreparation.Text = $"FFmpeg     {FormatPreparationStatus(services.Tools.Ffmpeg)}";
+        denoPreparation.Text = $"Deno     {FormatPreparationStatus(services.Tools.Deno)}";
         preparationOverlay.BringToFront();
         await Task.Delay(650);
         await preparationCard.FadeToAsync(0f, 200, Easings.CubicOut);
-        if (services.Tools.EngineStatus == DownloadEngineStatus.Ready)
+        if (services.Tools.CanAnalyze)
         {
             preparationOverlay.Visible = false;
             currentView?.BringToFront();
@@ -345,6 +425,7 @@ public sealed class MainForm : Form
         Text = text["App.Title"];
         brandLabel.Text = "ModernTube\nDownloader";
         navigation[downloadsView].Text = text["Nav.Downloads"];
+        navigation[liveView].Text = text["Nav.Live"];
         navigation[historyView].Text = text["Nav.History"];
         navigation[settingsView].Text = text["Nav.Settings"];
         preparationRetry.Text = text["Provisioning.Retry"];
@@ -355,7 +436,91 @@ public sealed class MainForm : Form
 
     private void ThemeChanged(object? sender, ThemeChangedEventArgs e) => Application.RunOnUIThread(UpdateNavigationState);
 
-    private void FormShown(object? sender, EventArgs e) => services.Appearance.RefreshSystemTheme();
+    private void FormShown(object? sender, EventArgs e)
+    {
+        // The constructor runs before Application.Run installs the UI synchronization context.
+        // Do not start the asynchronous ready transition until its continuations can return to it.
+        uiLoopReady = true;
+        UiCrashDiagnostics.RegisterStateProvider(onUiThread =>
+        {
+            var items = services.Queue.Snapshot();
+            var state = $"Queue: total={items.Count}, queued={items.Count(item => item.Status == DownloadStatus.Queued)}, " +
+                $"active={items.Count(item => item.Status is DownloadStatus.Waiting or DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing)}, " +
+                $"paused={services.Queue.IsPaused}; Web Remote: enabled={services.Settings.Current.EnableWebRemote}, running={services.WebRemote.IsRunning}";
+            return onUiThread ? state + $"; focused={FindDiagnosticControl(Controls, control => control.Focused)}; " +
+                $"captured={FindDiagnosticControl(Controls, control => control.Capture)}; content-children={content.Controls.Count}" : state;
+        });
+        services.Appearance.RefreshSystemTheme();
+        UpdateStatus();
+        if (initialExternalRequest is not null)
+            _ = HandleExternalUrlAsync(initialExternalRequest);
+#if DEBUG
+        if (automation is not null)
+        {
+            try { automation.Start(this); }
+            catch (Exception ex)
+            {
+                services.Logger.Error("Starting the development automation bridge failed.", ex);
+                FatalErrorReporter.ShowMessage("ModernTubeDownloader automation", ex.Message);
+                Close();
+            }
+        }
+#endif
+    }
+
+    private static string FindDiagnosticControl(IEnumerable<Control> roots, Func<Control, bool> predicate)
+    {
+        try
+        {
+            foreach (var child in roots.ToArray())
+            {
+                var nested = FindDiagnosticControl(child.Controls, predicate);
+                if (nested != "none") return nested;
+                if (predicate(child)) return child.AccessibleAutomationId ?? child.GetType().Name;
+            }
+            return "none";
+        }
+        catch (Exception error) { return "unavailable:" + error.GetType().Name; }
+    }
+
+    public async Task HandleExternalUrlAsync(ExternalMediaRequest request)
+    {
+        if (shutdownStarted || !services.Settings.Current.BrowserIntegrationEnabled ||
+            !ExternalMediaRequest.TryValidateSource(request.SourceUrl, out var sourceUrl))
+            return;
+        if (request.RequestId is { } id)
+        {
+            if (!externalRequestIds.Add(id)) return;
+            externalRequestOrder.Enqueue(id);
+            while (externalRequestOrder.Count > 256)
+                externalRequestIds.Remove(externalRequestOrder.Dequeue());
+        }
+
+        try
+        {
+            services.Logger.Info($"Opening external request id={request.RequestId?.ToString("D") ?? "legacy"}, source={request.Source}, queue={request.AutoQueue}, open={request.OpenInApp}, quality={request.RequestedQualityPresetId ?? "default"}, container={request.RequestedContainer}.");
+            if (WindowState == FormWindowState.Minimized)
+                WindowState = FormWindowState.Normal;
+            if (OperatingSystem.IsWindows() && PlatformHandle.HandleDescriptor == "HWND")
+                SetForegroundWindow(PlatformHandle.Handle);
+            if (new Uri(sourceUrl).AbsolutePath.StartsWith("/live/", StringComparison.OrdinalIgnoreCase))
+            { ShowView(liveView); await liveView.AcceptUrlAsync(sourceUrl); }
+            else
+            { ShowView(downloadsView); await downloadsView.AcceptExternalRequestAsync(request with { SourceUrl = sourceUrl }); }
+        }
+        catch (Exception exception)
+        {
+            if (request.RequestId is { } failedId) externalRequestIds.Remove(failedId);
+            services.Logger.Error("Handling an external YouTube link failed.", exception);
+            if (DownloadFailureClassifier.Classify(exception).Category == DownloadFailureCategory.Upcoming)
+            { ShowView(liveView); liveView.Present(new LiveNavigationRequest(sourceUrl, null, MediaAvailabilityKind.Upcoming)); }
+            else downloadsView.ShowExternalRequestError(exception);
+        }
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr window);
 
     private void LayoutChanged(object? sender, EventArgs e) => UpdateLayout();
 
@@ -373,6 +538,7 @@ public sealed class MainForm : Form
         preparationDetails.Width = innerWidth;
         ytDlpPreparation.Width = innerWidth;
         ffmpegPreparation.Width = innerWidth;
+        denoPreparation.Width = innerWidth;
         preparationProgress.Width = innerWidth;
         preparationRetry.Left = (preparationCard.Width - preparationRetry.Width) / 2;
     }
@@ -391,6 +557,13 @@ public sealed class MainForm : Form
 
     private async Task ShutdownAndCloseAsync()
     {
+#if DEBUG
+        if (automation is not null)
+        {
+            try { await automation.StopAsync(); }
+            catch (Exception ex) { services.Logger.Error("Stopping the development automation bridge failed.", ex); }
+        }
+#endif
         try
         {
             await services.ShutdownAsync();

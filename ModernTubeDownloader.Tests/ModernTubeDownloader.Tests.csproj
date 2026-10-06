@@ -17,6 +17,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\ModernTubeDownloader\ModernTubeDownloader.csproj" />
+    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Testing\ModernFormsNext.Testing.csproj" />
     <ProjectReference Include="..\ModernTubeDownloader.FakeTool\ModernTubeDownloader.FakeTool.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <Target Name="CopyFakeTool" AfterTargets="Build">

@@ -25,7 +25,7 @@ public sealed class FileAppLogger : IAppLogger, IDisposable
     private void Write(string level, string message)
     {
         if (!disposed)
-            entries.Add($"{DateTimeOffset.Now:O} [{level}] {message}");
+            entries.Add($"{DateTimeOffset.Now:O} [{level}] {LogSanitizer.Redact(message)}");
     }
 
     private void WriteLoop()

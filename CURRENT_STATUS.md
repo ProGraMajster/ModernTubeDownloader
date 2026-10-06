@@ -1,24 +1,126 @@
 # Current status
 
-Status date: 2026-09-04.
+## Release closure — 2026-10-06
 
-## Production-ready scope
+ModernTubeDownloader **1.0.0 is release-ready within the scoped evidence**. The owner selected **MIT**, Copyright © 2026 ProGraMajster, and explicitly approved committing, pushing master, making the repository public, tagging and publishing GitHub Release. External publication is gated on the final commit's CI; GitHub Actions and the `v1.0.0` release are the authoritative publication records.
+
+- Development, CI and Release use clean ModernFormsNext `f521f9dfcfe601bf9b6199b88132cccb2380d1bf`, fetched from `origin/master` on 2026-10-06: three commits after `bcf2bcb1726cbb697d2e56600188c4ef2c91ebe1`. Shared application/window lifecycle changes were inspected; no framework or application compatibility patch was needed.
+- Fresh Debug and Release: **375/375 tests each**, zero skipped tests, zero build warnings/errors. JavaScript: **16 extension + 25 Web Remote** tests, all passing. PL/EN resource parity is included in the .NET suite.
+- Fresh native ordinary EN/Dark including Settings/Details and one strict quality-popup cycle, active LIVE PL/Light with own persistence/Details, and 12-entry playlist EN/Dark (10 available entries queued) pass. A LIVE harness invocation initially supplied its ordinary VOD default URL and correctly failed the LIVE-start precondition; the explicit active-LIVE fixture passes. This invocation error is not an application/framework regression.
+- Packaging now requires the exact clean framework pin and application LICENSE, includes dependency redistribution notices, runs both configurations and checks zero skipped tests. Windows x64 remains self-contained, multi-file, untrimmed; symbols are separate. Tools, test/automation hosts, user data, logs and media are excluded.
+- Final local Build-Release and ZIP inspection pass (374 entries, no duplicates/forbidden files). Native UIA against the extracted self-contained EXE analyzed public Sintel without enqueue/download, opened Downloads/Settings/LIVE and closed normally; owned-HWND captures were inspected. Public GitHub artifact checksum will be independently checked after the tag workflow builds it (not assumed equal to the local ZIP).
+- Stable core readiness does not erase previous raw failures or broaden source qualification. SponsorBlock Remove remains **Experimental / default OFF / known playback defect**; FromStart is Experimental. Mark with explicit MKV is the supported SponsorBlock path.
+- Post-1.0: deferred soak, exhaustive DPI/device/browser/source matrices, Unknown child automatic-retry hardening and optional user-supplied authenticated cookies qualification. No universal extractor support or exhaustive manual sign-off is claimed.
+
+The 2026-10-05 snapshot below is historical, including its then-missing license and old dependency pin. See the final closure section in `STABILIZATION_REPORT.md` and the release checklist for the remaining focused native/package results.
+
+## Historical snapshot — 2026-10-05
+
+Status date: 2026-10-05. **NOT READY for public release because application LICENSE is missing.** Stable core is technically ready within scoped P0 evidence, not universally qualified. The user's revised policy defers broad device/source/soak matrices; missing coverage alone is not a blocker. Current evidence and triage are in `STABILIZATION_REPORT.md` / `RELEASE_CHECKLIST.md`; older snapshots below are historical.
+
+## Historical stabilization — local, not released
+
+- Development/CI/release retain the user-requested clean verified MFN master pin `bcf2bcb1726cbb697d2e56600188c4ef2c91ebe1`. Later fetch now shows `origin/master=f521f9df...` (+3 Android commits); bcf is not called latest fetched HEAD. No unrequested dependency migration/framework source change or dirty-main-checkout mutation.
+- Debug and Release builds have zero warnings/errors; all 375 .NET tests pass in each configuration with zero skips. Extension tests pass 16/16. Web Remote time-editor JavaScript tests pass 25/25. Restore, final Build-Release.ps1 and self-contained publish pass.
+- Conservative opaque direct-media selection is enabled only for non-LIVE Auto/MKV, with actual local A/V/duration verification before exposing a final output and again after remux. Missing codecs are not invented. Explicit MP4/WebM reject contradictory or unknown codec facts. The real Archive OGV range produced invalid remux timestamps; this is not a successful download qualification.
+- P0 dropdown: minimal native Light/Dark and actual MTD PL/Light + EN/Dark each pass 500/500 (five variants × 100), native popup and canonical peer agree. PL/Light exact CLI passes 200/200; EN/Dark exact CLI raw 197/200 has three preserved FAILs traced to real native deactivation/outside click after Expand. Controlled owned-window activation reproduces legitimate close/state agreement. This is environmental harness interference, not stale semantic state or confirmed app/MFN bug. Old untraced PL/Light pass 15 remains uncertain, post-1.0 follow-up. Strict assertions unchanged; no sleep/retry/focus/layout hack. Shared smoke records native focus/foreground/popup around actions.
+- Final ordinary EN/Dark native automation PASS. Separate final two-cycle PL/Light popup diagnostic FAIL at cycle 2: foreground changed to a foreign HWND, native active/focus became 0 and the actual popup/fresh peer both became hidden/Collapsed. The raw failure is retained, not rerun or counted as PASS; it is distinct from the successful ordinary smoke.
+- Video-card actions reuse the existing shared styles and compact PL/EN More options label. Six new headless PL/EN × Light/Dark/System cases verify bindings and interactive text contrast; the Dark on-accent and Light secondary-pressed semantic text tokens were corrected without changing backgrounds/layout.
+- Native P0 ZIP VOD close/reopen PASS: real .part 2,151,096 → 2,223,664 bytes, minimum unchanged, stable session/workspace, retained prefix hash, valid 34,076,243-byte / 888.093605 s MP4, ffprobe/10 s decode, exactly-one correct History. Both processes close normally. Child-kill safely becomes Failed/Unknown (no auto-retry); existing explicit Retry refreshes metadata/reuses 2,372,184 bytes/completes. Automatic unknown-child recovery is post-1.0 hardening, not PASS. Prior Archive, provisioning and Release LIVE FromNow/Stop-save/reconnect/parallel proof retained without repetition.
+- Real phone LAN adding worked per user feedback. The numeric-keyboard/colon mismatch was reproduced in the old form and replaced with separate Hours/Minutes/Seconds fields, responsive layout, preview and validation. The user confirmed the new phone UX and playback of a real 2–10 s Sintel clip. Token was disabled only in the explicitly approved temporary QA profile; product default/security policy is unchanged. The temporary listener was closed after the test, with no firewall rule added.
+- Soak: **PARTIAL / DEFERRED POST-1.0**, 91 samples/~83 continuous minutes before sleep; no sampled monotonic growth/crash, not no-leak proof. Wall-clock marker invalidated; no rerun or active soak blocker.
+- Scoped native layout inspection: four main screens at actual 100% PL/Light, 225% EN/Dark and 100% EN/System (resolved Dark), no unusable clipping/overlap. 125%/150% unavailable and NOT EXECUTED; full DPI/browser/phone/extractor/filesystem/network matrices post-1.0, no display/firewall changes.
+- User-confirmed SponsorBlock Remove playback FAIL with screen recording: frozen/apparently out-of-sequence picture at the cut. Existing file has backward PTS and 104 frames squeezed into ~1 ms of timeline at the join. Retain **Experimental, default OFF + existing warning**, not stable-qualified; Mark / explicit MKV recommended. No transcoding workaround. Subtitle and normal/recovered LIVE short human playback remain unanswered, not PASS. Cookies NOT EXECUTED without credentials; default OFF + safe synthetic failure/redaction checks, optional not basic-release blocker.
+- Detailed pre-pause recording frames confirm the visible freeze. 146 exact decoded-frame matches to the existing source around 09:38–09:46 explain the later scene after the outro removal; arbitrary foreign-frame insertion is not proven. Audio discontinuity/sustained A/V sync remain unqualified.
+- Local candidate ZIP: artifacts/release/ModernTubeDownloader-1.0.0-win-x64.zip, self-contained, multi-file, untrimmed; current checksum/size are in STABILIZATION_REPORT.md. ZIP hygiene passes, not full runtime sign-off. No staging, commit, push, tag or publication was performed. License remains USER DECISION REQUIRED.
+
+## Release blocker triage
+
+| Issue | Severity | User impact | Reproducible | Release blocker? | Reason |
+| --- | --- | --- | --- | --- | --- |
+| Missing application license | P0 / legal | No approved distribution terms | Yes | YES — USER DECISION REQUIRED | Concrete release prerequisite. |
+| Quality dropdown closes during automation | P2 / diagnostic | No confirmed incorrect native/peer behavior | Real external activation/click traced | NO — POST-1.0 QA | 100-cycle native variants pass; raw interrupted failures/old uncertainty retained. |
+| Native normal-close VOD resume | P0 gate | Advertised partial continuation | PASS | NO — CLOSED | Actual appended bytes, final media and exactly-one History. |
+| Killed-child Unknown exit / no auto-retry | P2 / hardening | Explicit Retry needed | Yes | NO — POST-1.0 QA | Preserved partial, fresh metadata and valid manual recovery; no universal auto-recovery promise. |
+| SponsorBlock Remove bad playback | P1 / Experimental | Frozen / out-of-sequence frames | Human FAIL + recording | NO for basic stable 1.0 — OPTIONAL FEATURE QUALIFICATION | User permits Experimental/default OFF/warning; not stable-qualified. |
+| Soak/full device/source matrices | P2 / qualification | Remaining combinations unqualified | Partial | NO — POST-1.0 QA | Explicitly deferred; do not claim full PASS/leak safety. |
+| Cookies/FromStart/upcoming/natural-end/human sync | P2 / optional | Credential/timing/experimental qualification | Synthetic PASS; real incomplete | NO — OPTIONAL FEATURE QUALIFICATION | Standard VOD/FromNow verified; safeguards retained. |
+| Publication approval | Approval gate | User-controlled distribution | Not authorized | USER DECISION REQUIRED | No automatic publication. |
+
+## Historical qualification snapshots — through 2026-10-03
+
+## Historical: runtime supported sources — local, not released
+
+- Downloads and Settings / Download engine expose Supported services: active executable version/count, search, grouped families, optional technical mode and 12-row pagination. ToolManager updates invalidate the version/path/hash cache and refresh an open dialog. No static full extractor list is committed.
+- Metadata-only Check URL uses the existing yt-dlp pipeline, bounded flat playlist preview and explicit navigation. It never queues or records. Source/type and actual subtitle/chapter/format/live facts appear in the compact card, LIVE analysis and Details / Source. Desktop is source-neutral; extension and Web Remote remain YouTube-scoped.
+- The active managed yt-dlp is `2026.08.19`: 1752 CLI rows, **1751 unique names** after duplicate `generic` removal, 136 explicit CURRENTLY BROKEN markers. This is extractor availability, not 1751 MTD-verified services.
+- The small QA registry only claims dated per-feature YouTube (`youtube`) and Twitch (`twitch:stream`) evidence from prior real qualification. YouTube playlist, Twitch VOD, Vimeo and Archive.org are not promoted to Verified by one successful metadata check.
+- Current real metadata checks pass for YouTube VOD/playlist/active LIVE/replay, Twitch LIVE/completed VOD and Internet Archive. The Vimeo sample requires login; localized cookies-file guidance is confirmed without credentials. Archive.org's tested formats lack codec IDs: recognition passes, but the current quality selector cannot queue that sample; the new source facts explain this rather than guessing codecs.
+- Debug/Release each pass 349/349 .NET tests with no skips; extension 16/16, Web Remote 7/7 and localization parity pass. Native source dialog PL/Light and EN/Dark, search/paging/wheel, Settings entry, 760×720 resize, cache across reopen and Open without enqueue/recording pass. Details / Source, LIVE, playlist/wheel and 20 Settings checkbox/scroll toggles pass. Desktop LIVE → replay routing no longer incorrectly applies the YouTube-only external-protocol validator; external/remote security boundaries are unchanged. Detailed evidence and remaining gates: `SUPPORTED_SOURCES.md`.
+- ModernFormsNext remains the unchanged clean source checkout at `6d341963dfa0468c3636ea251e107ee34d0d1272`. No commit, push, tag or public publication is authorized or performed in this round.
+- Final `Build-Release.ps1` PASS: self-contained, multi-file, untrimmed win-x64 local candidate `artifacts/release/ModernTubeDownloader-1.0.0-win-x64.zip`, **60,460,341 bytes**, **353 ZIP entries**; SHA-256 `e831c46b49a3a29cfa463c297ad9c51c0e5911ae0b30ef448b93a16ba2dc1381`. Source documentation is included; PDBs are in a separate symbols ZIP. No media tools, test harness, runtime data, logs or cache are bundled.
+- Final ordinary native PL/Light smoke PASS. One additional optional quality-dropdown capture repeat failed at Collapse with `ActionUnsupported` after Expand/capture; the dynamic popup state was no longer actionable for Collapse. That attempt is not counted as PASS or silently caught. Repeatable dropdown visual/focus QA remains open; successful source-dialog and Details runs are separate evidence.
+
+## Historical: independent LIVE subsystem refactor — local, not released
+
+- The final fetched `origin/master` is `6d341963dfa0468c3636ea251e107ee34d0d1272`, four commits after the initial `4b0191d1...` baseline below (DPI events and Form.Activate). The intermediate `1de8a6b...` qualification is retained in the validation report. All active development/CI/release pins match; the detached dependency checkout is clean, and the unrelated dirty main MFN checkout was not touched. No framework compatibility patch was necessary.
+- LIVE is actually owned by `LiveSessionService → LiveRecordingScheduler → existing LiveRecordingExecutor`. VOD stays `DownloadQueueService → QueueProcessor → DownloadJobExecutor`. Separate stores (`live-sessions.json` / `queue.json`) and limits allow 3 VOD + 2 LIVE; VOD pause and either scheduler shutdown do not stop the other subsystem. Legacy migration is destination-first/idempotent and retains recovery workspaces and ordinary queue data.
+- The LIVE page presents active/scheduled/recoverable sessions, explicit confirmation, own counters, duration/bytes/speed/start times, Edit, Stop and save, Cancel, Resume and Details. Queue cards/footer are VOD only. Web Remote has a separate safe `/api/live` projection/actions; starting LIVE still requires desktop confirmation. Existing extension transport remains unchanged.
+- Current validation, real-media profiles and remaining gates are recorded in `VALIDATION_REPORT.md`. Required independent-limit/pause/shutdown tests and a five-distinct-child-PID test pass. Real Release parallel 3 VOD + 1 LIVE, Stop and save, controlled yt-dlp interruption into Part 2, exhausted-retry Partial, and manual/automatic restart recovery pass with actual MKV A/V, ffprobe and short decode. Debug semantic UI also analyzed/recorded/stopped a real LIVE, opened Details and closed cleanly. These are not human A/V playback or real upcoming auto-start evidence.
+- Visual inspection used only captured app HWNDs: PL/Light at 1280×850 and EN/Dark at 1000×720 with scheduled-card ScrollIntoView. Settings dynamic scrolling, playlist paging/scroll, normal Details and external-instance forwarding were exercised through native semantic Automation. Dedicated DPI, human playback, real FromStart, real scheduled transition and a fresh complete Chrome/phone-LAN matrix remain open.
+- Final-pin qualification: Debug/Release each 313/313 tests, zero build warnings/errors, 16 extension tests, self-contained publish and 352-entry ZIP hygiene passed. Native LIVE/Settings/playlist/Details/protocol tests and real Release parallel capture/manual restart were repeated on exact `6d341963...`; the detailed interruption/Partial/automatic-resume runs used the intermediate pin, as explicitly recorded in the report.
+
+## Historical baseline before runtime ownership separation
+
+## 2026-10-03 ModernFormsNext and LIVE working-tree update — not released
+
+- ModernFormsNext development, CI and release pins now target fetched `origin/master` `4b0191d1c0de33e31e46c9f7a377dab833ae3d20` (29 commits after the previous `dc55839b...` pin). The separate framework checkout is clean; the unrelated dirty main framework checkout was not modified. Restore and Debug/Release builds on this pin passed with zero warnings/errors.
+- Active LIVE now has explicit FromNow and experimental eligible-extractor FromStart recording intents, a durable `LiveSession`, Stop and save, MKV stream-copy verification/recovery, separate parts after reconnect, `Partial`/`Interrupted` states, and History entries for verified parts. Upcoming LIVE can persist as WaitingForLive with app-level randomized polling and an immediate recheck after restart. The browser extension opens `/live/` in the app instead of unattended quick queueing. Web Remote presents the states and can stop/save/cancel/retry an existing job; starting LIVE remotely is intentionally rejected with an open-in-app message.
+- VOD jobs now use stable format-keyed workspaces to retain compatible yt-dlp `.part` data across retries, while a changed format is isolated. The default restart policy is manual resume, and exact byte/fragment continuation is source/protocol-dependent. No automatic transcode or unverified concat is performed.
+- Process-level fake-tool tests cover FromNow/FromStart flags, natural end, Stop and save, reconnection into separate parts, exhausted-retry Partial, stable-workspace VOD `.part` continuation, waiting transition and restart persistence. Native semantic Automation passed for active LIVE (PL/Dark) and upcoming LIVE (EN/Light) with isolated fake tools. Bounded real Twitch LIVE FromNow recording and Stop and save passed in Debug and self-contained Release. Published Release runs also recovered old Part 1 and recorded new Part 2 after both manual and automatic restart resume. A controlled termination of only the yt-dlp child recovered Part 1 and automatically retried into Part 2 after fresh metadata; a Windows Job Object closed its FFmpeg descendant. With retry disabled, the same controlled failure ended as Partial with one verified playable part. All reported parts had audio/video and passed short FFmpeg decode. Persisted LIVE queue data contained no raw signed metadata. Human playback, real FromStart, real upcoming auto-start, real VOD restart, DPI and visual gates remain open.
+
+## 2026-09-27 local enhancement update — not released
+
+- Added subtitle track projection from existing yt-dlp metadata, manual/automatic language selection, persisted per-job options, subtitle-only download/conversion, sidecar output, and optional stream-copy media embedding for MP4/MKV/WebM. Playlist workers apply a common policy after per-entry analysis; unavailable requested languages warn without failing the video.
+- Replaced browser-profile extraction with an opt-in, user-selected Netscape `cookies.txt` path. Lightweight validation runs at Settings save and operation time; contents are neither stored nor copied, and process/crash logs redact the path. A user-authorized authenticated-media test remains open.
+- Real media confirmed SponsorBlock Mark/MKV, but direct yt-dlp also reproduced malformed Mark/MP4 chapter metadata and an approximately 83 ms backward video PTS step at a Remove/MP4 edit. Mark is now allowed only for explicit MKV across desktop, queue, worker, and Web Remote; Remove remains available with an experimental warning and is not signed off for audiovisual quality. Custom ranges remain incompatible with subtitles/SponsorBlock, and Remove with subtitles.
+- Added a localized custom-range keyframe-alignment hint. Native semantic Automation exposed and verified it after switching to Custom in PL/Light and EN/Dark; this is not a complete visual/DPI matrix. Real concurrency-2/3 pacing, countdown, pause/resume, and graceful countdown shutdown passed on short public Blender ranges. Real subtitle/Mark/Remove/range and completed-live evidence is in the ignored manual validation report; active/upcoming live, real Chrome, phone/LAN, and DPI checks remain open where unverified.
+
+## 2026-09-26 local LAN remote and media-range update — not released
+
+- Implemented an opt-in, default-off Kestrel web remote over the existing application services, with explicit private IPv4/loopback binding, random in-memory bearer token, address-only QR, strict web input/Origin/Host checks, and bounded API. Only YouTube-family HTTPS URLs are accepted by the remote add form in this MVP; the desktop remains source-neutral. HTTP is unencrypted and must remain on a trusted LAN.
+- Added custom start/end range controls for analyzed videos and a common playlist selection, `MediaTimeRange` validation/persistence/retry/history, yt-dlp section requests for the selected video/audio formats, and best-effort final-duration logging via ffprobe. No full-download fallback or automatic re-encode is implemented; stream-copy cuts may be keyframe-aligned rather than exact.
+- Deterministic fake-tool tests and real loopback HTTP tests cover core behavior. These are not evidence of a real-site segment, phone/second-device LAN, firewall, or all DPI/theme combinations. Complete validation for this round is recorded in the final task report and release checklist; the older 206-test snapshot below predates these changes.
+
+## 2026-09-26 local update — not yet released
+
+- YouTube `/live/<id>` is accepted end-to-end by the extension and desktop protocol. The actual `live_status`/availability from yt-dlp controls downloadability: completed replay/VOD with ordinary formats proceeds, while active, upcoming, processing, private, and unavailable items get distinct feedback.
+- Automatic retry is bounded and category-driven: default one initial attempt plus two additional attempts. HTTP 403/429/5xx, timeout, and network failures retry with fresh metadata/format selection and isolated attempt directories; permanent failures do not.
+- Optional inclusive-range admission pacing is off by default. When enabled it spaces starts of separate queue items, including under concurrency 2–3. Retry backoff is separate; cancellation and shutdown interrupt waiting.
+- Localized queue failure details and structured, URL/credential-redacted logs were added. Automated fake-tool and extension tests validate the new flows; no real YouTube completed-live URL or private playlist was supplied for live verification. Browser-side playlist privacy is intentionally not guessed from unstable DOM text; yt-dlp remains authoritative.
+- Validation of this local update: Debug and Release build with zero warnings/errors, 206/206 .NET tests in each configuration, 13/13 extension tests, and MFN Automation smoke of a synthetic `/live/replay` page flow. Real Chrome and real completed-live/private-playlist smoke remain NOT EXECUTED.
+
+## Historical implemented scope — before current stabilization
 
 - Native ModernFormsNext Windows desktop UI on .NET 10.
 - Official multi-resolution Windows application icon shared by the executable and application windows.
-- URL analysis, metadata normalization, quality selection, single-item queueing, stream downloads, FFmpeg merge/remux, finalization, and persistent history.
-- Automatic yt-dlp and GPL-configured FFmpeg/ffprobe provisioning with validation, atomic activation, rollback preservation, and update checks.
-- Persistent queue with pause, cancellation, retry, ordering, removal, automatic vertical scrolling, and safe restart recovery.
+- URL analysis, metadata normalization, “up to” quality selection, per-job `Auto`/MP4/MKV/WebM output-container selection, single-item queueing, stream downloads, FFmpeg stream-copy merge/remux, finalization, and persistent history.
+- Playlist URL analysis and paged entry selection, bulk addition to the ordinary queue, per-entry format selection at download time, and playlist context in queue/history (local working tree; not part of a published 1.0.0 artifact).
+- Automatic yt-dlp, GPL-configured FFmpeg/ffprobe, and Deno provisioning with validation, atomic activation, rollback preservation, and update checks.
+- Persistent queue with optional, index-derived position badges (on by default), a live 1–3 concurrent-job limit, pause, per-item cancellation, retry, ordering, removal, automatic vertical scrolling, and safe restart recovery.
 - Compact analyzed-video presentation and Details sections for overview, metadata, formats, subtitles, and chapters.
 - Polish/English localization and System/Light/Dark themes.
 - Full raw metadata sidecars and publication-date file timestamps, independently configurable and enabled by default.
 - Local AppData logging and a fatal-error boundary that records full exceptions and displays a readable fallback dialog.
 - Self-contained, multi-file, untrimmed Windows x64 publishing and deterministic ZIP packaging.
 
-## Tested
+## Historical tested scope — before current stabilization
 
 - Debug and Release solution builds with serialized MSBuild and shared compilation disabled.
+- Against ModernFormsNext `dc55839b061485121a8e5dd8092ea2a79e4d7572`: restore, Debug/Release builds, 166 application tests, 32 upstream ScrollableControl regressions, one native Windows scroll-layout regression, semantic automation (EN/Dark and PL/Light), Queue ↔ History scroll reproduction, playlist pagination/scroll, external URL forwarding, and 13 extension tests passed on 2026-09-22. The last upstream commit changed only `CHANGELOG.md`; final restore, builds, app tests, and automation smoke were repeated on the exact pinned SHA. Visual captures were inspected at 1440×900 (EN/Dark) and 1280×720 (PL/Light); this is not a full manual UI or DPI matrix.
 - Complete automated unit/integration suite, including tool installation/update failure paths, queue persistence, details null safety, localization parity, timestamp/sidecar post-processing, and scroll planning.
+- Debug-only semantic automation smoke (normal startup without a bridge, explicit CLI startup, analysis, queue, Settings, Details tabs, and clean shutdown) with isolated synthetic tools; headless TestHost coverage for Details and a queue card.
+- Local playlist validation: deterministic parser/selection/queue/concurrency and end-to-end fake-tool tests, PL/EN TestHost preview, native CLI smoke for 12 and 220 entries (including 218 queued jobs), and unchanged single-video smoke. Real-site playlist extraction is not yet a verified claim.
 - Deterministic process-level workflow: analysis → separate streams → FFmpeg service merge → final file → metadata sidecar → timestamp → history.
 - Native-window visual checks at 1440×900 and 1280×720 in Polish/English and Light/Dark, including a long Unicode title.
 - Repeated Details opening with full and incomplete synthetic metadata, plus a live analyzed item; every tab, vertical scrolling, resize, close, and reopen were observed.
@@ -27,18 +129,22 @@ Status date: 2026-09-04.
 
 See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for the exact current validation state. Automated and observed manual evidence are intentionally reported separately.
 
-## Known limitations
+## Historical limitations — before current stabilization
+
+- The queue/history hide/show scroll anomaly was reproduced on the earlier ModernFormsNext `edb9bed983d334234f6b244c5a64f316d680d5ee`. The fix for [ModernFormsNext #130](https://github.com/ProGraMajster/ModernFormsNext/issues/130) is included in the current source pin; upstream unit/native regressions and the app's three-pass Queue ↔ History repro pass. No app-side workaround was added. A full manual DPI and interaction matrix remains pending.
+- The browser extension and desktop protocol/single-instance path are local MVP work. The page modal and popup now distinguish quick queueing from opening the analyzed options UI in the app, and the validated request carries quality, container, and action intent. The extension uses accessible native selects with explicit dark/light styling. Automated parser/registry/IPC/UI/extension tests pass. Real Chrome click-through, opened-dropdown appearance, and OS association smoke remain unverified before release.
+- The custom URI is one-way. It cannot return yt-dlp capabilities to the extension, so browser quality choices are documented “up to” presets rather than claimed real-time availability. Exact available presets are derived from yt-dlp metadata after opening the app. Dynamic browser-side capabilities would require a separately installed and authenticated Native Messaging host; DOM/player-response scraping is intentionally not used.
 
 - The public project license is not selected; the generated package is a local release candidate, not an approved public release.
 - The source repository is private at `ProGraMajster/ModernTubeDownloader`; no tag or GitHub Release has been published.
-- The application intentionally uses a pinned ModernFormsNext source checkout. NuGet 1.10.0 predates required scroll and windowing fixes.
-- ToolManager does not yet manage `yt-dlp-ejs` or a JavaScript runtime recommended by current yt-dlp guidance for full YouTube support.
-- Queue execution is intentionally single-worker. `MaxSimultaneousDownloads` is persisted but values above one do not yet create parallel workers.
-- Interrupted jobs restart from the beginning; byte-range resume is not implemented.
-- Playlists, channels, subtitle downloading, cookie/login UI, audio extraction, media conversion, embedding, cloud sync, and a library view are outside 1.0.0.
+- The application intentionally uses a pinned ModernFormsNext source checkout at `6d341963dfa0468c3636ea251e107ee34d0d1272` (`origin/master` last fetched 2026-10-03, four commits after the 4b0191d1 baseline above). Development, CI and release use the same source revision; a NuGet migration has not been validated in this update.
+- The official `yt-dlp.exe` carries `yt-dlp-ejs`; ModernTubeDownloader manages Deno 2.3.0+ and passes its verified path explicitly. Extractor behavior can still change with target sites and yt-dlp releases.
+- Interrupted jobs preserve stable session data and default to manual resume. VOD continuation reuses matching `.part` data when yt-dlp and the source allow it; LIVE reconnect starts a separate part after fresh metadata, not byte-perfect append. Bounded real LIVE graceful restart and child-process interruption pass; abrupt whole-app termination, arbitrary fragmented sources and real VOD restart still need separate qualification.
+- Explicit playlist URLs use a flat metadata request; individual-video analysis and downloads still use `--no-playlist`. Watch URLs with `&list=...` remain single-video jobs. Other source-specific playlist URL shapes and live/private extractor behavior have not been verified against real network sources.
+- Automatic channel expansion, manual codec selection, media transcoding, cloud sync, and a library view remain outside the current scope. Subtitle embedding is limited to compatible MP4/MKV/WebM outputs; no media transcoding is implicit. Explicit MP4/WebM requests fail when no stream-copy-compatible formats exist.
 - Dedicated 125% and 150% DPI observation remains pending.
 
-## Planned after 1.0.0 approval
+## Historical plans after 1.0.0 approval
 
 - Select and commit the application license.
 - Move to a compatible ModernFormsNext NuGet release when the required master changes are published.

@@ -10,6 +10,8 @@ internal static class AppBranding
     private static readonly Lazy<SKBitmap> NativeIcon = new(LoadIcon);
     private static readonly Lazy<SKBitmap> TitleBarIcon = new(LoadTitleBarIcon);
 
+    public static SKBitmap Icon => NativeIcon.Value;
+
     public static void Apply(Form form)
     {
         ArgumentNullException.ThrowIfNull(form);

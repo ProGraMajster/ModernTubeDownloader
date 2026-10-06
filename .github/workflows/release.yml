@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout ModernTubeDownloader
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Verify public-release prerequisites
         shell: pwsh
@@ -27,22 +29,35 @@ jobs:
           if ($env:GITHUB_REF_NAME -ne "v$version") {
             throw "Tag $env:GITHUB_REF_NAME does not match application version v$version."
           }
+          $tagCommit = git rev-parse "$($env:GITHUB_REF_NAME)^{commit}"
+          $headCommit = git rev-parse HEAD
+          if ($tagCommit -ne $headCommit -or $headCommit -ne $env:GITHUB_SHA) {
+            throw 'Release must be built from the exact tagged commit.'
+          }
+          if ('${{ github.event.repository.private }}' -ne 'false') {
+            throw 'The repository must be public before publishing the release.'
+          }
 
       - name: Checkout pinned ModernFormsNext
         uses: actions/checkout@v4
         with:
           repository: ProGraMajster/ModernFormsNext
-          ref: 1dce91b9740b3eba8d5f2f529017bebeffb88438
-          path: .dependencies/ModernFormsNext
+          ref: f521f9dfcfe601bf9b6199b88132cccb2380d1bf
+          path: .mfn-master-worktree
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Validate and package
         shell: pwsh
-        run: .\scripts\Build-Release.ps1 -ModernFormsNextRoot "$env:GITHUB_WORKSPACE\.dependencies\ModernFormsNext"
+        run: .\scripts\Build-Release.ps1 -ModernFormsNextRoot "$env:GITHUB_WORKSPACE\.mfn-master-worktree"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -62,4 +77,8 @@ jobs:
           $mainZip = Get-Item -Path .\artifacts\release\ModernTubeDownloader-*-win-x64.zip
           $checksum = Get-Item -LiteralPath "$($mainZip.FullName).sha256"
           $symbols = Get-Item -Path .\artifacts\release\ModernTubeDownloader-*-win-x64-symbols.zip
-          gh release create $env:GITHUB_REF_NAME $mainZip.FullName $checksum.FullName $symbols.FullName --verify-tag --title "ModernTubeDownloader $env:GITHUB_REF_NAME" --generate-notes
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $notes = Join-Path .\docs\releases "$($env:GITHUB_REF_NAME).md"
+          if (-not (Test-Path -LiteralPath $notes -PathType Leaf)) { throw 'Release notes are missing.' }
+          gh release create $env:GITHUB_REF_NAME $mainZip.FullName $checksum.FullName $symbols.FullName --verify-tag --title "ModernTubeDownloader $version" --notes-file $notes
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release publication failed.' }

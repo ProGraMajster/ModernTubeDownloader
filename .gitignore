@@ -12,6 +12,10 @@
 **/[Oo]bj/
 TestResults/
 artifacts/
+test-profiles/
+qa-profiles/
+screenshots/
+CrashReports/
 coverage/
 *.coverage
 *.coveragexml
@@ -36,6 +40,7 @@ Capture-MtdProcessWindow.ps1
 # Application runtime data (normally stored in %LOCALAPPDATA%)
 settings.json
 queue.json
+live-sessions.json
 history.json
 metadata/
 thumbnails/
@@ -50,6 +55,7 @@ output/
 yt-dlp.exe
 ffmpeg.exe
 ffprobe.exe
+deno.exe
 ffmpeg-*.zip
 yt-dlp*.zip
 
@@ -61,6 +67,11 @@ yt-dlp*.zip
 *.ytdl
 *.dmp
 *.stackdump
+*.pdb
+.env
+.env.*
+cookies.txt
+*.cookies.txt
 
 # OS-generated files
 Thumbs.db

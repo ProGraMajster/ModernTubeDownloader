@@ -1,4 +1,5 @@
 using ModernFormsNext;
+using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Localization;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Services;
@@ -37,13 +38,14 @@ internal sealed class HistoryView : UserControl
 
         searchPanel = new Panel();
         AppUi.Card(searchPanel);
-        search = new TextBox { Height = 44 };
+        search = new TextBox { Height = 44, AccessibleAutomationId = "HistorySearch" };
         AppUi.Input(search);
         search.TextChanged += SearchChanged;
         searchPanel.Controls.Add(search);
 
-        list = new FlowLayoutPanel
+        list = new AppScrollFlowLayoutPanel
         {
+            AccessibleAutomationId = "HistoryList",
             AutoScroll = true,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
@@ -97,6 +99,8 @@ internal sealed class HistoryView : UserControl
 
     private void RefreshItems()
     {
+        UiCrashDiagnostics.VerifyUiThread("history.rebuild");
+        UiCrashDiagnostics.Record("history.rebuild.begin", "historyList", list.Controls.Count);
         foreach (var card in cards)
             card.Dispose();
         cards.Clear();
@@ -124,6 +128,7 @@ internal sealed class HistoryView : UserControl
             list.BringToFront();
         }
         ResizeCards();
+        UiCrashDiagnostics.Record("history.rebuild.end", "historyList", list.Controls.Count);
     }
 
     private static bool Matches(DownloadHistoryEntry entry, string query)
@@ -138,7 +143,7 @@ internal sealed class HistoryView : UserControl
 
     private void ResizeCards()
     {
-        var width = Math.Max(520, list.ClientSize.Width - 12);
+        var width = Math.Max(520, list.DisplayRectangle.Width - 4);
         foreach (var card in cards)
             card.Width = width;
     }

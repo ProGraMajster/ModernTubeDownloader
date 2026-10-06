@@ -11,13 +11,14 @@
     <Copyright>Copyright (c) 2026 ProGraMajster</Copyright>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/ProGraMajster/ModernTubeDownloader</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
 
     <Deterministic>true</Deterministic>
     <DebugType>portable</DebugType>
     <WarningLevel>8</WarningLevel>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
 
-    <ModernFormsNextCommit>1dce91b9740b3eba8d5f2f529017bebeffb88438</ModernFormsNextCommit>
+    <ModernFormsNextCommit>f521f9dfcfe601bf9b6199b88132cccb2380d1bf</ModernFormsNextCommit>
     <ModernFormsNextRoot Condition="'$(ModernFormsNextRoot)' == ''">$(MSBuildThisFileDirectory).mfn-master-worktree</ModernFormsNextRoot>
   </PropertyGroup>
 

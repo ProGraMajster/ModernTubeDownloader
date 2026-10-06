@@ -12,6 +12,8 @@ public sealed record AppPaths(
     string ToolStateFile,
     string ToolStagingDirectory)
 {
+    public string LiveSessionsFile => Path.Combine(RootDirectory, "live-sessions.json");
+
     public static AppPaths CreateDefault()
     {
         var configuredRoot = Environment.GetEnvironmentVariable("MODERNTUBEDOWNLOADER_DATA_ROOT");

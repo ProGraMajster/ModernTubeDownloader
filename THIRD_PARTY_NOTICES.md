@@ -2,7 +2,7 @@
 
 This document records the third-party components used to build or operate ModernTubeDownloader 1.0.0. It is informational and is not legal advice. Each component remains subject to its own license terms.
 
-ModernTubeDownloader's own project license has not yet been selected. That decision is separate from every license listed below and blocks a final public release.
+ModernTubeDownloader is licensed under MIT (Copyright © 2026 ProGraMajster); see LICENSE. That license is separate from each third-party license below. The release includes exact redistribution license/notice texts under `licenses/`.
 
 ## Runtime libraries shipped in the self-contained ZIP
 
@@ -12,25 +12,30 @@ ModernTubeDownloader's own project license has not yet been selected. That decis
 - License: MIT, with additional third-party notices in the .NET distribution.
 - License and notices: https://github.com/dotnet/runtime/blob/main/LICENSE.TXT and https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT
 
+The package also contains the ASP.NET Core shared runtime used by the local Web Remote host (MIT plus its own third-party notices). Exact runtime-pack licenses/notices are included alongside those for .NET Core under `licenses/`.
+
 The self-contained `win-x64` artifact contains the Microsoft .NET runtime required to run the application without a separate .NET installation.
 
 ### ModernFormsNext
 
 - Project: https://github.com/ProGraMajster/ModernFormsNext
-- Source revision used for 1.0.0: `1dce91b9740b3eba8d5f2f529017bebeffb88438`
+- Source revision for 1.0.0: `f521f9dfcfe601bf9b6199b88132cccb2380d1bf` (origin/master fetched 2026-10-06).
 - License: MIT.
 
-The application currently builds from a pinned source checkout because the required post-1.10.0 fixes are not yet available in a newer NuGet release. Published application output contains the resulting runtime assemblies, not the ModernFormsNext source tree.
+The application currently builds from a pinned source checkout to keep development, CI, and release on the same validated revision. Application output contains the resulting runtime assemblies, not the ModernFormsNext source tree.
 
 ### Markdig 1.3.2
 
 - Project: https://github.com/xoofx/markdig
 - NuGet license expression: BSD-2-Clause.
+- Redistribution text: `licenses/Markdig-1.3.2.txt`, from the NuGet-recorded source revision `fc705234fa211d179ee1d5e7656b51ab99f70ca9`.
 
 ### Topten.RichTextKit 0.4.167
 
 - Project: https://github.com/toptensoftware/RichTextKit
 - NuGet license expression: Apache-2.0.
+- Redistribution text: `licenses/Topten.RichTextKit-0.4.167.txt`, from the NuGet-recorded source revision `ae434c82d8a197e3d259761879fb3f862f12efd8`.
+- Full Apache 2.0 terms: `licenses/Apache-2.0.txt` (standard license text from GitHub's license API); the preceding file preserves RichTextKit's own copyright notice.
 
 ### SkiaSharp and HarfBuzz packages
 
@@ -47,9 +52,16 @@ The packages include additional native third-party material. Consult the `LICENS
 - System.Drawing.Common 10.0.10 — MIT.
 - Microsoft.Win32.SystemEvents 10.0.10 — part of the .NET libraries; see the .NET runtime license and notices above.
 
+### QRCoder 1.8.0
+
+- Project: https://github.com/Shane32/QRCoder
+- License: MIT (see the package license and project repository).
+
+QRCoder creates an address-only QR code locally in Settings. No online QR generation service is contacted, and the authentication token is not encoded in the QR.
+
 ## Tools downloaded after installation
 
-The application ZIP does not contain `yt-dlp.exe`, `ffmpeg.exe`, or `ffprobe.exe`. ToolManager downloads them into `%LOCALAPPDATA%\ModernTubeDownloader\Tools` for the current user.
+The application ZIP does not contain `yt-dlp.exe`, `ffmpeg.exe`, `ffprobe.exe`, or `deno.exe`. ToolManager downloads them into `%LOCALAPPDATA%\ModernTubeDownloader\Tools` for the current user.
 
 ### yt-dlp
 
@@ -61,6 +73,18 @@ The application ZIP does not contain `yt-dlp.exe`, `ffmpeg.exe`, or `ffprobe.exe
 - Bundled executable notices: https://github.com/yt-dlp/yt-dlp/blob/master/THIRD_PARTY_LICENSES.txt
 
 The official yt-dlp documentation states that PyInstaller-bundled executables contain GPLv3-or-later components and that the combined executable is distributed under GPLv3-or-later terms. The application's notices therefore do not describe the downloaded Windows executable as Unlicense-only.
+
+The official PyInstaller-bundled `yt-dlp.exe` also includes the `yt-dlp-ejs` challenge-solver scripts; no separate EJS package is downloaded by the application.
+
+### Deno
+
+- Project: https://github.com/denoland/deno
+- Managed release source: https://api.github.com/repos/denoland/deno/releases/latest
+- Asset selected on Windows x64: `deno-x86_64-pc-windows-msvc.zip`.
+- License: MIT.
+- License: https://github.com/denoland/deno/blob/main/LICENSE.md
+
+Deno is downloaded as the JavaScript runtime recommended by yt-dlp for its EJS challenge solver. ModernTubeDownloader validates that the runtime is at least version 2.3.0 and passes its explicit executable path to yt-dlp; it does not rely on a global PATH entry.
 
 ### FFmpeg and ffprobe
 

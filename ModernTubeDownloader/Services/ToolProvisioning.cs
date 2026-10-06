@@ -32,9 +32,13 @@ public sealed class GitHubToolReleaseSource(HttpClient httpClient) : IToolReleas
 {
     public async Task<ToolReleaseInfo> GetLatestAsync(ExternalToolKind kind, CancellationToken cancellationToken = default)
     {
-        var endpoint = kind == ExternalToolKind.YtDlp
-            ? "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
-            : "https://api.github.com/repos/yt-dlp/FFmpeg-Builds/releases/latest";
+        var endpoint = kind switch
+        {
+            ExternalToolKind.YtDlp => "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest",
+            ExternalToolKind.Ffmpeg => "https://api.github.com/repos/yt-dlp/FFmpeg-Builds/releases/latest",
+            ExternalToolKind.Deno => "https://api.github.com/repos/denoland/deno/releases/latest",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
         using var response = await httpClient.GetAsync(endpoint, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
@@ -44,7 +48,13 @@ public sealed class GitHubToolReleaseSource(HttpClient httpClient) : IToolReleas
         var published = root.TryGetProperty("published_at", out var publishedElement) && publishedElement.TryGetDateTimeOffset(out var parsed)
             ? parsed
             : (DateTimeOffset?)null;
-        var desiredName = kind == ExternalToolKind.YtDlp ? "yt-dlp.exe" : GetFfmpegAssetName();
+        var desiredName = kind switch
+        {
+            ExternalToolKind.YtDlp => "yt-dlp.exe",
+            ExternalToolKind.Ffmpeg => GetFfmpegAssetName(),
+            ExternalToolKind.Deno => GetDenoAssetName(),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
         var assets = root.GetProperty("assets").EnumerateArray().ToArray();
         var asset = assets.FirstOrDefault(item => string.Equals(item.GetProperty("name").GetString(), desiredName, StringComparison.OrdinalIgnoreCase));
         if (asset.ValueKind == JsonValueKind.Undefined)
@@ -60,7 +70,7 @@ public sealed class GitHubToolReleaseSource(HttpClient httpClient) : IToolReleas
         var displayVersion = kind == ExternalToolKind.Ffmpeg && published is { } publishedAt
             ? $"build {publishedAt:yyyy-MM-dd}"
             : tag;
-        return new ToolReleaseInfo(kind, identity, displayVersion, downloadUri, desiredName, digest, size, published, kind == ExternalToolKind.Ffmpeg);
+        return new ToolReleaseInfo(kind, identity, displayVersion, downloadUri, desiredName, digest, size, published, kind != ExternalToolKind.YtDlp);
     }
 
     private async Task<string?> TryReadChecksumAsync(
@@ -69,7 +79,13 @@ public sealed class GitHubToolReleaseSource(HttpClient httpClient) : IToolReleas
         IReadOnlyList<JsonElement> assets,
         CancellationToken cancellationToken)
     {
-        var checksumName = kind == ExternalToolKind.YtDlp ? "SHA2-256SUMS" : "checksums.sha256";
+        var checksumName = kind switch
+        {
+            ExternalToolKind.YtDlp => "SHA2-256SUMS",
+            ExternalToolKind.Ffmpeg => "checksums.sha256",
+            ExternalToolKind.Deno => $"{desiredName}.sha256sum",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
         var checksumAsset = assets.FirstOrDefault(item => string.Equals(item.GetProperty("name").GetString(), checksumName, StringComparison.OrdinalIgnoreCase));
         if (checksumAsset.ValueKind == JsonValueKind.Undefined ||
             !Uri.TryCreate(checksumAsset.GetProperty("browser_download_url").GetString(), UriKind.Absolute, out var checksumUri))
@@ -79,6 +95,8 @@ public sealed class GitHubToolReleaseSource(HttpClient httpClient) : IToolReleas
         foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (kind == ExternalToolKind.Deno && parts.Length >= 1 && parts[0].Length == 64)
+                return NormalizeDigest(parts[0]);
             if (parts.Length >= 2 && parts[0].Length == 64 && string.Equals(parts[^1].TrimStart('*'), desiredName, StringComparison.OrdinalIgnoreCase))
                 return NormalizeDigest(parts[0]);
         }
@@ -95,6 +113,17 @@ public sealed class GitHubToolReleaseSource(HttpClient httpClient) : IToolReleas
             _ => throw new PlatformNotSupportedException($"FFmpeg managed provisioning does not support {RuntimeInformation.ProcessArchitecture}.")
         };
         return $"ffmpeg-master-latest-{platform}-gpl.zip";
+    }
+
+    private static string GetDenoAssetName()
+    {
+        var architecture = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => "x86_64",
+            Architecture.Arm64 => "aarch64",
+            _ => throw new PlatformNotSupportedException($"Deno managed provisioning does not support {RuntimeInformation.ProcessArchitecture} on Windows.")
+        };
+        return $"deno-{architecture}-pc-windows-msvc.zip";
     }
 
     private static string? NormalizeDigest(string? value)
@@ -163,7 +192,7 @@ public sealed class ProcessToolBinaryValidator(AsyncProcessRunner processRunner)
     public async Task<string> ValidateAsync(ExternalToolKind kind, string executablePath, string? ffprobePath, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(executablePath)) throw new FileNotFoundException("Tool executable was not found.", executablePath);
-        var arguments = kind == ExternalToolKind.YtDlp ? new[] { "--version" } : new[] { "-version" };
+        var arguments = kind == ExternalToolKind.Ffmpeg ? new[] { "-version" } : new[] { "--version" };
         var result = await processRunner.RunAsync(new ProcessRunRequest(executablePath, arguments), cancellationToken).ConfigureAwait(false);
         if (!result.IsSuccess) throw new InvalidDataException($"{Path.GetFileName(executablePath)} validation exited with code {result.ExitCode}.");
         if (kind == ExternalToolKind.Ffmpeg)
@@ -173,9 +202,19 @@ public sealed class ProcessToolBinaryValidator(AsyncProcessRunner processRunner)
             var probeResult = await processRunner.RunAsync(new ProcessRunRequest(ffprobePath, ["-version"]), cancellationToken).ConfigureAwait(false);
             if (!probeResult.IsSuccess) throw new InvalidDataException($"ffprobe validation exited with code {probeResult.ExitCode}.");
         }
-        return result.StandardOutput.FirstOrDefault(line => !string.IsNullOrWhiteSpace(line))?.Trim()
+        var versionText = result.StandardOutput.FirstOrDefault(line => !string.IsNullOrWhiteSpace(line))?.Trim()
             ?? result.StandardError.FirstOrDefault(line => !string.IsNullOrWhiteSpace(line))?.Trim()
             ?? "unknown";
+        if (kind == ExternalToolKind.Deno)
+            ValidateDenoVersion(versionText);
+        return versionText;
+    }
+
+    internal static void ValidateDenoVersion(string versionText)
+    {
+        var versionValue = versionText.Split(' ', StringSplitOptions.RemoveEmptyEntries).SkipWhile(part => !char.IsDigit(part.FirstOrDefault())).FirstOrDefault();
+        if (versionValue is null || !Version.TryParse(versionValue.TrimStart('v'), out var version) || version < new Version(2, 3, 0))
+            throw new InvalidDataException($"Deno 2.3.0 or newer is required; detected '{versionText}'.");
     }
 }
 
@@ -221,8 +260,10 @@ public sealed class ToolPackageInstaller(
             installing?.Invoke();
             if (release.IsArchive)
                 ExtractZipSafely(downloadPath, payloadDirectory, cancellationToken);
-            else
+            else if (release.Kind == ExternalToolKind.YtDlp)
                 File.Move(downloadPath, Path.Combine(payloadDirectory, "yt-dlp.exe"));
+            else
+                throw new InvalidDataException($"{release.Kind} must be supplied as an archive.");
 
             var staged = LocateExecutables(release.Kind, payloadDirectory);
             var version = await validator.ValidateAsync(release.Kind, staged.Executable, staged.Ffprobe, cancellationToken).ConfigureAwait(false);
@@ -243,6 +284,11 @@ public sealed class ToolPackageInstaller(
         {
             var ytDlp = Directory.EnumerateFiles(root, "yt-dlp.exe", SearchOption.AllDirectories).SingleOrDefault();
             return (ytDlp ?? throw new InvalidDataException("yt-dlp.exe is missing from the prepared package."), null);
+        }
+        if (kind == ExternalToolKind.Deno)
+        {
+            var deno = Directory.EnumerateFiles(root, "deno.exe", SearchOption.AllDirectories).SingleOrDefault();
+            return (deno ?? throw new InvalidDataException("deno.exe is missing from the prepared package."), null);
         }
         var ffmpeg = Directory.EnumerateFiles(root, "ffmpeg.exe", SearchOption.AllDirectories).SingleOrDefault();
         var ffprobe = Directory.EnumerateFiles(root, "ffprobe.exe", SearchOption.AllDirectories).SingleOrDefault();
@@ -293,7 +339,13 @@ public sealed class ToolPackageInstaller(
         catch { }
     }
 
-    private static string ToolDirectoryName(ExternalToolKind kind) => kind == ExternalToolKind.YtDlp ? "yt-dlp" : "ffmpeg";
+    private static string ToolDirectoryName(ExternalToolKind kind) => kind switch
+    {
+        ExternalToolKind.YtDlp => "yt-dlp",
+        ExternalToolKind.Ffmpeg => "ffmpeg",
+        ExternalToolKind.Deno => "deno",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind))
+    };
     private static string SanitizeSegment(string value)
     {
         var result = new string(value.Select(character => char.IsLetterOrDigit(character) || character is '.' or '-' or '_' ? character : '_').ToArray());

@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Reflection;
 using System.Text;
 
 namespace ModernTubeDownloader.Infrastructure;
@@ -15,11 +16,25 @@ internal static class FatalErrorReporter
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
         ArgumentNullException.ThrowIfNull(exception);
 
+        var report = BuildReport(message, exception);
+        try
+        {
+            var directory = Path.Combine(paths.RootDirectory, "CrashReports");
+            Directory.CreateDirectory(directory);
+            var reportPath = Path.Combine(directory,
+                $"ModernTubeDownloader-crash-{DateTimeOffset.Now:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}.log");
+            File.WriteAllText(reportPath, report, new UTF8Encoding(false));
+        }
+        catch
+        {
+            // Keep the normal logger and fallback available if the separate report fails.
+        }
+
         if (logger is not null)
         {
             try
             {
-                logger.Error(message, exception);
+                logger.Error(report);
                 return;
             }
             catch
@@ -32,13 +47,31 @@ internal static class FatalErrorReporter
         {
             Directory.CreateDirectory(paths.LogDirectory);
             var path = Path.Combine(paths.LogDirectory, $"ModernTubeDownloader-{DateTimeOffset.Now:yyyyMMdd}.log");
-            var entry = $"{DateTimeOffset.Now:O} [FTL] {message}{Environment.NewLine}{exception}{Environment.NewLine}";
-            File.AppendAllText(path, entry, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.AppendAllText(path, $"{DateTimeOffset.Now:O} [FTL] {report}{Environment.NewLine}", new UTF8Encoding(false));
         }
         catch
         {
             // No further recovery is possible if even the fallback log cannot be written.
         }
+    }
+
+    internal static string BuildReport(string message, Exception exception)
+    {
+        var assembly = typeof(FatalErrorReporter).Assembly;
+        var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? assembly.GetName().Version?.ToString() ?? "unknown";
+        var mfnSha = assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => attribute.Key == "ModernFormsNextCommit")?.Value ?? "unknown";
+        var raw = $"ModernTubeDownloader fatal crash {DateTimeOffset.Now:O}{Environment.NewLine}" +
+            $"App version: {version}; ModernFormsNext SHA: {mfnSha}{Environment.NewLine}" +
+            $"OS: {RuntimeInformation.OSDescription}; architecture: {RuntimeInformation.ProcessArchitecture}{Environment.NewLine}" +
+            $"{message}{Environment.NewLine}{exception}{Environment.NewLine}" +
+            UiCrashDiagnostics.Snapshot();
+        var redacted = LogSanitizer.Redact(raw);
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return string.IsNullOrEmpty(userProfile)
+            ? redacted
+            : redacted.Replace(userProfile, "<user-profile>", StringComparison.OrdinalIgnoreCase);
     }
 
     public static void ShowMessage(string title, string message)

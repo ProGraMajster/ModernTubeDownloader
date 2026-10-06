@@ -17,11 +17,18 @@ public sealed class ToolManagerTests
 
         await harness.Manager.Initialization;
 
+        Assert.True(harness.Manager.YtDlp.Installed, harness.Manager.YtDlp.ErrorMessage);
+        Assert.True(harness.Manager.Ffmpeg.Installed, harness.Manager.Ffmpeg.ErrorMessage);
+        Assert.True(harness.Manager.Deno.Installed, harness.Manager.Deno.ErrorMessage);
+        Assert.Equal(ToolStatus.Ready, harness.Manager.YtDlp.Status);
+        Assert.Equal(ToolStatus.Ready, harness.Manager.Ffmpeg.Status);
+        Assert.Equal(ToolStatus.Ready, harness.Manager.Deno.Status);
         Assert.Equal(DownloadEngineStatus.Ready, harness.Manager.EngineStatus);
         Assert.True(File.Exists(harness.Manager.YtDlp.ExecutablePath));
         Assert.True(File.Exists(harness.Manager.Ffmpeg.ExecutablePath));
         Assert.True(File.Exists(harness.Manager.Ffmpeg.FfprobePath));
-        Assert.Equal(2, harness.Source.CallCount);
+        Assert.True(File.Exists(harness.Manager.Deno.ExecutablePath));
+        Assert.Equal(3, harness.Source.CallCount);
         Assert.True(File.Exists(harness.Paths.ToolStateFile));
     }
 
@@ -31,12 +38,19 @@ public sealed class ToolManagerTests
         var root = ToolHarness.NewRoot();
         await using var first = await ToolHarness.CreateAsync(root);
         await first.Manager.Initialization;
+        await first.Manager.StopAsync();
         var persisted = await File.ReadAllTextAsync(AppPaths.Create(root).ToolStateFile);
         Assert.Contains("lastToolUpdateCheck", persisted, StringComparison.OrdinalIgnoreCase);
 
         await using var second = await ToolHarness.CreateAsync(root);
         await second.Manager.Initialization;
 
+        Assert.True(second.Manager.YtDlp.Installed, second.Manager.YtDlp.ErrorMessage);
+        Assert.True(second.Manager.Ffmpeg.Installed, second.Manager.Ffmpeg.ErrorMessage);
+        Assert.True(second.Manager.Deno.Installed, second.Manager.Deno.ErrorMessage);
+        Assert.Equal(ToolStatus.Ready, second.Manager.YtDlp.Status);
+        Assert.Equal(ToolStatus.Ready, second.Manager.Ffmpeg.Status);
+        Assert.Equal(ToolStatus.Ready, second.Manager.Deno.Status);
         Assert.Equal(DownloadEngineStatus.Ready, second.Manager.EngineStatus);
         Assert.Equal(0, second.Source.CallCount);
         Assert.Equal(0, second.Handler.RequestCount);
@@ -127,6 +141,23 @@ public sealed class ToolManagerTests
         Assert.True(File.Exists(oldPath));
         Assert.Equal(ToolStatus.Failed, harness.Manager.YtDlp.Status);
         Assert.Contains("remains active", harness.Manager.YtDlp.ErrorMessage);
+        Assert.Equal(DownloadEngineStatus.Degraded, harness.Manager.EngineStatus);
+    }
+
+    [Fact]
+    public async Task MissingFfmpeg_AllowsAnalysisCapabilitiesButRejectsOnlyFfmpegLease()
+    {
+        await using var harness = await ToolHarness.CreateAsync();
+        harness.SetFfmpegRelease("invalid-ffmpeg", "invalid-ffmpeg", "ffprobe");
+
+        await harness.Manager.Initialization;
+
+        Assert.True(harness.Manager.CanAnalyze);
+        Assert.False(harness.Manager.CanMerge);
+        Assert.Equal(DownloadEngineStatus.Degraded, harness.Manager.EngineStatus);
+        await using var ytDlp = await harness.Manager.AcquireAsync(ExternalToolKind.YtDlp);
+        await using var deno = await harness.Manager.AcquireAsync(ExternalToolKind.Deno);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Manager.AcquireAsync(ExternalToolKind.Ffmpeg));
     }
 
     [Fact]
@@ -138,9 +169,11 @@ public sealed class ToolManagerTests
         var yt = Path.Combine(customDirectory, "yt-dlp.exe");
         var ffmpeg = Path.Combine(customDirectory, "ffmpeg.exe");
         var ffprobe = Path.Combine(customDirectory, "ffprobe.exe");
+        var deno = Path.Combine(customDirectory, "deno.exe");
         await File.WriteAllTextAsync(yt, "custom-yt");
         await File.WriteAllTextAsync(ffmpeg, "custom-ffmpeg");
         await File.WriteAllTextAsync(ffprobe, "custom-ffprobe");
+        await File.WriteAllTextAsync(deno, "deno 2.3.0");
         await using var harness = await ToolHarness.CreateAsync(root, settings =>
         {
             settings.UseCustomYtDlp = true;
@@ -148,6 +181,8 @@ public sealed class ToolManagerTests
             settings.UseCustomFfmpeg = true;
             settings.CustomFfmpegPath = ffmpeg;
             settings.CustomFfprobePath = ffprobe;
+            settings.UseCustomDeno = true;
+            settings.CustomDenoPath = deno;
         });
 
         await harness.Manager.Initialization;
@@ -155,6 +190,7 @@ public sealed class ToolManagerTests
 
         Assert.False(harness.Manager.YtDlp.ManagedByApplication);
         Assert.False(harness.Manager.Ffmpeg.ManagedByApplication);
+        Assert.False(harness.Manager.Deno.ManagedByApplication);
         Assert.Equal(0, harness.Source.CallCount);
         Assert.Equal(0, harness.Handler.RequestCount);
         Assert.Equal("custom-yt", await File.ReadAllTextAsync(yt));
@@ -227,6 +263,7 @@ public sealed class ToolManagerTests
                 new ToolManager(paths, settings, source, new ToolPackageInstaller(paths, new ToolDownloadService(client), validator), validator, logger));
             harness.SetYtDlpRelease("v1", "yt-v1");
             harness.SetFfmpegRelease("ff-v1", "ffmpeg-v1", "ffprobe-v1");
+            harness.SetDenoRelease("deno-v1", "deno 2.3.0");
             return harness;
         }
 
@@ -244,6 +281,14 @@ public sealed class ToolManagerTests
             var bytes = CreateZip(ffmpeg, ffprobe);
             Handler.Payloads[uri] = bytes;
             Source.Ffmpeg = new ToolReleaseInfo(ExternalToolKind.Ffmpeg, identity, identity, uri, "ffmpeg.zip", Sha(bytes), bytes.Length, DateTimeOffset.UtcNow, true);
+        }
+
+        public void SetDenoRelease(string identity, string deno)
+        {
+            var uri = new Uri($"https://assets.test/deno-{identity}.zip");
+            var bytes = CreateDenoZip(deno);
+            Handler.Payloads[uri] = bytes;
+            Source.Deno = new ToolReleaseInfo(ExternalToolKind.Deno, identity, identity, uri, "deno.zip", Sha(bytes), bytes.Length, DateTimeOffset.UtcNow, true);
         }
 
         public async ValueTask DisposeAsync()
@@ -264,6 +309,14 @@ public sealed class ToolManagerTests
             return stream.ToArray();
         }
 
+        private static byte[] CreateDenoZip(string deno)
+        {
+            using var stream = new MemoryStream();
+            using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+                WriteEntry(archive, "deno.exe", deno);
+            return stream.ToArray();
+        }
+
         private static void WriteEntry(ZipArchive archive, string name, string value)
         {
             using var writer = new StreamWriter(archive.CreateEntry(name).Open(), Encoding.UTF8);
@@ -277,13 +330,20 @@ public sealed class ToolManagerTests
     {
         public ToolReleaseInfo YtDlp { get; set; } = null!;
         public ToolReleaseInfo Ffmpeg { get; set; } = null!;
+        public ToolReleaseInfo Deno { get; set; } = null!;
         public int CallCount { get; private set; }
 
         public Task<ToolReleaseInfo> GetLatestAsync(ExternalToolKind kind, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
-            return Task.FromResult(kind == ExternalToolKind.YtDlp ? YtDlp : Ffmpeg);
+            return Task.FromResult(kind switch
+            {
+                ExternalToolKind.YtDlp => YtDlp,
+                ExternalToolKind.Ffmpeg => Ffmpeg,
+                ExternalToolKind.Deno => Deno,
+                _ => throw new ArgumentOutOfRangeException(nameof(kind))
+            });
         }
     }
 

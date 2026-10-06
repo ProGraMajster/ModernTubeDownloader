@@ -3,7 +3,8 @@ namespace ModernTubeDownloader.Models;
 public enum ExternalToolKind
 {
     YtDlp,
-    Ffmpeg
+    Ffmpeg,
+    Deno
 }
 
 public enum ToolStatus
@@ -46,7 +47,13 @@ public sealed record ToolInfo
     public static ToolInfo Missing(ExternalToolKind kind, string message) => new()
     {
         Kind = kind,
-        ToolName = kind == ExternalToolKind.YtDlp ? "yt-dlp" : "FFmpeg",
+        ToolName = kind switch
+        {
+            ExternalToolKind.YtDlp => "yt-dlp",
+            ExternalToolKind.Ffmpeg => "FFmpeg",
+            ExternalToolKind.Deno => "Deno",
+            _ => kind.ToString()
+        },
         Status = ToolStatus.Missing,
         ErrorMessage = message
     };
@@ -56,5 +63,6 @@ public enum DownloadEngineStatus
 {
     Preparing,
     Ready,
+    Degraded,
     Failed
 }

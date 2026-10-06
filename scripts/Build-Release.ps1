@@ -7,13 +7,16 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $solutionPath = Join-Path $repositoryRoot 'ModernTubeDownloader.slnx'
 $applicationProject = Join-Path $repositoryRoot 'ModernTubeDownloader\ModernTubeDownloader.csproj'
+$testProject = Join-Path $repositoryRoot 'ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj'
 $propertiesPath = Join-Path $repositoryRoot 'Directory.Build.props'
+$defaultModernFormsNextRoot = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot '.mfn-master-worktree'))
 
 if ([string]::IsNullOrWhiteSpace($ModernFormsNextRoot)) {
-    $ModernFormsNextRoot = Join-Path $repositoryRoot '.mfn-master-worktree'
+    $ModernFormsNextRoot = $defaultModernFormsNextRoot
 }
 
 $ModernFormsNextRoot = [System.IO.Path]::GetFullPath($ModernFormsNextRoot)
+$buildTarget = if ([string]::Equals($ModernFormsNextRoot, $defaultModernFormsNextRoot, [System.StringComparison]::OrdinalIgnoreCase)) { $solutionPath } else { $testProject }
 $modernFormsProject = Join-Path $ModernFormsNextRoot 'ModernFormsNext\ModernFormsNext.csproj'
 if (-not (Test-Path -LiteralPath $modernFormsProject -PathType Leaf)) {
     throw "ModernFormsNext was not found at '$ModernFormsNextRoot'. Pass -ModernFormsNextRoot with a checkout containing ModernFormsNext/ModernFormsNext.csproj."
@@ -26,6 +29,15 @@ if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerTe
 }
 
 $version = $versionNode.InnerText.Trim()
+$frameworkCommit = $properties.SelectSingleNode('/Project/PropertyGroup/ModernFormsNextCommit').InnerText.Trim()
+$actualFrameworkCommit = & git -C $ModernFormsNextRoot rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or $actualFrameworkCommit -ne $frameworkCommit) {
+    throw 'ModernFormsNext checkout must match the central release pin.'
+}
+$frameworkChanges = & git -C $ModernFormsNextRoot status --porcelain
+if ($LASTEXITCODE -ne 0 -or $frameworkChanges) { throw 'ModernFormsNext source checkout must be clean.' }
+$licensePath = Join-Path $repositoryRoot 'LICENSE'
+if (-not (Test-Path -LiteralPath $licensePath -PathType Leaf)) { throw 'The application LICENSE is required.' }
 $artifactsRoot = Join-Path $repositoryRoot 'artifacts'
 $publishRoot = Join-Path $artifactsRoot 'publish\win-x64'
 $releaseRoot = Join-Path $artifactsRoot 'release\win-x64'
@@ -67,10 +79,23 @@ function Invoke-DotNet {
 $modernFormsProperty = "-p:ModernFormsNextRoot=$ModernFormsNextRoot"
 $serialBuildProperties = @('-m:1', '/p:UseSharedCompilation=false', $modernFormsProperty)
 
-Invoke-DotNet -Arguments @('restore', $solutionPath, $modernFormsProperty)
-Invoke-DotNet -Arguments (@('build', $solutionPath, '-c', 'Debug', '--no-restore') + $serialBuildProperties)
-Invoke-DotNet -Arguments (@('build', $solutionPath, '-c', 'Release', '--no-restore') + $serialBuildProperties)
-Invoke-DotNet -Arguments (@('test', $solutionPath, '-c', 'Release', '--no-build') + $serialBuildProperties)
+Invoke-DotNet -Arguments @('restore', $buildTarget, $modernFormsProperty)
+foreach ($configuration in @('Debug', 'Release')) {
+    Invoke-DotNet -Arguments (@('build', $buildTarget, '-c', $configuration, '--no-restore', '-warnaserror') + $serialBuildProperties)
+    $resultsRoot = Join-Path $artifactsRoot "validation\$configuration"
+    Invoke-DotNet -Arguments (@('test', $testProject, '-c', $configuration, '--no-build', '--logger', 'trx;LogFileName=release-validation.trx', '--results-directory', $resultsRoot) + $serialBuildProperties)
+    [xml] $testResults = Get-Content -LiteralPath (Join-Path $resultsRoot 'release-validation.trx') -Raw
+    $counters = $testResults.TestRun.ResultSummary.Counters
+    if ([int]$counters.total -eq 0 -or [int]$counters.total -ne [int]$counters.passed) {
+        throw "$configuration must have passing tests with no skipped tests."
+    }
+}
+Push-Location $repositoryRoot
+try {
+    & node --test browser-extension/tests/*.test.cjs ModernTubeDownloader.Tests/WebRemoteTimeInput.test.cjs
+    if ($LASTEXITCODE -ne 0) { throw 'Browser extension / Web Remote JavaScript tests failed.' }
+}
+finally { Pop-Location }
 Invoke-DotNet -Arguments @(
     'publish',
     $applicationProject,
@@ -81,6 +106,7 @@ Invoke-DotNet -Arguments @(
     $modernFormsProperty,
     '-m:1',
     '/p:UseSharedCompilation=false',
+    '-warnaserror',
     '-o', $publishRoot
 )
 
@@ -93,12 +119,52 @@ Get-ChildItem -LiteralPath $publishRoot | ForEach-Object {
 
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'README.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'SUPPORTED_SOURCES.md') -Destination $releaseRoot
+Copy-Item -LiteralPath $licensePath -Destination $releaseRoot
+
+# Keep redistribution notices from the exact restored packages, not a moving web page.
+$licensesRoot = Join-Path $releaseRoot 'licenses'
+[void] (New-Item -ItemType Directory -Path $licensesRoot -Force)
+Copy-Item -LiteralPath (Join-Path $ModernFormsNextRoot 'LICENSE.txt') -Destination (Join-Path $licensesRoot 'ModernFormsNext.txt')
+Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'licenses') -File | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $licensesRoot
+}
+$assets = Get-Content -LiteralPath (Join-Path $repositoryRoot 'ModernTubeDownloader\obj\project.assets.json') -Raw | ConvertFrom-Json -AsHashtable
+function Copy-PackageNotices([string]$package, [string]$packageVersion, [bool]$requireLicense = $true) {
+    $packageDirectory = $null
+    foreach ($folder in $assets.packageFolders.Keys) {
+        $candidate = Join-Path $folder "$($package.ToLowerInvariant())\$packageVersion"
+        if (Test-Path -LiteralPath $candidate -PathType Container) { $packageDirectory = $candidate; break }
+    }
+    if (-not $packageDirectory) { throw "Missing restored package notices: $package/$packageVersion" }
+    $notices = @(Get-ChildItem -LiteralPath $packageDirectory -File | Where-Object { $_.Name -match '^(LICENSE|THIRD.PARTY.NOTICES)\.' })
+    if ($requireLicense -and -not @($notices | Where-Object Name -match '^LICENSE\.').Count) {
+        throw "Missing redistribution license: $package/$packageVersion"
+    }
+    foreach ($notice in $notices) {
+        Copy-Item -LiteralPath $notice.FullName -Destination (Join-Path $licensesRoot "$package-$packageVersion-$($notice.Name)")
+    }
+}
+foreach ($package in @('SkiaSharp', 'SkiaSharp.HarfBuzz', 'SkiaSharp.NativeAssets.Win32', 'HarfBuzzSharp', 'HarfBuzzSharp.NativeAssets.Win32', 'System.Drawing.Common', 'QRCoder', 'Microsoft.Win32.SystemEvents')) {
+    $library = @($assets.libraries.Keys | Where-Object { $_.Split('/')[0] -eq $package })
+    if ($library.Count -ne 1) { throw "Expected one restored version of $package." }
+    Copy-PackageNotices $package $library[0].Split('/')[1] ($package -ne 'Microsoft.Win32.SystemEvents')
+}
+$runtimeConfig = Get-Content -LiteralPath (Join-Path $publishRoot 'ModernTubeDownloader.runtimeconfig.json') -Raw | ConvertFrom-Json
+$runtime = @($runtimeConfig.runtimeOptions.includedFrameworks | Where-Object name -eq 'Microsoft.NETCore.App')
+if ($runtime.Count -ne 1) { throw 'Cannot identify the self-contained .NET runtime version.' }
+Copy-PackageNotices 'Microsoft.NETCore.App.Runtime.win-x64' $runtime[0].version
+$aspNetRuntime = @($runtimeConfig.runtimeOptions.includedFrameworks | Where-Object name -eq 'Microsoft.AspNetCore.App')
+if ($aspNetRuntime.Count -ne 1) { throw 'Cannot identify the self-contained ASP.NET Core runtime version.' }
+Copy-PackageNotices 'Microsoft.AspNetCore.App.Runtime.win-x64' $aspNetRuntime[0].version
 
 $forbiddenFiles = Get-ChildItem -LiteralPath $releaseRoot -Recurse -File | Where-Object {
-    $_.Extension -eq '.pdb' -or
+    $_.Extension -in @('.pdb', '.log', '.trx', '.mp4', '.webm', '.mkv', '.user', '.suo') -or
     $_.Name -like '*FakeTool*' -or
+    $_.Name -like 'ModernTubeDownloader.Tests*' -or
+    $_.Name -like 'ModernFormsNext.Automation*' -or
     $_.Name -like 'ModernFormsNext.WindowKit.Backend.Tools.MicroCom*' -or
-    $_.Name -in @('yt-dlp.exe', 'ffmpeg.exe', 'ffprobe.exe')
+    $_.Name -in @('yt-dlp.exe', 'ffmpeg.exe', 'ffprobe.exe', 'deno.exe', 'settings.json', 'queue.json', 'history.json', 'cookies.txt')
 }
 if ($forbiddenFiles) {
     throw "Release folder contains forbidden files: $($forbiddenFiles.FullName -join ', ')"

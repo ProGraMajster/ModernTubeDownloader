@@ -5,6 +5,7 @@ using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Utilities;
+using SkiaSharp;
 
 namespace ModernTubeDownloader.Views;
 
@@ -34,7 +35,8 @@ internal sealed class QueueItemCard : UserControl
     private readonly ThumbnailCacheService thumbnails;
     private readonly LocalizationService text;
     private readonly PictureBox thumbnail;
-    private readonly Label thumbnailPlaceholder;
+    private readonly PictureBox thumbnailPlaceholder;
+    private readonly Label positionBadge;
     private readonly Label title;
     private readonly Label subtitle;
     private readonly Label status;
@@ -48,6 +50,8 @@ internal sealed class QueueItemCard : UserControl
     private string? loadedThumbnail;
     private Guid itemId;
     private bool selected;
+    private readonly CancellationTokenSource lifetimeCancellation = new();
+    private bool disposed;
 
     public QueueItemCard(ThumbnailCacheService thumbnails, LocalizationService text)
     {
@@ -62,10 +66,19 @@ internal sealed class QueueItemCard : UserControl
         thumbnail.Style.Border.Radius = 10;
         thumbnail.Style.Border.Width = 0;
         AppUi.BindBackground(thumbnail, AppThemeTokens.SurfaceSecondary);
-        thumbnailPlaceholder = AppUi.Heading("MTD", 12f);
+        thumbnailPlaceholder = new PictureBox { Image = AppBranding.Icon, SizeMode = PictureBoxSizeMode.Zoom, Padding = new Padding(20) };
         thumbnailPlaceholder.Dock = DockStyle.Fill;
-        thumbnailPlaceholder.TextAlign = ContentAlignment.MiddleCenter;
         thumbnail.Controls.Add(thumbnailPlaceholder);
+        positionBadge = new Label
+        {
+            Visible = false,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Font = new Font("Segoe UI", 10.5f, FontStyle.Bold)
+        };
+        AppUi.BindBackground(positionBadge, AppThemeTokens.NavigationSelected);
+        AppUi.BindForeground(positionBadge, AppThemeTokens.NavigationSelectedText);
+        positionBadge.Style.Border.Radius = 8;
+        positionBadge.Style.Border.Width = 0;
         title = AppUi.Heading(string.Empty, 13.5f);
         subtitle = AppUi.Muted();
         status = AppUi.Muted();
@@ -92,22 +105,39 @@ internal sealed class QueueItemCard : UserControl
         subtitle.Click += SelectCard;
         status.Click += SelectCard;
         thumbnail.Click += SelectCard;
+        positionBadge.Click += SelectCard;
         SizeChanged += CardSizeChanged;
         text.LanguageChanged += LanguageChanged;
-        Controls.AddRange([thumbnail, title, subtitle, status, transfer, progress, primaryAction, secondaryAction, moreAction]);
+        Controls.AddRange([thumbnail, title, subtitle, status, transfer, progress, primaryAction, secondaryAction, moreAction, positionBadge]);
+        positionBadge.BringToFront();
         LayoutControls();
     }
 
     public event EventHandler<QueueItemActionEventArgs>? ActionRequested;
 
+    public void SetQueuePosition(string? position)
+    {
+        positionBadge.Text = position ?? string.Empty;
+        positionBadge.Visible = !string.IsNullOrEmpty(position);
+    }
+
     public void UpdateItem(DownloadQueueItem item, bool isSelected)
     {
         currentItem = item;
         itemId = item.Id;
+        AccessibleAutomationId = $"QueueItem-{item.Id:N}";
+        status.AccessibleAutomationId = $"QueueStatus-{item.Id:N}";
+        positionBadge.AccessibleAutomationId = $"QueuePosition-{item.Id:N}";
+        primaryAction.AccessibleAutomationId = $"QueuePrimaryAction-{item.Id:N}";
+        secondaryAction.AccessibleAutomationId = $"QueueSecondaryAction-{item.Id:N}";
         selected = isSelected;
         title.Text = item.Title;
-        subtitle.Text = $"{item.Channel}  •  {text[$"Quality.{QualityPreset.Find(item.QualityPresetId).Id}"]}";
-        var localizedStatus = text[$"Status.{item.Status}"];
+        subtitle.Text = $"{item.Channel}  •  {text[$"Quality.{QualityPreset.Find(item.QualityPresetId).Id}"]}" +
+            (string.IsNullOrWhiteSpace(item.PlaylistTitle) ? string.Empty : $"  •  {text.Get("Queue.PlaylistPart", item.PlaylistTitle)}") +
+            (item.RequestedRange is { Mode: MediaRangeMode.Custom } ? $"  •  {item.RequestedRange.DisplayText}" : string.Empty);
+        var localizedStatus = item.Status == DownloadStatus.Waiting && item.RetryDelaySeconds > 0
+            ? text.Get("Queue.Detail.RetryWaiting", item.AttemptCount + 1, item.MaximumAttempts, item.RetryDelaySeconds)
+            : text[$"Status.{item.Status}"];
         if (item.Status == DownloadStatus.Completed && item.HasPostProcessingWarnings)
             localizedStatus = $"{localizedStatus}  •  {text["Queue.CompletedWithWarnings"]}";
         status.Text = isSelected
@@ -118,8 +148,9 @@ internal sealed class QueueItemCard : UserControl
         AppUi.BindForeground(status, item.Status switch
         {
             DownloadStatus.Completed => AppThemeTokens.Success,
-            DownloadStatus.Failed or DownloadStatus.Cancelled => AppThemeTokens.Error,
-            DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing => AppThemeTokens.Info,
+            DownloadStatus.Failed or DownloadStatus.Cancelled or DownloadStatus.Partial => AppThemeTokens.Error,
+            DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or
+                DownloadStatus.Finalizing => AppThemeTokens.Info,
             _ => AppThemeTokens.TextSecondary
         });
         ConfigureActions(item);
@@ -139,6 +170,7 @@ internal sealed class QueueItemCard : UserControl
         var compact = innerWidth < 760;
         Height = compact ? 204 : 150;
         thumbnail.SetBounds(18, 18, compact ? 144 : 168, compact ? 81 : 94);
+        positionBadge.SetBounds(thumbnail.Left + 8, thumbnail.Top + 8, 34, 27);
         var infoLeft = thumbnail.Right + 16;
         var actionsWidth = compact ? 0 : 132;
         var actionsLeft = Width - 18 - actionsWidth;
@@ -181,11 +213,15 @@ internal sealed class QueueItemCard : UserControl
     private async Task LoadThumbnailAsync(string? url)
     {
         var expected = url;
-        var image = await thumbnails.GetAsync(url).ConfigureAwait(false);
+        SKBitmap? image;
+        try { image = await thumbnails.GetAsync(url, lifetimeCancellation.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return; }
         if (image is null || !string.Equals(expected, loadedThumbnail, StringComparison.Ordinal))
             return;
         Application.RunOnUIThread(() =>
         {
+            if (disposed || lifetimeCancellation.IsCancellationRequested || !string.Equals(expected, loadedThumbnail, StringComparison.Ordinal))
+                return;
             thumbnail.Image = image;
             thumbnailPlaceholder.Visible = false;
         });
@@ -210,10 +246,10 @@ internal sealed class QueueItemCard : UserControl
         switch (item.Status)
         {
             case DownloadStatus.Queued:
-            case DownloadStatus.Waiting:
                 SetAction(primaryAction, text["Common.Remove"], QueueItemAction.Remove);
                 SetAction(secondaryAction, text["Queue.MoveUp"], QueueItemAction.MoveUp);
                 break;
+            case DownloadStatus.Waiting:
             case DownloadStatus.DownloadingVideo:
             case DownloadStatus.DownloadingAudio:
             case DownloadStatus.Merging:
@@ -223,8 +259,14 @@ internal sealed class QueueItemCard : UserControl
                 break;
             case DownloadStatus.Failed:
             case DownloadStatus.Cancelled:
+            case DownloadStatus.Interrupted:
                 SetAction(primaryAction, text["Common.Retry"], QueueItemAction.Retry);
                 SetAction(secondaryAction, text["Common.Details"], QueueItemAction.Details);
+                break;
+            case DownloadStatus.Partial:
+                SetAction(primaryAction, item.FinalFile is null ? text["Common.Retry"] : text["Common.OpenFile"],
+                    item.FinalFile is null ? QueueItemAction.Retry : QueueItemAction.OpenFile);
+                SetAction(secondaryAction, text["Common.Retry"], QueueItemAction.Retry);
                 break;
             case DownloadStatus.Completed:
                 SetAction(primaryAction, text["Common.OpenFile"], QueueItemAction.OpenFile);
@@ -238,7 +280,7 @@ internal sealed class QueueItemCard : UserControl
         actionsMenu.Items.Clear();
         AddMenuItem(text["Common.Select"], QueueItemAction.Select);
         actionsMenu.Items.Add(new MenuSeparatorItem());
-        if (item.Status is DownloadStatus.Queued or DownloadStatus.Waiting)
+        if (item.Status == DownloadStatus.Queued)
         {
             AddMenuItem(text["Queue.MoveFirst"], QueueItemAction.MoveFirst);
             AddMenuItem(text["Queue.MoveUp"], QueueItemAction.MoveUp);
@@ -247,14 +289,20 @@ internal sealed class QueueItemCard : UserControl
             actionsMenu.Items.Add(new MenuSeparatorItem());
             AddMenuItem(text["Common.Remove"], QueueItemAction.Remove);
         }
-        else if (item.Status is DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing)
+        else if (item.Status is DownloadStatus.Waiting or DownloadStatus.DownloadingVideo or
+                 DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing)
         {
             AddMenuItem(text["Common.Cancel"], QueueItemAction.Cancel);
         }
-        else if (item.Status is DownloadStatus.Failed or DownloadStatus.Cancelled)
+        else if (item.Status is DownloadStatus.Failed or DownloadStatus.Cancelled or DownloadStatus.Interrupted or DownloadStatus.Partial)
         {
             AddMenuItem(text["Common.Retry"], QueueItemAction.Retry);
             AddMenuItem(text["Common.Details"], QueueItemAction.Details);
+            if (item.FinalFile is not null)
+            {
+                AddMenuItem(text["Common.OpenFile"], QueueItemAction.OpenFile);
+                AddMenuItem(text["Common.OpenFolder"], QueueItemAction.OpenFolder);
+            }
             AddMenuItem(text["Common.Remove"], QueueItemAction.Remove);
         }
         else
@@ -307,8 +355,11 @@ internal sealed class QueueItemCard : UserControl
     {
         if (disposing)
         {
+            disposed = true;
+            lifetimeCancellation.Cancel();
             SizeChanged -= CardSizeChanged;
             text.LanguageChanged -= LanguageChanged;
+            lifetimeCancellation.Dispose();
         }
         base.Dispose(disposing);
     }

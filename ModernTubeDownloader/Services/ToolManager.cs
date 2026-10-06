@@ -8,8 +8,10 @@ public sealed class ToolManagerState
     public DateTimeOffset? LastToolUpdateCheck { get; set; }
     public ToolInstallationState? YtDlp { get; set; }
     public ToolInstallationState? Ffmpeg { get; set; }
+    public ToolInstallationState? Deno { get; set; }
     public ToolInstallationState? PendingYtDlp { get; set; }
     public ToolInstallationState? PendingFfmpeg { get; set; }
+    public ToolInstallationState? PendingDeno { get; set; }
 }
 
 public sealed class ToolInstallationState
@@ -25,17 +27,22 @@ public sealed class ToolUsageLease : IAsyncDisposable
 {
     private Func<ValueTask>? release;
 
-    internal ToolUsageLease(ExternalToolKind kind, string executablePath, string? ffprobePath, Func<ValueTask> release)
+    internal ToolUsageLease(ExternalToolKind kind, string executablePath, string? ffprobePath, Func<ValueTask> release,
+        string? version = null, bool managed = false)
     {
         Kind = kind;
         ExecutablePath = executablePath;
         FfprobePath = ffprobePath;
+        Version = version;
+        Managed = managed;
         this.release = release;
     }
 
     public ExternalToolKind Kind { get; }
     public string ExecutablePath { get; }
     public string? FfprobePath { get; }
+    public string? Version { get; }
+    public bool Managed { get; }
 
     public ValueTask DisposeAsync() => Interlocked.Exchange(ref release, null)?.Invoke() ?? ValueTask.CompletedTask;
 }
@@ -57,7 +64,8 @@ public sealed class ToolManager
     private readonly Dictionary<ExternalToolKind, int> usageCounts = new()
     {
         [ExternalToolKind.YtDlp] = 0,
-        [ExternalToolKind.Ffmpeg] = 0
+        [ExternalToolKind.Ffmpeg] = 0,
+        [ExternalToolKind.Deno] = 0
     };
     private ToolManagerState persistedState = new();
     private Task? initializationTask;
@@ -83,7 +91,18 @@ public sealed class ToolManager
 
     public ToolInfo YtDlp { get; private set; } = ToolInfo.Missing(ExternalToolKind.YtDlp, "Preparing yt-dlp.");
     public ToolInfo Ffmpeg { get; private set; } = ToolInfo.Missing(ExternalToolKind.Ffmpeg, "Preparing FFmpeg.");
+    public ToolInfo Deno { get; private set; } = ToolInfo.Missing(ExternalToolKind.Deno, "Preparing the JavaScript runtime.");
     public event EventHandler? Changed;
+
+    public bool CanAnalyze
+    {
+        get { lock (stateLock) return YtDlp.Installed && Deno.Installed; }
+    }
+
+    public bool CanMerge
+    {
+        get { lock (stateLock) return Ffmpeg.Installed; }
+    }
 
     public DownloadEngineStatus EngineStatus
     {
@@ -91,8 +110,13 @@ public sealed class ToolManager
         {
             lock (stateLock)
             {
-                if (YtDlp.Installed && Ffmpeg.Installed) return DownloadEngineStatus.Ready;
-                if (YtDlp.Status == ToolStatus.Failed || Ffmpeg.Status == ToolStatus.Failed) return DownloadEngineStatus.Failed;
+                if (YtDlp.Installed && Deno.Installed)
+                {
+                    if (Ffmpeg.Installed && YtDlp.Status != ToolStatus.Failed && Ffmpeg.Status != ToolStatus.Failed && Deno.Status != ToolStatus.Failed)
+                        return DownloadEngineStatus.Ready;
+                    return DownloadEngineStatus.Degraded;
+                }
+                if (YtDlp.Status == ToolStatus.Failed || Deno.Status == ToolStatus.Failed) return DownloadEngineStatus.Failed;
                 return DownloadEngineStatus.Preparing;
             }
         }
@@ -129,25 +153,42 @@ public sealed class ToolManager
         await Start().WaitAsync(cancellationToken).ConfigureAwait(false);
         ToolInfo ytDlp;
         ToolInfo ffmpeg;
+        ToolInfo deno;
         lock (stateLock)
         {
             ytDlp = YtDlp;
             ffmpeg = Ffmpeg;
+            deno = Deno;
         }
-        if (!ytDlp.Installed || !ffmpeg.Installed)
-            throw new InvalidOperationException(ytDlp.ErrorMessage ?? ffmpeg.ErrorMessage ?? "The download engine is not ready.");
+        if (!ytDlp.Installed || !ffmpeg.Installed || !deno.Installed)
+            throw new InvalidOperationException(ytDlp.ErrorMessage ?? deno.ErrorMessage ?? ffmpeg.ErrorMessage ?? "The download engine is not ready.");
+    }
+
+    public async Task EnsureAnalysisReadyAsync(CancellationToken cancellationToken = default)
+    {
+        await Start().WaitAsync(cancellationToken).ConfigureAwait(false);
+        ToolInfo ytDlp;
+        ToolInfo deno;
+        lock (stateLock)
+        {
+            ytDlp = YtDlp;
+            deno = Deno;
+        }
+        if (!ytDlp.Installed || !deno.Installed)
+            throw new InvalidOperationException(ytDlp.ErrorMessage ?? deno.ErrorMessage ?? "yt-dlp and its JavaScript runtime are not ready.");
     }
 
     public async Task<ToolUsageLease> AcquireAsync(ExternalToolKind kind, CancellationToken cancellationToken = default)
     {
-        await EnsureReadyAsync(cancellationToken).ConfigureAwait(false);
+        await Start().WaitAsync(cancellationToken).ConfigureAwait(false);
         lock (stateLock)
         {
             var tool = GetInfo(kind);
             if (!tool.Installed || string.IsNullOrWhiteSpace(tool.ExecutablePath))
                 throw new InvalidOperationException(tool.ErrorMessage ?? $"{tool.ToolName} is not ready.");
             usageCounts[kind]++;
-            return new ToolUsageLease(kind, tool.ExecutablePath, tool.FfprobePath, () => ReleaseAsync(kind));
+            return new ToolUsageLease(kind, tool.ExecutablePath, tool.FfprobePath, () => ReleaseAsync(kind),
+                tool.InstalledVersion, tool.ManagedByApplication);
         }
     }
 
@@ -161,8 +202,10 @@ public sealed class ToolManager
         {
             await InspectConfiguredToolAsync(ExternalToolKind.YtDlp, cancellationToken).ConfigureAwait(false);
             await InspectConfiguredToolAsync(ExternalToolKind.Ffmpeg, cancellationToken).ConfigureAwait(false);
+            await InspectConfiguredToolAsync(ExternalToolKind.Deno, cancellationToken).ConfigureAwait(false);
             await ProvisionIfMissingAsync(ExternalToolKind.YtDlp, cancellationToken).ConfigureAwait(false);
             await ProvisionIfMissingAsync(ExternalToolKind.Ffmpeg, cancellationToken).ConfigureAwait(false);
+            await ProvisionIfMissingAsync(ExternalToolKind.Deno, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -178,8 +221,10 @@ public sealed class ToolManager
         {
             if (!YtDlp.Installed) await InspectConfiguredToolAsync(ExternalToolKind.YtDlp, cancellationToken).ConfigureAwait(false);
             if (!Ffmpeg.Installed) await InspectConfiguredToolAsync(ExternalToolKind.Ffmpeg, cancellationToken).ConfigureAwait(false);
+            if (!Deno.Installed) await InspectConfiguredToolAsync(ExternalToolKind.Deno, cancellationToken).ConfigureAwait(false);
             await ProvisionIfMissingAsync(ExternalToolKind.YtDlp, cancellationToken).ConfigureAwait(false);
             await ProvisionIfMissingAsync(ExternalToolKind.Ffmpeg, cancellationToken).ConfigureAwait(false);
+            await ProvisionIfMissingAsync(ExternalToolKind.Deno, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -197,6 +242,7 @@ public sealed class ToolManager
                 return;
             await CheckToolForUpdateAsync(ExternalToolKind.YtDlp, cancellationToken).ConfigureAwait(false);
             await CheckToolForUpdateAsync(ExternalToolKind.Ffmpeg, cancellationToken).ConfigureAwait(false);
+            await CheckToolForUpdateAsync(ExternalToolKind.Deno, cancellationToken).ConfigureAwait(false);
             persistedState.LastToolUpdateCheck = utcNow();
             await SaveStateAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -224,8 +270,10 @@ public sealed class ToolManager
             var cancellationToken = lifetimeCancellation.Token;
             await InspectConfiguredToolAsync(ExternalToolKind.YtDlp, cancellationToken).ConfigureAwait(false);
             await InspectConfiguredToolAsync(ExternalToolKind.Ffmpeg, cancellationToken).ConfigureAwait(false);
+            await InspectConfiguredToolAsync(ExternalToolKind.Deno, cancellationToken).ConfigureAwait(false);
             await ProvisionIfMissingAsync(ExternalToolKind.YtDlp, cancellationToken).ConfigureAwait(false);
             await ProvisionIfMissingAsync(ExternalToolKind.Ffmpeg, cancellationToken).ConfigureAwait(false);
+            await ProvisionIfMissingAsync(ExternalToolKind.Deno, cancellationToken).ConfigureAwait(false);
             await SaveStateAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested) { }
@@ -258,6 +306,11 @@ public sealed class ToolManager
             persistedState.Ffmpeg = persistedState.PendingFfmpeg;
             persistedState.PendingFfmpeg = null;
         }
+        if (persistedState.PendingDeno is not null)
+        {
+            persistedState.Deno = persistedState.PendingDeno;
+            persistedState.PendingDeno = null;
+        }
     }
 
     private async Task InspectConfiguredToolAsync(ExternalToolKind kind, CancellationToken cancellationToken)
@@ -267,7 +320,13 @@ public sealed class ToolManager
         {
             try
             {
-                var executable = ResolveExecutable(custom.Executable, kind == ExternalToolKind.YtDlp ? "yt-dlp.exe" : "ffmpeg.exe");
+                var executable = ResolveExecutable(custom.Executable, kind switch
+                {
+                    ExternalToolKind.YtDlp => "yt-dlp.exe",
+                    ExternalToolKind.Ffmpeg => "ffmpeg.exe",
+                    ExternalToolKind.Deno => "deno.exe",
+                    _ => throw new ArgumentOutOfRangeException(nameof(kind))
+                });
                 var ffprobe = kind == ExternalToolKind.Ffmpeg ? ResolveCustomFfprobe(executable, custom.Ffprobe) : null;
                 var version = await validator.ValidateAsync(kind, executable, ffprobe, cancellationToken).ConfigureAwait(false);
                 SetInfo(new ToolInfo
@@ -531,7 +590,9 @@ public sealed class ToolManager
     private (bool Enabled, string? Executable, string? Ffprobe) GetCustomConfiguration(ExternalToolKind kind) => kind switch
     {
         ExternalToolKind.YtDlp => (settings.Current.UseCustomYtDlp, settings.Current.CustomYtDlpPath, null),
-        _ => (settings.Current.UseCustomFfmpeg, settings.Current.CustomFfmpegPath, settings.Current.CustomFfprobePath)
+        ExternalToolKind.Ffmpeg => (settings.Current.UseCustomFfmpeg, settings.Current.CustomFfmpegPath, settings.Current.CustomFfprobePath),
+        ExternalToolKind.Deno => (settings.Current.UseCustomDeno, settings.Current.CustomDenoPath, null),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
     private static string ResolveExecutable(string? configured, string fileName)
@@ -569,7 +630,13 @@ public sealed class ToolManager
 
     private ToolInfo GetInfo(ExternalToolKind kind)
     {
-        lock (stateLock) return kind == ExternalToolKind.YtDlp ? YtDlp : Ffmpeg;
+        lock (stateLock) return kind switch
+        {
+            ExternalToolKind.YtDlp => YtDlp,
+            ExternalToolKind.Ffmpeg => Ffmpeg,
+            ExternalToolKind.Deno => Deno,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
     }
 
     private void SetInfo(ToolInfo info)
@@ -577,14 +644,21 @@ public sealed class ToolManager
         lock (stateLock)
         {
             if (info.Kind == ExternalToolKind.YtDlp) YtDlp = info;
-            else Ffmpeg = info;
+            else if (info.Kind == ExternalToolKind.Ffmpeg) Ffmpeg = info;
+            else Deno = info;
         }
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
     private ToolInstallationState? GetInstallation(ExternalToolKind kind)
     {
-        lock (stateLock) return kind == ExternalToolKind.YtDlp ? persistedState.YtDlp : persistedState.Ffmpeg;
+        lock (stateLock) return kind switch
+        {
+            ExternalToolKind.YtDlp => persistedState.YtDlp,
+            ExternalToolKind.Ffmpeg => persistedState.Ffmpeg,
+            ExternalToolKind.Deno => persistedState.Deno,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
     }
 
     private void SetInstallation(ExternalToolKind kind, ToolInstallationState? value)
@@ -595,19 +669,33 @@ public sealed class ToolManager
     private void SetInstallationUnsafe(ExternalToolKind kind, ToolInstallationState? value)
     {
         if (kind == ExternalToolKind.YtDlp) persistedState.YtDlp = value;
-        else persistedState.Ffmpeg = value;
+        else if (kind == ExternalToolKind.Ffmpeg) persistedState.Ffmpeg = value;
+        else persistedState.Deno = value;
     }
 
     private ToolInstallationState? GetPendingInstallationUnsafe(ExternalToolKind kind) =>
-        kind == ExternalToolKind.YtDlp ? persistedState.PendingYtDlp : persistedState.PendingFfmpeg;
+        kind switch
+        {
+            ExternalToolKind.YtDlp => persistedState.PendingYtDlp,
+            ExternalToolKind.Ffmpeg => persistedState.PendingFfmpeg,
+            ExternalToolKind.Deno => persistedState.PendingDeno,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
 
     private void SetPendingInstallationUnsafe(ExternalToolKind kind, ToolInstallationState? value)
     {
         if (kind == ExternalToolKind.YtDlp) persistedState.PendingYtDlp = value;
-        else persistedState.PendingFfmpeg = value;
+        else if (kind == ExternalToolKind.Ffmpeg) persistedState.PendingFfmpeg = value;
+        else persistedState.PendingDeno = value;
     }
 
-    private static string ToolName(ExternalToolKind kind) => kind == ExternalToolKind.YtDlp ? "yt-dlp" : "FFmpeg";
+    private static string ToolName(ExternalToolKind kind) => kind switch
+    {
+        ExternalToolKind.YtDlp => "yt-dlp",
+        ExternalToolKind.Ffmpeg => "FFmpeg",
+        ExternalToolKind.Deno => "Deno",
+        _ => kind.ToString()
+    };
 
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
     {

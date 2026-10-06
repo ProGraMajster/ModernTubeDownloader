@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="mtd-popup">
+  <header><img src="../assets/icon32.png" alt=""><strong>ModernTubeDownloader</strong></header>
+  <p id="page" class="page"></p>
+  <label class="quality-label" for="quality">Jakość</label>
+  <select id="quality">
+    <option value="best">Najlepsza dostępna</option>
+    <option value="2160">2160p / 4K</option>
+    <option value="1440">1440p</option>
+    <option value="1080">1080p</option>
+    <option value="720">720p</option>
+    <option value="480">480p</option>
+    <option value="360">360p</option>
+    <option value="audio">Tylko dźwięk</option>
+  </select>
+  <p class="option">Jakość oznacza „do”. Aplikacja wybierze najbliższą dostępną niższą jakość.</p>
+  <a id="open" class="secondary-action" href="#">Otwórz w aplikacji</a>
+  <a id="launch" href="#">Dodaj do kolejki</a>
+  <p id="status" role="status"></p>
+  <script src="shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

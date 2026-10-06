@@ -1,8 +1,10 @@
 using ModernFormsNext;
+using ModernFormsNext.Accessibility;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Localization;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Theming;
+using ModernTubeDownloader.Services;
 
 namespace ModernTubeDownloader.Views;
 
@@ -18,10 +20,11 @@ internal sealed class VideoDetailsForm : Form
         ArgumentNullException.ThrowIfNull(text);
         this.metadata = metadata;
         this.text = text;
+        AccessibilityObject.AutomationId = "DetailsWindow";
         AppBranding.Apply(this);
         Size = new System.Drawing.Size(980, 740);
         MinimumSize = new System.Drawing.Size(760, 540);
-        tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Padding(12) };
+        tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Padding(12), AccessibleAutomationId = "DetailsTabs" };
         AppUi.Surface(tabs);
         Controls.Add(tabs);
         text.LanguageChanged += LanguageChanged;
@@ -32,16 +35,27 @@ internal sealed class VideoDetailsForm : Form
     {
         Text = text.Get("Details.WindowTitle", DisplayValue(metadata.Title, text["Details.Untitled"]));
         tabs.TabPages.Clear();
-        AddTextTab(text["Details.Overview"], BuildOverview());
-        AddTextTab(text["Details.Metadata"], BuildMetadata());
-        AddTextTab(text["Details.Formats"], BuildFormats());
-        AddTextTab(text["Details.Subtitles"], BuildSubtitles());
-        AddTextTab(text["Details.Chapters"], BuildChapters());
+        AddTextTab(text["Details.Overview"], "DetailsOverviewContent", BuildOverview());
+        AddTextTab(text["Sources.Source"], "DetailsSourceContent", SourcePresentation.Details(metadata, text));
+        AddTextTab(text["Details.Metadata"], "DetailsMetadataContent", BuildMetadata());
+        AddTextTab(text["Details.Formats"], "DetailsFormatsContent", BuildFormats());
+        AddTextTab(text["Details.Subtitles"], "DetailsSubtitlesContent", BuildSubtitles());
+        AddTextTab(text["Details.Chapters"], "DetailsChaptersContent", BuildChapters());
+        // These are MFN's existing logical TabItem peers, not a parallel automation tree.
+        var ids = new[] { "DetailsOverviewTab", "DetailsSourceTab", "DetailsMetadataTab", "DetailsFormatsTab", "DetailsSubtitlesTab", "DetailsChaptersTab" };
+        var accessible = tabs.AccessibilityObject;
+        var index = 0;
+        for (var child = 0; child < accessible.GetChildCount() && index < ids.Length; child++)
+        {
+            if (accessible.GetChild(child) is { ControlType: AccessibleControlType.TabItem } peer)
+                peer.AutomationId = ids[index++];
+        }
     }
 
-    private void AddTextTab(string title, string value)
+    private void AddTextTab(string title, string automationId, string value)
     {
         var page = tabs.TabPages.Add(title);
+        page.AccessibleAutomationId = automationId;
         AppUi.Surface(page);
         var content = new TextBox
         {
@@ -53,6 +67,7 @@ internal sealed class VideoDetailsForm : Form
             TextAlign = ContentAlignment.TopLeft,
             ScrollBars = ScrollBars.Vertical
         };
+        content.AccessibleAutomationId = automationId + "Text";
         AppUi.Input(content);
         page.Controls.Add(content);
     }

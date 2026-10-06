@@ -31,12 +31,14 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
         var standardOutput = new ConcurrentQueue<string>();
         var standardError = new ConcurrentQueue<string>();
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        WindowsProcessJob? processJob = null;
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
             if (!process.Start())
                 throw new ExternalProcessException($"Could not start {Path.GetFileName(request.FileName)}.");
+            processJob = WindowsProcessJob.TryAssign(process, logger);
             process.StandardInput.Close();
         }
         catch (Exception ex) when (ex is not ExternalProcessException)
@@ -51,10 +53,16 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
         try
         {
             await process.WaitForExitAsync().ConfigureAwait(false);
+            // A tool can exit while a descendant still owns its redirected
+            // pipes. Closing the job terminates descendants and lets both
+            // line readers reach EOF, including after an external tool kill.
+            processJob?.Dispose();
+            processJob = null;
             await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
         }
         finally
         {
+            processJob?.Dispose();
             stopwatch.Stop();
         }
 
@@ -64,12 +72,21 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
         return result;
     }
 
-    private static async Task ReadLinesAsync(StreamReader reader, ConcurrentQueue<string> target, Action<string>? callback)
+    private async Task ReadLinesAsync(StreamReader reader, ConcurrentQueue<string> target, Action<string>? callback)
     {
+        var callbackFailureLogged = false;
         while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
         {
             target.Enqueue(line);
-            try { callback?.Invoke(line); } catch { }
+            try { callback?.Invoke(line); }
+            catch (Exception ex)
+            {
+                if (!callbackFailureLogged)
+                {
+                    callbackFailureLogged = true;
+                    logger.Error("A process output callback failed; output draining will continue.", ex);
+                }
+            }
         }
     }
 
@@ -88,21 +105,28 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
     {
         var source = arguments.ToArray();
         var redacted = new List<string>(source.Length);
-        var redactNext = false;
+        string? redactNext = null;
 
         foreach (var argument in source)
         {
-            if (redactNext)
+            if (redactNext is not null)
             {
-                redacted.Add("<redacted>");
-                redactNext = false;
+                redacted.Add(redactNext);
+                redactNext = null;
                 continue;
             }
 
-            if (argument is "--username" or "--password" or "--cookies" or "--cookies-from-browser" or "--netrc-location")
+            if (argument is "--username" or "--password" or "--cookies-from-browser" or "--netrc-location")
             {
                 redacted.Add(argument);
-                redactNext = true;
+                redactNext = "<redacted>";
+                continue;
+            }
+
+            if (argument == "--cookies")
+            {
+                redacted.Add(argument);
+                redactNext = "<cookie-file>";
                 continue;
             }
 
@@ -123,6 +147,7 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
     private static bool ContainsSensitiveInlineValue(string value) =>
         value.Contains("authorization:", StringComparison.OrdinalIgnoreCase) ||
         value.Contains("cookie:", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("username=", StringComparison.OrdinalIgnoreCase) ||
         value.Contains("password=", StringComparison.OrdinalIgnoreCase) ||
         value.Contains("token=", StringComparison.OrdinalIgnoreCase);
 }

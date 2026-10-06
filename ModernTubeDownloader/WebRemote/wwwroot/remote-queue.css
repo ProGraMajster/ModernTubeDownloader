@@ -1,0 +1,9 @@
+.countdown{margin:12px 0 4px;color:#87c7ff;font-size:.88rem}
+.optionToggle{display:flex;align-items:center;gap:10px;cursor:pointer}
+.optionToggle input[type=checkbox]{width:18px;height:18px;min-height:18px;flex:0 0 18px;margin:0;padding:0;border-radius:4px;accent-color:#1676e4}
+.completedSection{border-top:1px solid #293b58;margin-top:12px;padding-top:12px}
+.completedSection summary{cursor:pointer;color:#adbfda;font-weight:650}
+.queueItem.compact{display:block;padding:10px 0}
+.queueItem.compact .actions{margin-top:4px}
+.queueItem.compact .actions button{min-height:30px}
+@media(prefers-color-scheme:light){.countdown{color:#155caa}.completedSection{border-color:#e2e9f2}.completedSection summary{color:#526783}}

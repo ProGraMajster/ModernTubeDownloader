@@ -28,6 +28,10 @@ public sealed record FormatSelection(
     bool AudioOnly,
     bool RequiresMerge)
 {
+    // Missing extractor codec fields are not codec facts. Such a direct-media
+    // selection must be inspected locally before it can become a final output.
+    public bool RequiresStreamProbe { get; init; }
+
     public IEnumerable<string> FormatIds
     {
         get

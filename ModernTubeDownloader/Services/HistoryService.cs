@@ -21,11 +21,11 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
     {
         try
         {
-            var loaded = await AtomicJsonFile.ReadAsync<List<DownloadHistoryEntry>>(paths.HistoryFile, cancellationToken).ConfigureAwait(false) ?? [];
+            var loaded = await AtomicJsonFile.ReadAsync<List<DownloadHistoryEntry?>>(paths.HistoryFile, cancellationToken).ConfigureAwait(false) ?? [];
             lock (sync)
             {
                 entries.Clear();
-                entries.AddRange(loaded);
+                entries.AddRange(loaded.OfType<DownloadHistoryEntry>().Select(Normalize));
             }
         }
         catch (Exception ex)
@@ -34,11 +34,26 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
         }
     }
 
+    private static DownloadHistoryEntry Normalize(DownloadHistoryEntry entry)
+    {
+        return entry with
+        {
+            Title = entry.Title ?? string.Empty,
+            SourceUrl = entry.SourceUrl ?? string.Empty,
+            VideoId = entry.VideoId ?? string.Empty,
+            Channel = entry.Channel ?? string.Empty,
+            Quality = entry.Quality ?? string.Empty,
+            FinalPath = entry.FinalPath ?? string.Empty,
+            Status = entry.Status ?? string.Empty
+        };
+    }
+
     public async Task AddAsync(DownloadHistoryEntry entry, CancellationToken cancellationToken = default)
     {
         lock (sync)
         {
-            entries.RemoveAll(existing => existing.QueueItemId == entry.QueueItemId);
+            entries.RemoveAll(existing => existing.QueueItemId == entry.QueueItemId &&
+                existing.LivePartIndex == entry.LivePartIndex);
             entries.Add(entry);
         }
         await SaveAsync(cancellationToken).ConfigureAwait(false);

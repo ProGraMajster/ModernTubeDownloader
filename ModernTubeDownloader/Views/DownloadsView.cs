@@ -1,32 +1,44 @@
 using System.Globalization;
 using ModernFormsNext;
 using ModernFormsNext.Animations;
+using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Localization;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Utilities;
+using SkiaSharp;
 
 namespace ModernTubeDownloader.Views;
 
 internal sealed class DownloadsView : UserControl
 {
+#if DEBUG
+    internal Func<Form, IDisposable?>? RegisterDetailsForAutomation { get; set; }
+    internal Func<Form, IDisposable?>? RegisterAdvancedForAutomation { get; set; }
+#endif
+    public event EventHandler<LiveNavigationRequest>? LiveRequested;
+    public event EventHandler? SupportedSourcesRequested;
+    private readonly Button supportedSourcesButton;
+    private readonly Label sourceSummary;
+
     private enum PreviewState
     {
         Empty,
         Analyzing,
         Analyzed,
+        PlaylistAnalyzed,
         Failed
     }
 
     private const int EmptyPreviewHeight = 126;
     private const int AnalyzingPreviewHeight = 140;
     private const int FailedPreviewHeight = 154;
-    private const int AnalyzedPreviewHeight = 178;
+    private const int AnalyzedPreviewHeight = 218;
     private const int CompactEmptyPreviewHeight = 116;
     private const int CompactAnalyzingPreviewHeight = 130;
     private const int CompactFailedPreviewHeight = 144;
-    private const int CompactAnalyzedPreviewHeight = 170;
+    private const int CompactAnalyzedPreviewHeight = 210;
 
     private readonly AppServices services;
     private readonly LocalizationService text;
@@ -44,20 +56,28 @@ internal sealed class DownloadsView : UserControl
     private readonly ToolTip pasteToolTip = new() { InitialDelay = 350, AutoPopDelay = 5000 };
     private readonly Button analyzeButton;
     private readonly Panel previewPanel;
+    private readonly PlaylistPreviewControl playlistPreview;
     private readonly Panel previewPlaceholder;
     private readonly AppVectorIcon previewIcon;
-    private readonly Label previewPlaceholderText;
     private readonly PictureBox previewImage;
     private readonly Label previewTitle;
     private readonly Label previewFacts;
     private readonly Label qualityLabel;
+    private readonly Label containerLabel;
     private readonly Label feedback;
     private readonly ComboBox quality;
+    private readonly ComboBox container;
+    private readonly MediaRangeEditor rangeEditor;
+    private readonly Label rangeHint;
     private readonly Button addButton;
     private readonly Button detailsButton;
+    private readonly Button advancedButton;
+    private readonly Button clearPreviewButton;
     private readonly ProgressBar analysisProgress;
     private readonly Panel queueToolbar;
     private readonly Label queueTitle;
+    private readonly Label admissionCountdown;
+    private readonly ModernFormsNext.Timer admissionCountdownTimer;
     private readonly Button pauseButton;
     private readonly Button moreButton;
     private readonly ContextMenu queueMenu = new();
@@ -69,10 +89,14 @@ internal sealed class DownloadsView : UserControl
     private readonly Label queueEmptyBody;
     private readonly Dictionary<Guid, QueueItemCard> cards = [];
     private VideoMetadata? analyzedMetadata;
+    private SubtitleOptions currentSubtitles = new();
+    private SponsorBlockOptions currentSponsorBlock = new();
     private CancellationTokenSource? analyzeCancellation;
     private Guid? selectedItemId;
     private PreviewState previewState;
     private bool queueBuilt;
+    private readonly CancellationTokenSource lifetimeCancellation = new();
+    private bool disposed;
 
     public DownloadsView(AppServices services)
     {
@@ -102,16 +126,22 @@ internal sealed class DownloadsView : UserControl
         urlPanel = new Panel();
         AppUi.Card(urlPanel);
         urlLabel = AppUi.Muted();
+        supportedSourcesButton = new Button { AccessibleAutomationId = "SupportedSourcesButton" };
+        AppUi.Secondary(supportedSourcesButton);
+        supportedSourcesButton.Click += (_, _) => SupportedSourcesRequested?.Invoke(this, EventArgs.Empty);
+        sourceSummary = AppUi.Muted();
+        sourceSummary.AccessibleAutomationId = "AnalyzedSourceSummary";
         urlInput = new TextBox
         {
+            AccessibleAutomationId = "DownloadUrlInput",
             Height = 48,
             Padding = new Padding(14, 0, 14, 0),
             TextAlign = ContentAlignment.MiddleLeft
         };
         AppUi.Input(urlInput);
         urlInput.Font = new Font("Segoe UI", 12.5f);
-        pasteButton = new Button { Height = 48, Width = 48 };
-        analyzeButton = new Button { Height = 48 };
+        pasteButton = new Button { Height = 48, Width = 48, AccessibleAutomationId = "PasteButton" };
+        analyzeButton = new Button { Height = 48, Enabled = false, AccessibleAutomationId = "AnalyzeButton" };
         AppUi.Secondary(pasteButton);
         AppUi.Primary(analyzeButton);
         pasteIcon = new AppVectorIcon(AppIconKind.Clipboard, 24, AppThemeTokens.TextPrimary)
@@ -124,16 +154,15 @@ internal sealed class DownloadsView : UserControl
         pasteButton.Click += PasteClicked;
         analyzeButton.Click += AnalyzeClicked;
         urlInput.TextChanged += UrlChanged;
-        urlPanel.Controls.AddRange([urlLabel, urlInput, pasteButton, analyzeButton]);
+        urlPanel.Controls.AddRange([urlLabel, urlInput, pasteButton, analyzeButton, supportedSourcesButton]);
 
-        previewPanel = new Panel();
+        previewPanel = new Panel { AccessibleAutomationId = "PreviewCard" };
+        previewPanel.Controls.Add(sourceSummary);
         AppUi.Card(previewPanel);
         previewPlaceholder = new Panel();
         AppUi.Card(previewPlaceholder, secondary: true);
         previewIcon = new AppVectorIcon(AppIconKind.Download, 30, AppThemeTokens.TextSecondary);
-        previewPlaceholderText = AppUi.Heading("URL", 11.5f);
-        previewPlaceholderText.TextAlign = ContentAlignment.MiddleCenter;
-        previewPlaceholder.Controls.AddRange([previewIcon, previewPlaceholderText]);
+        previewPlaceholder.Controls.Add(previewIcon);
         previewImage = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom, Visible = false };
         previewImage.Style.Border.Radius = 12;
         previewImage.Style.Border.Width = 0;
@@ -143,16 +172,29 @@ internal sealed class DownloadsView : UserControl
         previewFacts = AppUi.Muted();
         previewFacts.Multiline = true;
         qualityLabel = AppUi.Muted();
-        quality = new ComboBox { Enabled = false };
+        quality = new ComboBox { Enabled = false, AccessibleAutomationId = "QualitySelector" };
         AppUi.Input(quality);
-        addButton = new Button { Enabled = false };
-        detailsButton = new Button { Enabled = false };
+        containerLabel = AppUi.Muted();
+        container = new ComboBox { Enabled = false, AccessibleAutomationId = "ContainerSelector" };
+        AppUi.Input(container);
+        container.SelectedIndexChanged += ContainerChanged;
+        rangeEditor = new MediaRangeEditor(text, "Video");
+        rangeEditor.ModeChanged += (_, _) => UpdateLayout();
+        rangeHint = AppUi.Muted();
+        rangeHint.AccessibleAutomationId = "VideoRangeKeyframeHint";
+        addButton = new Button { Enabled = false, AccessibleAutomationId = "AddToQueueButton" };
+        detailsButton = new Button { Enabled = false, AccessibleAutomationId = "DetailsButton" };
+        advancedButton = new Button { Enabled = false, AccessibleAutomationId = "AdvancedOptionsButton" };
         AppUi.Primary(addButton);
         AppUi.Secondary(detailsButton);
+        AppUi.Secondary(advancedButton);
+        clearPreviewButton = new Button { Text = "×", Visible = false, AccessibleAutomationId = "ClearAnalyzedPreviewButton" };
         feedback = AppUi.Muted();
         analysisProgress = new ProgressBar { Minimum = 0, Maximum = 100, Value = 45, Visible = false };
         addButton.Click += AddClicked;
         detailsButton.Click += DetailsClicked;
+        advancedButton.Click += AdvancedClicked;
+        clearPreviewButton.Click += (_, _) => ClearAnalyzedPreview();
         previewPanel.Controls.AddRange([
             previewPlaceholder,
             previewImage,
@@ -160,16 +202,29 @@ internal sealed class DownloadsView : UserControl
             previewFacts,
             qualityLabel,
             quality,
+            containerLabel,
+            container,
+            rangeEditor,
+            rangeHint,
             addButton,
             detailsButton,
+            advancedButton,
+            clearPreviewButton,
             feedback,
             analysisProgress]);
+
+        playlistPreview = new PlaylistPreviewControl(text) { Visible = false };
+        playlistPreview.AddRequested += PlaylistAddRequested;
+        playlistPreview.AdvancedOptionsRequested += AdvancedClicked;
 
         queueToolbar = new Panel();
         AppUi.BindBackground(queueToolbar);
         queueTitle = AppUi.Heading(string.Empty, 16.5f);
-        pauseButton = new Button();
-        moreButton = new Button { Text = "…", Width = 44 };
+        admissionCountdown = AppUi.Muted();
+        admissionCountdown.AccessibleAutomationId = "QueueAdmissionCountdown";
+        admissionCountdown.Visible = false;
+        pauseButton = new Button { AccessibleAutomationId = "QueuePauseButton" };
+        moreButton = new Button { Text = "…", Width = 44, AccessibleAutomationId = "QueueMenuButton" };
         AppUi.Secondary(pauseButton);
         AppUi.Secondary(moreButton);
         pauseButton.Click += (_, _) => services.Queue.SetPaused(!services.Queue.IsPaused);
@@ -177,12 +232,19 @@ internal sealed class DownloadsView : UserControl
             () => queueMenu.Show(
                 moreButton,
                 moreButton.PointToScreen(new System.Drawing.Point(0, moreButton.Height + 4))));
-        queueToolbar.Controls.AddRange([queueTitle, pauseButton, moreButton]);
+        queueToolbar.Controls.AddRange([queueTitle, admissionCountdown, pauseButton, moreButton]);
+        admissionCountdownTimer = new ModernFormsNext.Timer { Interval = 1000 };
+        admissionCountdownTimer.Tick += (_, _) =>
+        {
+            UpdateAdmissionCountdown();
+        };
+        admissionCountdownTimer.Start();
 
         queueArea = new Panel();
         AppUi.BindBackground(queueArea);
-        queueHost = new FlowLayoutPanel
+        queueHost = new AppScrollFlowLayoutPanel
         {
+            AccessibleAutomationId = "QueueList",
             Dock = DockStyle.Fill,
             AutoScroll = true,
             FlowDirection = FlowDirection.TopDown,
@@ -203,10 +265,11 @@ internal sealed class DownloadsView : UserControl
         queueArea.Controls.Add(queueHost);
         queueArea.Controls.Add(queueEmpty);
 
-        Controls.AddRange([header, urlPanel, previewPanel, queueToolbar, queueArea]);
+        Controls.AddRange([header, urlPanel, previewPanel, playlistPreview, queueToolbar, queueArea]);
         SizeChanged += ViewSizeChanged;
         text.LanguageChanged += LanguageChanged;
         services.Queue.Changed += QueueChanged;
+        services.Settings.Changed += SettingsChanged;
         services.Tools.Changed += ToolStatusChanged;
         ApplyLocalization();
         SetPreviewState(PreviewState.Empty);
@@ -233,7 +296,8 @@ internal sealed class DownloadsView : UserControl
 
         var sectionGap = compactHeight ? 4 : 8;
         urlPanel.SetBounds(page, header.Bottom + sectionGap, width, compactHeight ? 96 : 108);
-        urlLabel.SetBounds(22, compactHeight ? 8 : 12, width - 44, 24);
+        urlLabel.SetBounds(22, compactHeight ? 8 : 12, width - 310, 24);
+        supportedSourcesButton.SetBounds(width - 276, compactHeight ? 7 : 11, 254, 28);
         var analyzeWidth = width < 760 ? 112 : 136;
         var inputTop = compactHeight ? 38 : 48;
         const int inputHeight = 48;
@@ -244,38 +308,48 @@ internal sealed class DownloadsView : UserControl
         var previewTop = urlPanel.Bottom + gap;
         var previewHeight = GetPreviewHeight(compactHeight);
         previewPanel.SetBounds(page, previewTop, width, previewHeight);
+        clearPreviewButton.SetBounds(width - 42, 10, 30, 30);
+        playlistPreview.SetBounds(page, previewTop, width, previewHeight);
         var analyzed = previewState == PreviewState.Analyzed;
-        var thumbnailWidth = analyzed
+        var mediaPreview = analyzed;
+        rangeHint.Visible = analyzed && rangeEditor.IsCustom;
+        var thumbnailWidth = mediaPreview
             ? Math.Clamp((int)Math.Round(width * 0.18d), 176, 216)
             : compactHeight ? 96 : 112;
-        var thumbnailHeight = analyzed
+        var thumbnailHeight = mediaPreview
             ? (int)Math.Round(thumbnailWidth * 9d / 16d)
             : compactHeight ? 64 : 72;
         var thumbnailTop = Math.Max(12, (previewHeight - thumbnailHeight) / 2);
         previewPlaceholder.SetBounds(22, thumbnailTop, thumbnailWidth, thumbnailHeight);
         previewImage.SetBounds(22, thumbnailTop, thumbnailWidth, thumbnailHeight);
-        var iconGroupHeight = previewIcon.Height + 4 + 22;
         previewIcon.SetBounds(
             (thumbnailWidth - previewIcon.Width) / 2,
-            Math.Max(6, (thumbnailHeight - iconGroupHeight) / 2),
+            Math.Max(6, (thumbnailHeight - previewIcon.Height) / 2),
             previewIcon.Width,
             previewIcon.Height);
-        previewPlaceholderText.SetBounds(8, previewIcon.Bottom + 4, thumbnailWidth - 16, 22);
         var detailsLeft = previewPlaceholder.Right + 20;
         var detailsWidth = width - detailsLeft - 22;
         if (analyzed)
         {
-            previewTitle.SetBounds(detailsLeft, 10, detailsWidth, 38);
-            previewFacts.SetBounds(detailsLeft, 49, detailsWidth, 20);
-            qualityLabel.SetBounds(detailsLeft, 71, 84, 17);
-            feedback.SetBounds(detailsLeft + 92, 71, Math.Max(120, detailsWidth - 92), 17);
-            var comboWidth = Math.Min(300, Math.Max(210, detailsWidth - 24));
-            quality.SetBounds(detailsLeft, 89, comboWidth, 36);
-            var actionTop = previewHeight - 46;
+            sourceSummary.SetBounds(22, Math.Max(6, thumbnailTop - 36), thumbnailWidth, 34);
+            previewTitle.SetBounds(detailsLeft, 9, detailsWidth - 36, 34);
+            previewFacts.SetBounds(detailsLeft, 44, detailsWidth, 20);
+            var fieldGap = 10;
+            var comboWidth = Math.Max(130, (detailsWidth - fieldGap) / 2);
+            qualityLabel.SetBounds(detailsLeft, 64, comboWidth, 15);
+            containerLabel.SetBounds(detailsLeft + comboWidth + fieldGap, 64, comboWidth, 15);
+            quality.SetBounds(detailsLeft, 80, comboWidth, 32);
+            container.SetBounds(quality.Right + fieldGap, 80, comboWidth, 32);
+            rangeEditor.SetBounds(detailsLeft, 118, detailsWidth, 34);
+            var rangeOffset = rangeEditor.IsCustom ? 20 : 0;
+            rangeHint.SetBounds(detailsLeft, 152, detailsWidth, 18);
+            feedback.SetBounds(detailsLeft, (compactHeight ? 148 : 154) + rangeOffset, detailsWidth, 17);
+            var actionTop = (compactHeight ? 168 : 176) + rangeOffset;
             var detailsActionWidth = Math.Min(132, Math.Max(112, detailsWidth / 4));
             var addWidth = Math.Min(184, Math.Max(154, detailsWidth / 3));
-            detailsButton.SetBounds(detailsLeft, actionTop, detailsActionWidth, 36);
-            addButton.SetBounds(detailsButton.Right + 10, actionTop, addWidth, 36);
+            detailsButton.SetBounds(detailsLeft, actionTop, detailsActionWidth, 34);
+            addButton.SetBounds(detailsButton.Right + 10, actionTop, addWidth, 34);
+            advancedButton.SetBounds(22, actionTop, thumbnailWidth, 34);
         }
         else
         {
@@ -290,10 +364,13 @@ internal sealed class DownloadsView : UserControl
             analysisProgress.SetBounds(detailsLeft, previewFacts.Bottom + 8, Math.Max(180, detailsWidth - 12), 10);
         }
 
-        queueToolbar.SetBounds(page, previewPanel.Bottom + gap, width, compactHeight ? 44 : 50);
-        queueTitle.SetBounds(0, compactHeight ? 4 : 7, Math.Max(180, width - 336), 34);
+        queueToolbar.SetBounds(page, previewTop + previewHeight + gap, width, compactHeight ? 44 : 50);
         moreButton.SetBounds(width - 44, compactHeight ? 3 : 5, 44, 40);
         pauseButton.SetBounds(moreButton.Left - 12 - 164, compactHeight ? 3 : 5, 164, 40);
+        var countdownLeft = Math.Max(180, pauseButton.Left - 190);
+        queueTitle.SetBounds(0, compactHeight ? 4 : 7, countdownLeft - 8, 34);
+        admissionCountdown.SetBounds(countdownLeft, compactHeight ? 8 : 11,
+            Math.Max(0, pauseButton.Left - countdownLeft - 8), 28);
 
         var queueTop = queueToolbar.Bottom + 4;
         queueArea.SetBounds(page, queueTop, width, Math.Max(100, ClientSize.Height - queueTop - 16));
@@ -310,11 +387,13 @@ internal sealed class DownloadsView : UserControl
             (PreviewState.Empty, false) => EmptyPreviewHeight,
             (PreviewState.Analyzing, false) => AnalyzingPreviewHeight,
             (PreviewState.Failed, false) => FailedPreviewHeight,
-            (PreviewState.Analyzed, false) => AnalyzedPreviewHeight,
+            (PreviewState.Analyzed, false) => AnalyzedPreviewHeight + (rangeEditor.IsCustom ? 20 : 0),
+            (PreviewState.PlaylistAnalyzed, false) => ClientSize.Width >= 1016 ? 380 : 420,
             (PreviewState.Empty, true) => CompactEmptyPreviewHeight,
             (PreviewState.Analyzing, true) => CompactAnalyzingPreviewHeight,
             (PreviewState.Failed, true) => CompactFailedPreviewHeight,
-            _ => CompactAnalyzedPreviewHeight
+            (PreviewState.PlaylistAnalyzed, true) => ClientSize.Width >= 1016 ? 310 : 350,
+            _ => CompactAnalyzedPreviewHeight + (rangeEditor.IsCustom ? 20 : 0)
         };
 
     private async void PasteClicked(object? sender, EventArgs e)
@@ -323,7 +402,11 @@ internal sealed class DownloadsView : UserControl
         {
             var clipboardText = await Clipboard.GetTextAsync();
             if (!string.IsNullOrWhiteSpace(clipboardText))
+            {
                 urlInput.Text = clipboardText.Trim();
+                if (!YtDlpMetadataService.TryValidateSourceUrl(urlInput.Text, out _, out _))
+                    feedback.Text = text["Downloads.InvalidUrl"];
+            }
         }
         catch (Exception ex)
         {
@@ -339,67 +422,206 @@ internal sealed class DownloadsView : UserControl
             SetPreviewState(PreviewState.Empty);
     }
 
-    private async void AnalyzeClicked(object? sender, EventArgs e)
+    public Task AcceptExternalUrlAsync(string sourceUrl, bool autoAnalyze)
+    {
+        if (!Infrastructure.ExternalMediaRequest.TryValidateSource(sourceUrl, out var normalized))
+            throw new ArgumentException("Unsupported external media URL.", nameof(sourceUrl));
+        urlInput.Text = normalized;
+        return autoAnalyze ? AnalyzeAsync() : Task.CompletedTask;
+    }
+
+    public Task AcceptCheckedSourceAsync(SourceCheckResult request)
+        => AcceptDesktopUrlAsync(request.SourceUrl, request.Playlist is not null);
+
+    internal Task AcceptDesktopUrlAsync(string sourceUrl, bool detectedPlaylist = false)
+    {
+        if (!YtDlpMetadataService.TryValidateSourceUrl(sourceUrl, out var normalized, out _))
+        {
+            feedback.Text = text["Downloads.InvalidUrl"];
+            return Task.CompletedTask;
+        }
+        urlInput.Text = normalized;
+        return AnalyzeAsync(detectedPlaylist);
+    }
+
+    public async Task AcceptExternalRequestAsync(Infrastructure.ExternalMediaRequest request)
+    {
+        if (!Infrastructure.ExternalMediaRequest.TryValidateSource(request.SourceUrl, out var normalized))
+            throw new ArgumentException("Unsupported external media URL.", nameof(request));
+        if (!request.AutoQueue)
+        {
+            await AcceptExternalUrlAsync(normalized, request.AutoAnalyze);
+            if (analyzedMetadata is not null)
+            {
+                SelectContainer(request.RequestedContainer);
+                PopulateAvailableQualities(analyzedMetadata, request.RequestedQualityPresetId);
+            }
+            else if (YtDlpMetadataService.IsPlaylistUrl(normalized))
+                playlistPreview.SetOptions(request.RequestedQualityPresetId, request.RequestedContainer);
+            return;
+        }
+
+        // Quick downloads use a separate analysis path so another browser request cannot
+        // cancel an in-progress request by replacing the manual preview's token.
+        urlInput.Text = normalized;
+        await services.Tools.EnsureAnalysisReadyAsync(lifetimeCancellation.Token);
+        var preset = QualityPreset.Find(request.RequestedQualityPresetId ?? services.Settings.Current.DefaultQualityPresetId);
+        if (YtDlpMetadataService.IsPlaylistUrl(normalized))
+        {
+            if (!request.AutoQueuePlaylist)
+            {
+                await AcceptExternalUrlAsync(normalized, true);
+                return;
+            }
+            var playlist = await services.Metadata.AnalyzePlaylistAsync(normalized, lifetimeCancellation.Token);
+            var selection = new PlaylistSelection(playlist);
+            services.Queue.AddRangeSkippingDuplicates(selection.CreateQueueItems(preset, request.RequestedContainer,
+                subtitles: services.Settings.Current.SubtitleDefaults,
+                sponsorBlock: services.Settings.Current.SponsorBlockDefaults));
+        }
+        else
+        {
+            var metadata = await services.Metadata.AnalyzeAsync(normalized, lifetimeCancellation.Token);
+            var availability = MediaAvailabilityPolicy.Classify(metadata);
+            if (availability is MediaAvailabilityKind.ActiveLive or MediaAvailabilityKind.Upcoming)
+            {
+                LiveRequested?.Invoke(this, new LiveNavigationRequest(normalized, metadata, availability));
+                return;
+            }
+            var formats = FormatSelector.Select(metadata, preset, request.RequestedContainer);
+            services.Queue.AddRangeSkippingDuplicates([
+                DownloadQueueItem.FromMetadata(metadata, preset, formats, request.RequestedContainer,
+                    subtitles: services.Settings.Current.SubtitleDefaults,
+                    sponsorBlock: services.Settings.Current.SponsorBlockDefaults)]);
+        }
+    }
+
+    public void ShowExternalRequestError(Exception? error = null)
+    {
+        SetPreviewState(PreviewState.Failed);
+        feedback.Text = error is null ? text["Error.Generic"]
+            : text[DownloadFailureClassifier.Classify(error).UserMessageKey];
+    }
+
+    private async void AnalyzeClicked(object? sender, EventArgs e) => await AnalyzeAsync();
+
+    private async Task AnalyzeAsync(bool detectedPlaylist = false)
     {
         analyzeCancellation?.Cancel();
-        analyzeCancellation?.Dispose();
-        analyzeCancellation = new CancellationTokenSource();
-        var cancellationToken = analyzeCancellation.Token;
+        var currentAnalysis = new CancellationTokenSource();
+        analyzeCancellation = currentAnalysis;
+        var cancellationToken = currentAnalysis.Token;
+        var sourceUrl = urlInput.Text;
         analyzeButton.Enabled = false;
         analyzedMetadata = null;
         previewImage.Image = null;
+        currentSubtitles = services.Settings.Current.SubtitleDefaults.Copy();
+        currentSponsorBlock = services.Settings.Current.SponsorBlockDefaults.Copy();
         SetPreviewState(PreviewState.Analyzing);
 
         try
         {
-            await services.Tools.EnsureReadyAsync(cancellationToken);
-            analyzedMetadata = await services.Metadata.AnalyzeAsync(urlInput.Text, cancellationToken);
-            PopulateMetadata(analyzedMetadata);
-            SetPreviewState(PreviewState.Analyzed);
-            feedback.Text = text.Get("Downloads.FormatsFound", analyzedMetadata.Formats.Count);
+            await services.Tools.EnsureAnalysisReadyAsync(cancellationToken);
+            if (disposed || !ReferenceEquals(analyzeCancellation, currentAnalysis) || cancellationToken.IsCancellationRequested)
+                return;
+            if (detectedPlaylist || YtDlpMetadataService.IsPlaylistUrl(sourceUrl))
+            {
+                var playlist = await services.Metadata.AnalyzePlaylistAsync(sourceUrl, cancellationToken, detectedPlaylist);
+                if (disposed || !ReferenceEquals(analyzeCancellation, currentAnalysis) || cancellationToken.IsCancellationRequested)
+                    return;
+                playlistPreview.ShowPlaylist(
+                    playlist,
+                    services.Settings.Current.DefaultQualityPresetId,
+                    services.Settings.Current.PreferredVideoContainer);
+                SetPreviewState(PreviewState.PlaylistAnalyzed);
+            }
+            else
+            {
+                analyzedMetadata = await services.Metadata.AnalyzeAsync(sourceUrl, cancellationToken);
+                if (disposed || !ReferenceEquals(analyzeCancellation, currentAnalysis) || cancellationToken.IsCancellationRequested)
+                    return;
+                var availability = MediaAvailabilityPolicy.Classify(analyzedMetadata);
+                if (availability is MediaAvailabilityKind.ActiveLive or MediaAvailabilityKind.Upcoming)
+                {
+                    LiveRequested?.Invoke(this, new LiveNavigationRequest(sourceUrl, analyzedMetadata, availability));
+                    ClearAnalyzedPreview();
+                }
+                else
+                {
+                    SetPreviewState(PreviewState.Analyzed);
+                    PopulateMetadata(analyzedMetadata);
+                    feedback.Text = availability == MediaAvailabilityKind.Ready
+                        ? text.Get("Downloads.FormatsFound", analyzedMetadata.Formats.Count)
+                        : text[DownloadFailureClassifier.Classify(new MediaAvailabilityException(availability)).UserMessageKey];
+                }
+            }
         }
         catch (OperationCanceledException)
         {
-            feedback.Text = text["Downloads.AnalysisCancelled"];
-            SetPreviewState(PreviewState.Empty);
+            if (!disposed && ReferenceEquals(analyzeCancellation, currentAnalysis))
+            {
+                feedback.Text = text["Downloads.AnalysisCancelled"];
+                SetPreviewState(PreviewState.Empty);
+            }
         }
         catch (Exception ex)
         {
             services.Logger.Error("Media analysis failed.", ex);
+            if (disposed || !ReferenceEquals(analyzeCancellation, currentAnalysis)) return;
+            if (DownloadFailureClassifier.Classify(ex).Category == DownloadFailureCategory.Upcoming)
+            {
+                LiveRequested?.Invoke(this, new LiveNavigationRequest(sourceUrl, null, MediaAvailabilityKind.Upcoming));
+                ClearAnalyzedPreview();
+                return;
+            }
             analyzedMetadata = null;
             previewImage.Image = null;
             quality.Items.Clear();
             SetPreviewState(PreviewState.Failed);
+            feedback.Text = text[DownloadFailureClassifier.Classify(ex).UserMessageKey];
         }
         finally
         {
-            analyzeButton.Enabled = YtDlpMetadataService.TryValidateSourceUrl(urlInput.Text, out _, out _);
+            if (!disposed && ReferenceEquals(analyzeCancellation, currentAnalysis))
+            {
+                analyzeCancellation = null;
+                analyzeButton.Enabled = YtDlpMetadataService.TryValidateSourceUrl(urlInput.Text, out _, out _);
+            }
+            currentAnalysis.Dispose();
         }
     }
 
     private void SetPreviewState(PreviewState state)
     {
         var stateChanged = previewState != state;
+        if (state == PreviewState.Analyzing && stateChanged)
+            rangeEditor.Reset();
         previewState = state;
         var analyzed = state == PreviewState.Analyzed;
+        var hasOptions = analyzed;
+        previewPanel.Visible = state != PreviewState.PlaylistAnalyzed;
+        playlistPreview.Visible = state == PreviewState.PlaylistAnalyzed;
         previewImage.Visible = analyzed && previewImage.Image is not null;
+        sourceSummary.Visible = analyzed;
         previewPlaceholder.Visible = !previewImage.Visible;
-        qualityLabel.Visible = analyzed;
-        quality.Visible = analyzed;
-        addButton.Visible = analyzed;
+        qualityLabel.Visible = hasOptions;
+        quality.Visible = hasOptions;
+        containerLabel.Visible = hasOptions;
+        container.Visible = hasOptions;
+        rangeEditor.Visible = analyzed;
+        rangeHint.Visible = analyzed && rangeEditor.IsCustom;
+        addButton.Visible = hasOptions;
         detailsButton.Visible = analyzed;
+        advancedButton.Visible = analyzed;
+        clearPreviewButton.Visible = hasOptions;
         analysisProgress.Visible = state == PreviewState.Analyzing;
-        feedback.Visible = analyzed || state == PreviewState.Failed;
-        quality.Enabled = analyzed && quality.Items.Count > 0;
+        feedback.Visible = hasOptions || state == PreviewState.Failed;
+        quality.Enabled = hasOptions && quality.Items.Count > 0;
+        container.Enabled = hasOptions && container.Items.Count > 0;
         addButton.Enabled = quality.Enabled;
         detailsButton.Enabled = analyzedMetadata is not null;
-        previewPlaceholderText.Text = state switch
-        {
-            PreviewState.Analyzing => "…",
-            PreviewState.Analyzed => "MTD",
-            _ => "URL"
-        };
-
+        advancedButton.Enabled = analyzedMetadata is not null;
+        addButton.Text = text["Downloads.AddToQueue"];
         if (state == PreviewState.Empty)
         {
             previewTitle.Text = text["Downloads.EmptyTitle"];
@@ -419,9 +641,26 @@ internal sealed class DownloadsView : UserControl
             feedback.Text = text["Error.Generic"];
         }
 
+
         UpdateLayout();
         if (stateChanged)
             AnimatePreviewState();
+    }
+
+    private void ClearAnalyzedPreview()
+    {
+        UiCrashDiagnostics.VerifyUiThread("downloads.clear-preview");
+        analyzedMetadata = null;
+        previewImage.Image = null;
+        currentSubtitles = services.Settings.Current.SubtitleDefaults.Copy();
+        currentSponsorBlock = services.Settings.Current.SponsorBlockDefaults.Copy();
+        quality.SelectedIndex = -1;
+        quality.Items.Clear();
+        container.SelectedIndex = -1;
+        container.Items.Clear();
+        rangeEditor.Reset();
+        SetPreviewState(PreviewState.Empty);
+        UiCrashDiagnostics.Record("preview.clear");
     }
 
     private void AnimatePreviewState()
@@ -436,15 +675,60 @@ internal sealed class DownloadsView : UserControl
 
     private void PopulateMetadata(VideoMetadata metadata)
     {
+        sourceSummary.Multiline = true;
+        var sourceFacts = ExtractorIdentityService.Facts(metadata);
+        var sourceName = string.IsNullOrWhiteSpace(sourceFacts.Identity.DisplayName)
+            ? text["Common.NotAvailable"] : sourceFacts.Identity.DisplayName;
+        sourceSummary.Text = $"{text["Sources.Source"]}: {sourceName}" + Environment.NewLine +
+            text[$"Sources.Type.{sourceFacts.Kind}"];
         previewTitle.Text = metadata.Title;
         previewFacts.Text = $"{metadata.DisplayChannel}  •  {FormatDuration(metadata.DurationSeconds)}  •  {FormatViews(metadata.ViewCount)}  •  {FormatDate(metadata.UploadDate)}";
-        var currentPresetId = (quality.SelectedItem as LocalizedOption<QualityPreset>)?.Value.Id
+        PopulateContainers(SelectedContainer());
+        PopulateAvailableQualities(metadata);
+        _ = LoadPreviewThumbnailAsync(metadata.ThumbnailUrl);
+    }
+
+    private void PopulateAvailableQualities(VideoMetadata metadata, string? selectedPresetId = null)
+    {
+        var currentPresetId = selectedPresetId ?? (quality.SelectedItem as LocalizedOption<QualityPreset>)?.Value.Id
             ?? services.Settings.Current.DefaultQualityPresetId;
         quality.Items.Clear();
-        foreach (var preset in FormatSelector.GetAvailablePresets(metadata))
+        foreach (var preset in FormatSelector.GetAvailablePresets(metadata, SelectedContainer()))
             quality.Items.Add(new LocalizedOption<QualityPreset>(preset, text[$"Quality.{preset.Id}"]));
         SelectQuality(currentPresetId);
-        _ = LoadPreviewThumbnailAsync(metadata.ThumbnailUrl);
+        quality.Enabled = quality.Items.Count > 0;
+        addButton.Enabled = quality.Enabled;
+    }
+
+    private void PopulateContainers(PreferredVideoContainer selected)
+    {
+        container.SelectedIndex = -1;
+        container.Items.Clear();
+        foreach (var value in Enum.GetValues<PreferredVideoContainer>())
+            container.Items.Add(new LocalizedOption<PreferredVideoContainer>(value, text[$"Container.{value}"]));
+        SelectContainer(selected);
+    }
+
+    private PreferredVideoContainer SelectedContainer() =>
+        (container.SelectedItem as LocalizedOption<PreferredVideoContainer>)?.Value
+        ?? services.Settings.Current.PreferredVideoContainer;
+
+    private void SelectContainer(PreferredVideoContainer selected)
+    {
+        for (var index = 0; index < container.Items.Count; index++)
+            if (container.Items[index] is LocalizedOption<PreferredVideoContainer> option && option.Value == selected)
+            {
+                container.SelectedIndex = index;
+                return;
+            }
+        if (container.Items.Count > 0)
+            container.SelectedIndex = 0;
+    }
+
+    private void ContainerChanged(object? sender, EventArgs e)
+    {
+        if (analyzedMetadata is not null)
+            PopulateAvailableQualities(analyzedMetadata);
     }
 
     private void SelectQuality(string presetId)
@@ -466,10 +750,14 @@ internal sealed class DownloadsView : UserControl
         if (!services.Settings.Current.DownloadThumbnail)
             return;
         var expectedMetadata = analyzedMetadata;
-        var image = await services.Thumbnails.GetAsync(url).ConfigureAwait(false);
+        SKBitmap? image;
+        try { image = await services.Thumbnails.GetAsync(url, lifetimeCancellation.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return; }
         if (image is not null && ReferenceEquals(expectedMetadata, analyzedMetadata))
             Application.RunOnUIThread(() =>
             {
+                if (disposed || lifetimeCancellation.IsCancellationRequested || !ReferenceEquals(expectedMetadata, analyzedMetadata))
+                    return;
                 previewImage.Image = image;
                 previewImage.Visible = true;
                 previewPlaceholder.Visible = false;
@@ -482,8 +770,28 @@ internal sealed class DownloadsView : UserControl
             return;
         try
         {
-            var selection = FormatSelector.Select(analyzedMetadata, selected.Value);
-            var item = DownloadQueueItem.FromMetadata(analyzedMetadata, selected.Value, selection);
+            if (!rangeEditor.TryGetRange(analyzedMetadata.DurationSeconds,
+                    analyzedMetadata.IsLive == true || analyzedMetadata.LiveStatus == "is_live",
+                    out var requestedRange, out var rangeError))
+            {
+                feedback.Text = text[rangeError!];
+                return;
+            }
+            if (services.Queue.ContainsPendingOrActive(analyzedMetadata.Id, selected.Value.Id, SelectedContainer(),
+                    requestedRange, currentSubtitles, currentSponsorBlock))
+            {
+                feedback.Text = text["Downloads.AlreadyQueued"];
+                return;
+            }
+            var selectedContainer = SelectedContainer();
+            var selection = FormatSelector.Select(analyzedMetadata, selected.Value, selectedContainer);
+            if (!CanQueueWithEnhancements(requestedRange, out var enhancementError))
+            {
+                feedback.Text = enhancementError;
+                return;
+            }
+            var item = DownloadQueueItem.FromMetadata(analyzedMetadata, selected.Value, selection, selectedContainer,
+                requestedRange, currentSubtitles, currentSponsorBlock);
             services.Queue.Add(item);
             selectedItemId = item.Id;
             feedback.Text = text.Get("Downloads.Added", item.Title);
@@ -491,7 +799,37 @@ internal sealed class DownloadsView : UserControl
         catch (Exception ex)
         {
             services.Logger.Error("Adding a queue item failed.", ex);
-            feedback.Text = text["Error.Generic"];
+            feedback.Text = text[DownloadFailureClassifier.Classify(ex).UserMessageKey];
+        }
+    }
+
+    private void PlaylistAddRequested(object? sender, EventArgs e)
+    {
+        if (playlistPreview.Selection is not { } selection) return;
+        try
+        {
+            if (!playlistPreview.TryGetRange(out var requestedRange, out var rangeError))
+            {
+                playlistPreview.SetFeedback(text[rangeError!]);
+                return;
+            }
+            if (!CanQueueWithEnhancements(requestedRange, out var enhancementError))
+            {
+                playlistPreview.SetFeedback(enhancementError);
+                return;
+            }
+            var candidates = selection.CreateQueueItems(playlistPreview.SelectedPreset, playlistPreview.SelectedContainer,
+                requestedRange, currentSubtitles, currentSponsorBlock);
+            var result = services.Queue.AddRangeSkippingDuplicates(candidates);
+            var unavailable = selection.Playlist.Entries.Count(entry => !entry.IsAvailable);
+            playlistPreview.SetFeedback(text.Get("Playlist.AddSummary", result.Added, result.DuplicatesSkipped, unavailable));
+            if (result.Added > 0)
+                selectedItemId = services.Queue.Snapshot().Last().Id;
+        }
+        catch (Exception ex)
+        {
+            services.Logger.Error("Adding selected playlist entries failed.", ex);
+            playlistPreview.SetFeedback(ex is ArgumentException ? text["Range.Error.Duration"] : text["Error.Generic"]);
         }
     }
 
@@ -505,6 +843,9 @@ internal sealed class DownloadsView : UserControl
         try
         {
             using var form = new VideoDetailsForm(metadata, text);
+#if DEBUG
+            using var automationRegistration = RegisterDetailsForAutomation?.Invoke(form);
+#endif
             await form.ShowDialog(owner);
             services.Logger.Info($"Closed video details for id={videoId}.");
         }
@@ -516,11 +857,51 @@ internal sealed class DownloadsView : UserControl
         }
     }
 
+    private async void AdvancedClicked(object? sender, EventArgs e)
+    {
+        if (FindForm() is not { } owner) return;
+        try
+        {
+            using var form = new AdvancedDownloadOptionsForm(text, services.Settings.Current,
+                previewState == PreviewState.Analyzed ? analyzedMetadata : null,
+                currentSubtitles, currentSponsorBlock,
+                previewState == PreviewState.PlaylistAnalyzed ? playlistPreview.SelectedContainer : SelectedContainer());
+#if DEBUG
+            using var automationRegistration = RegisterAdvancedForAutomation?.Invoke(form);
+#endif
+            if (await form.ShowDialog(owner) != DialogResult.OK) return;
+            currentSubtitles = form.Subtitles;
+            currentSponsorBlock = form.SponsorBlock;
+            if (currentSponsorBlock.Mode == SponsorBlockMode.Remove)
+                feedback.Text = text["SponsorBlock.RemoveExperimentalWarning"];
+        }
+        catch (Exception ex)
+        {
+            services.Logger.Error("Opening advanced download options failed.", ex);
+            if (previewState == PreviewState.PlaylistAnalyzed)
+                playlistPreview.SetFeedback(text["Error.Generic"]);
+            else feedback.Text = text["Error.Generic"];
+        }
+    }
+
+    private bool CanQueueWithEnhancements(MediaTimeRange range, out string error)
+    {
+        error = string.Empty;
+        var selectedContainer = previewState == PreviewState.PlaylistAnalyzed
+            ? playlistPreview.SelectedContainer : SelectedContainer();
+        var issue = DownloadOptionCompatibilityValidator.Check(range, currentSubtitles,
+            currentSponsorBlock, selectedContainer);
+        if (issue != DownloadOptionIssue.None)
+            error = text[DownloadOptionCompatibilityValidator.MessageKey(issue)];
+        return error.Length == 0;
+    }
+
     private void QueueChanged(object? sender, QueueChangedEventArgs e)
     {
         Application.RunOnUIThread(() =>
         {
             pauseButton.Text = services.Queue.IsPaused ? text["Queue.Resume"] : text["Queue.Pause"];
+            UpdateAdmissionCountdown();
             if (e.Kind is QueueChangeKind.Collection or QueueChangeKind.Order)
                 BuildQueueCards(e.Kind == QueueChangeKind.Collection ? e.ItemId : null);
             else if (e.ItemId is { } id && cards.TryGetValue(id, out var card) && services.Queue.Find(id) is { } item)
@@ -532,18 +913,35 @@ internal sealed class DownloadsView : UserControl
     private void ToolStatusChanged(object? sender, EventArgs e)
         => Application.RunOnUIThread(UpdateEngineStatus);
 
+    private void SettingsChanged(object? sender, EventArgs e)
+        => Application.RunOnUIThread(() =>
+        {
+            UpdateQueuePositionBadges(services.Queue.Snapshot());
+            UpdateAdmissionCountdown();
+        });
+
+    private void UpdateAdmissionCountdown()
+    {
+        var remaining = services.Processor.RemainingAdmissionDelay;
+        var seconds = remaining is { } delay ? (int)Math.Ceiling(delay.TotalSeconds) : 0;
+        admissionCountdown.Visible = seconds > 0;
+        if (seconds > 0) admissionCountdown.Text = text.Get("Queue.NextDownloadIn", seconds);
+    }
+
     private void UpdateEngineStatus()
     {
         var engine = services.Tools.EngineStatus;
         toolStatus.Text = engine switch
         {
             DownloadEngineStatus.Ready => text["Header.EngineReady"],
+            DownloadEngineStatus.Degraded => text["Header.EngineDegraded"],
             DownloadEngineStatus.Failed => text["Header.EngineFailed"],
             _ => text["Header.EnginePreparing"]
         };
         AppUi.BindBackground(toolStatusDot, engine switch
         {
             DownloadEngineStatus.Ready => AppThemeTokens.Success,
+            DownloadEngineStatus.Degraded => AppThemeTokens.Warning,
             DownloadEngineStatus.Failed => AppThemeTokens.Error,
             _ => AppThemeTokens.Info
         });
@@ -551,30 +949,38 @@ internal sealed class DownloadsView : UserControl
 
     private void BuildQueueCards(Guid? scrollToItemId = null)
     {
+        UiCrashDiagnostics.VerifyUiThread("downloads.queue-rebuild");
+        UiCrashDiagnostics.Record("queue.rebuild.begin", "queueHost", queueHost.Controls.Count);
         var previousIds = cards.Keys.ToHashSet();
-        foreach (var card in cards.Values)
-            card.Dispose();
-        cards.Clear();
-        queueHost.Controls.Clear();
         var items = services.Queue.Snapshot();
         if (selectedItemId is { } selected && items.All(item => item.Id != selected))
             selectedItemId = null;
-        foreach (var item in items)
+        queueHost.SuspendLayout();
+        try
         {
-            var card = new QueueItemCard(services.Thumbnails, text);
-            card.ActionRequested += CardActionRequested;
-            cards[item.Id] = card;
-            queueHost.Controls.Add(card);
-            card.UpdateItem(item, selectedItemId == item.Id);
-            if (queueBuilt && !previousIds.Contains(item.Id))
+            foreach (var card in cards.Values)
+                card.Dispose();
+            cards.Clear();
+            queueHost.Controls.Clear();
+            foreach (var item in items)
             {
-                card.Opacity = 0f;
-                card.TranslationY = 8f;
-                _ = Task.WhenAll(
-                    card.FadeToAsync(1f, 190, Easings.CubicOut),
-                    card.TranslateToAsync(0f, 0f, 190, Easings.CubicOut));
+                var card = new QueueItemCard(services.Thumbnails, text);
+                card.ActionRequested += CardActionRequested;
+                cards[item.Id] = card;
+                queueHost.Controls.Add(card);
+                card.UpdateItem(item, selectedItemId == item.Id);
+                if (queueBuilt && items.Count <= 40 && !previousIds.Contains(item.Id))
+                {
+                    card.Opacity = 0f;
+                    card.TranslationY = 8f;
+                    _ = Task.WhenAll(
+                        card.FadeToAsync(1f, 190, Easings.CubicOut),
+                        card.TranslateToAsync(0f, 0f, 190, Easings.CubicOut));
+                }
             }
         }
+        finally { queueHost.ResumeLayout(false); }
+        UpdateQueuePositionBadges(items);
         queueBuilt = true;
         queueEmpty.Visible = items.Count == 0;
         queueHost.Visible = items.Count != 0;
@@ -587,6 +993,14 @@ internal sealed class DownloadsView : UserControl
         if (scrollToItemId is { } id && !previousIds.Contains(id) && cards.ContainsKey(id))
             ScrollQueueCardIntoView(id);
         BuildQueueMenu();
+        UiCrashDiagnostics.Record("queue.rebuild.end", "queueHost", queueHost.Controls.Count);
+    }
+
+    private void UpdateQueuePositionBadges(IReadOnlyList<DownloadQueueItem> items)
+    {
+        var positions = QueuePositionPresenter.Build(items, services.Settings.Current.ShowQueuePositionNumbers);
+        foreach (var (id, card) in cards)
+            card.SetQueuePosition(positions.GetValueOrDefault(id));
     }
 
     private void ScrollQueueCardIntoView(Guid itemId)
@@ -617,18 +1031,29 @@ internal sealed class DownloadsView : UserControl
 
     private void BuildQueueMenu()
     {
+        var items = services.Queue.Snapshot();
+        var selectedIndex = selectedItemId is { } id ? Array.FindIndex(items.ToArray(), item => item.Id == id) : -1;
+        var selected = selectedIndex >= 0 ? items[selectedIndex] : null;
+        var movable = selected?.Status is DownloadStatus.Queued or DownloadStatus.Waiting;
+        var removable = selected is not null && selected.Status is not (
+            DownloadStatus.Waiting or DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or
+            DownloadStatus.Merging or DownloadStatus.Finalizing);
+        var cancellable = selected?.Status is DownloadStatus.Waiting or DownloadStatus.DownloadingVideo or
+            DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing;
+        var retryable = selected?.Status is DownloadStatus.Failed or DownloadStatus.Cancelled or
+            DownloadStatus.Partial or DownloadStatus.Interrupted;
         queueMenu.Items.Clear();
-        AddQueueMenu(text["Queue.ClearPending"], () => services.Queue.RemoveAllPending());
+        AddQueueMenu(text["Queue.ClearPending"], () => services.Queue.RemoveAllPending(),
+            items.Any(item => item.Status is DownloadStatus.Queued or DownloadStatus.Waiting));
         queueMenu.Items.Add(new MenuSeparatorItem());
-        var hasSelection = selectedItemId.HasValue;
-        AddQueueMenu(text["Queue.MoveFirst"], () => MoveSelectedTo(0), hasSelection);
-        AddQueueMenu(text["Queue.MoveUp"], () => MoveSelectedBy(-1), hasSelection);
-        AddQueueMenu(text["Queue.MoveDown"], () => MoveSelectedBy(1), hasSelection);
-        AddQueueMenu(text["Queue.MoveLast"], () => MoveSelectedTo(int.MaxValue), hasSelection);
+        AddQueueMenu(text["Queue.MoveFirst"], () => MoveSelectedTo(0), movable && selectedIndex > 0);
+        AddQueueMenu(text["Queue.MoveUp"], () => MoveSelectedBy(-1), movable && selectedIndex > 0);
+        AddQueueMenu(text["Queue.MoveDown"], () => MoveSelectedBy(1), movable && selectedIndex < items.Count - 1);
+        AddQueueMenu(text["Queue.MoveLast"], () => MoveSelectedTo(int.MaxValue), movable && selectedIndex < items.Count - 1);
         queueMenu.Items.Add(new MenuSeparatorItem());
-        AddQueueMenu(text["Queue.RetrySelected"], RetrySelected, hasSelection);
-        AddQueueMenu(text["Queue.RemoveSelected"], RemoveSelected, hasSelection);
-        AddQueueMenu(text["Queue.CancelSelected"], CancelSelected, hasSelection);
+        AddQueueMenu(text["Queue.RetrySelected"], RetrySelected, retryable);
+        AddQueueMenu(text["Queue.RemoveSelected"], RemoveSelected, removable);
+        AddQueueMenu(text["Queue.CancelSelected"], CancelSelected, cancellable);
     }
 
     private void AddQueueMenu(string label, Action action, bool enabled = true)
@@ -651,6 +1076,7 @@ internal sealed class DownloadsView : UserControl
             case QueueItemAction.Retry: services.Queue.Retry(e.ItemId); break;
             case QueueItemAction.Details: await ShowQueueDetailsAsync(e.ItemId); break;
             case QueueItemAction.Cancel: services.Processor.CancelActive(e.ItemId); break;
+
             case QueueItemAction.OpenFile: ShellService.OpenFile(services.Queue.Find(e.ItemId)?.FinalFile); break;
             case QueueItemAction.OpenFolder: ShellService.OpenFolderForFile(services.Queue.Find(e.ItemId)?.FinalFile); break;
         }
@@ -665,7 +1091,13 @@ internal sealed class DownloadsView : UserControl
             return;
 
         var status = text[$"Status.{item.Status}"];
-        var detail = item.ErrorMessage ?? item.StatusMessage;
+        var localizedDetail = item.StatusMessageKey is { Length: > 0 } key ? text[key] : item.StatusMessage;
+        var failure = item.FailureMessageKey is { Length: > 0 } failureKey
+            ? text[failureKey] : item.ErrorMessage;
+        var detail = failure is { Length: > 0 }
+            ? $"{localizedDetail}\n\n{failure}\n\n{text["Error.Suggestion"]}" : localizedDetail;
+        if (item.FailureTechnicalSummary is { Length: > 0 } technical)
+            detail += $"\n\n{text["Error.Details"]}\n{technical}";
         using var dialog = new MessageBoxForm(
             text.Get("Queue.DetailsTitle", item.Title),
             text.Get("Queue.DetailsBody", status, detail));
@@ -718,22 +1150,26 @@ internal sealed class DownloadsView : UserControl
         pageTitle.Text = text["Downloads.Title"];
         pageSubtitle.Text = text["Downloads.Subtitle"];
         urlLabel.Text = text["Downloads.UrlLabel"];
+        supportedSourcesButton.Text = text["Sources.Link"];
         urlInput.Placeholder = text["Downloads.UrlPlaceholder"];
         pasteButton.AccessibleName = text["Downloads.PasteTooltip"];
         pasteToolTip.SetToolTip(pasteButton, text["Downloads.PasteTooltip"]);
         pasteToolTip.SetToolTip(pasteIcon, text["Downloads.PasteTooltip"]);
+        pasteToolTip.SetToolTip(clearPreviewButton, text["Downloads.ClearPreview"]);
         analyzeButton.Text = text["Common.Analyze"];
         qualityLabel.Text = text["Downloads.Quality"];
+        containerLabel.Text = text["Downloads.Container"];
+        rangeHint.Text = text["Range.KeyframeWarning"];
         addButton.Text = text["Downloads.AddToQueue"];
         detailsButton.Text = text["Common.Details"];
+        advancedButton.Text = text["Advanced.MoreOptions"];
         queueTitle.Text = text["Downloads.QueueTitle"];
         pauseButton.Text = services.Queue.IsPaused ? text["Queue.Resume"] : text["Queue.Pause"];
         queueEmptyTitle.Text = text["Downloads.QueueEmptyTitle"];
         queueEmptyBody.Text = text["Downloads.QueueEmptyBody"];
         UpdateEngineStatus();
         SetPreviewState(previewState);
-        if (analyzedMetadata is not null)
-            PopulateMetadata(analyzedMetadata);
+        if (analyzedMetadata is not null) PopulateMetadata(analyzedMetadata);
         BuildQueueMenu();
     }
 
@@ -756,14 +1192,20 @@ internal sealed class DownloadsView : UserControl
     {
         if (disposing)
         {
+            disposed = true;
+            lifetimeCancellation.Cancel();
             services.Queue.Changed -= QueueChanged;
+            services.Settings.Changed -= SettingsChanged;
             services.Tools.Changed -= ToolStatusChanged;
             text.LanguageChanged -= LanguageChanged;
+            playlistPreview.AddRequested -= PlaylistAddRequested;
+            playlistPreview.AdvancedOptionsRequested -= AdvancedClicked;
             SizeChanged -= ViewSizeChanged;
             queueHost.SizeChanged -= QueueHostSizeChanged;
             pasteToolTip.Dispose();
+            admissionCountdownTimer.Dispose();
             analyzeCancellation?.Cancel();
-            analyzeCancellation?.Dispose();
+            lifetimeCancellation.Dispose();
         }
         base.Dispose(disposing);
     }

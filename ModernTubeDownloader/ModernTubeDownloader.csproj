@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -18,11 +18,18 @@
     <PublishSingleFile>false</PublishSingleFile>
     <PublishReadyToRun>false</PublishReadyToRun>
   </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext\ModernFormsNext.csproj" />
+    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Automation\ModernFormsNext.Automation.csproj" Condition="'$(Configuration)' == 'Debug'" />
+    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Automation.Windows\ModernFormsNext.Automation.Windows.csproj" Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
   <ItemGroup>
+    <AssemblyMetadata Include="ModernFormsNextCommit" Value="$(ModernFormsNextCommit)" />
+    <PackageReference Include="QRCoder" Version="1.8.0" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <EmbeddedResource Include="Assets\AppIcon.png" LogicalName="ModernTubeDownloader.Assets.AppIcon.png" />
     <EmbeddedResource Include="Resources\Languages\*.json" />
+    <EmbeddedResource Include="WebRemote\wwwroot\*" />
   </ItemGroup>
 </Project>

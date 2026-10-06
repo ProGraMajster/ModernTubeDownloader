@@ -12,25 +12,32 @@ public static class FileSystemUtilities
         using (File.Create(probe, 1, FileOptions.DeleteOnClose)) { }
     }
 
-    public static string ResolveFinalPath(string directory, string baseName, string extension, FileConflictBehavior behavior, bool overwrite)
+    public static string ResolveFinalPath(string directory, string baseName, string extension, FileConflictBehavior behavior,
+        bool overwrite, IReadOnlyList<string>? companionSuffixes = null)
     {
         Directory.CreateDirectory(directory);
         baseName = string.IsNullOrWhiteSpace(baseName) ? "download" : baseName;
         extension = extension.Trim().TrimStart('.');
+        companionSuffixes ??= [];
         var candidate = Path.Combine(directory, $"{baseName}.{extension}");
-        if (!File.Exists(candidate) || overwrite || behavior == FileConflictBehavior.Overwrite)
+        if (overwrite || behavior == FileConflictBehavior.Overwrite || IsAvailable(baseName))
             return candidate;
         if (behavior == FileConflictBehavior.Fail)
-            throw new IOException($"The destination file already exists: {candidate}");
+            throw new IOException($"The destination file or a companion file already exists: {candidate}");
 
         for (var index = 2; index < 10_000; index++)
         {
-            candidate = Path.Combine(directory, $"{baseName} ({index}).{extension}");
-            if (!File.Exists(candidate))
+            var numberedBase = $"{baseName} ({index})";
+            candidate = Path.Combine(directory, $"{numberedBase}.{extension}");
+            if (IsAvailable(numberedBase))
                 return candidate;
         }
 
         throw new IOException("Could not find an unused destination filename.");
+
+        bool IsAvailable(string candidateBase) =>
+            !File.Exists(Path.Combine(directory, $"{candidateBase}.{extension}")) &&
+            companionSuffixes.All(suffix => !File.Exists(Path.Combine(directory, $"{candidateBase}.{suffix}")));
     }
 
     public static string SafeIdentifier(string value)

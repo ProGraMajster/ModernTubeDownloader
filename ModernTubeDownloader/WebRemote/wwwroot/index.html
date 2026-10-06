@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ModernTubeDownloader Remote</title>
+  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/remote-queue.css">
+  <link rel="stylesheet" href="/time-input.css">
+  <script src="/time-input.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header><div class="brand"><span class="mark">▶↓</span><div><strong>ModernTubeDownloader</strong><small id="subtitle">Panel zdalny w sieci lokalnej</small></div></div><span class="pill" id="connection">—</span></header>
+    <section class="panel" id="loginPanel">
+      <h1 id="loginTitle">Połącz z aplikacją</h1>
+      <p id="loginDescription">Wpisz token wyświetlany w ustawieniach aplikacji na komputerze.</p>
+      <form id="loginForm"><label for="token">Token</label><input id="token" type="password" autocomplete="off" required><button type="submit" id="connectButton">Połącz</button></form>
+    </section>
+    <div id="dashboard" hidden>
+      <section class="panel"><h1 id="liveHeading">LIVE</h1><h2 id="liveActiveHeading">Aktualnie nagrywane</h2><div id="liveActive"></div><h2 id="liveScheduledHeading">Zaplanowane</h2><div id="liveScheduled"></div><h2 id="livePartialHeading">Częściowe i ostatnie</h2><div id="livePartial"></div></section>
+      <section class="panel"><div class="sectionHead"><h1 id="queueHeading">Kolejka</h1><button type="button" id="pauseButton" class="secondary">Pauza</button></div><p id="admissionCountdown" class="countdown" role="status" hidden></p><div id="queue"></div><details id="completedSection" class="completedSection" hidden><summary id="completedSummary"></summary><div id="completedQueue"></div></details></section>
+      <section class="panel"><h2 id="addHeading">Dodaj materiał</h2><form id="addForm">
+        <p id="remoteSourceScope">Zdalne dodawanie jest obecnie ograniczone do obsługiwanych adresów YouTube.</p>
+        <label id="urlLabel" for="url">Adres filmu lub playlisty</label><input id="url" type="url" maxlength="2048" required placeholder="https://www.youtube.com/watch?v=…">
+        <div class="columns"><div><label id="qualityLabel" for="quality">Jakość</label><select id="quality"><option value="best">Najlepsza dostępna</option><option value="2160">2160p / 4K</option><option value="1440">1440p</option><option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option><option value="360">360p</option><option value="audio">Tylko dźwięk</option></select></div><div><label id="containerLabel" for="container">Kontener</label><select id="container"><option value="Auto">Auto</option><option value="Mp4">MP4</option><option value="Mkv">MKV</option><option value="WebM">WebM</option></select></div></div>
+        <label id="rangeLabel" for="rangeMode">Zakres materiału</label><select id="rangeMode"><option value="full">Całość</option><option value="custom">Niestandardowy</option></select>
+        <div id="rangeFields" hidden>
+          <div class="columns">
+            <fieldset class="timeBound" aria-describedby="rangeHint"><legend id="fromLabel">Od</legend><div class="timeParts">
+              <div><label id="fromHoursLabel" for="fromHours">Godz.</label><input id="fromHours" type="text" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3" placeholder="00" autocomplete="off" disabled></div>
+              <div><label id="fromMinutesLabel" for="fromMinutes">Min.</label><input id="fromMinutes" type="text" inputmode="numeric" pattern="[0-5]?[0-9]" maxlength="2" placeholder="00" autocomplete="off" disabled></div>
+              <div><label id="fromSecondsLabel" for="fromSeconds">Sek.</label><input id="fromSeconds" type="text" inputmode="numeric" pattern="[0-5]?[0-9]" maxlength="2" placeholder="00" autocomplete="off" disabled></div>
+            </div></fieldset>
+            <fieldset class="timeBound" aria-describedby="rangeHint"><legend id="toLabel">Do</legend><div class="timeParts">
+              <div><label id="toHoursLabel" for="toHours">Godz.</label><input id="toHours" type="text" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3" placeholder="00" autocomplete="off" disabled></div>
+              <div><label id="toMinutesLabel" for="toMinutes">Min.</label><input id="toMinutes" type="text" inputmode="numeric" pattern="[0-5]?[0-9]" maxlength="2" placeholder="00" autocomplete="off" disabled></div>
+              <div><label id="toSecondsLabel" for="toSeconds">Sek.</label><input id="toSeconds" type="text" inputmode="numeric" pattern="[0-5]?[0-9]" maxlength="2" placeholder="00" autocomplete="off" disabled></div>
+            </div></fieldset>
+          </div>
+          <p id="rangeHint" class="meta">Wpisuj tylko cyfry. Puste „Od” oznacza początek, a puste „Do” — koniec materiału.</p>
+          <output id="rangePreview" class="meta" aria-live="polite"></output>
+        </div>
+        <div><label class="optionToggle"><input id="useSubtitleDefaults" type="checkbox"> <span id="subtitleDefaultsLabel">Napisy według ustawień aplikacji</span></label></div>
+        <div><label class="optionToggle"><input id="useSponsorBlockDefaults" type="checkbox"> <span id="sponsorDefaultsLabel">SponsorBlock według ustawień aplikacji</span></label></div>
+        <button type="submit" id="addButton">Dodaj do kolejki</button>
+      </form></section>
+    </div>
+    <p id="message" role="status" aria-live="polite"></p>
+    <footer id="footer">Dostęp tylko w zaufanej sieci lokalnej. Połączenie HTTP nie jest szyfrowane.</footer>
+  </main>
+</body>
+</html>

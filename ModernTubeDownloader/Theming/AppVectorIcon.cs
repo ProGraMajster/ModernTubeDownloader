@@ -10,6 +10,7 @@ internal enum AppIconKind
     Clipboard,
     Download,
     Queue,
+    Live,
     History,
     Settings
 }
@@ -45,6 +46,10 @@ internal sealed class AppVectorIcon : UserControl
     {
         switch (kind)
         {
+            case AppIconKind.Live:
+                AddCircle(3 * scale, 3 * scale, 18 * scale, scale);
+                AddFilledCircle(8 * scale, 8 * scale, 8 * scale);
+                break;
             case AppIconKind.Clipboard:
                 AddPath(scale, [
                     ClosedFigure((6, 5), (18, 5), (18, 21), (6, 21)),
