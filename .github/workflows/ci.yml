@@ -13,24 +13,24 @@ jobs:
 
     steps:
       - name: Checkout ModernTubeDownloader
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Checkout pinned ModernFormsNext
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ProGraMajster/ModernFormsNext
           ref: f521f9dfcfe601bf9b6199b88132cccb2380d1bf
           path: .mfn-master-worktree
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
       - name: Setup Node.js for Web Remote tests
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
 

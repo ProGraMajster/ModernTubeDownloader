@@ -80,9 +80,10 @@ $modernFormsProperty = "-p:ModernFormsNextRoot=$ModernFormsNextRoot"
 $serialBuildProperties = @('-m:1', '/p:UseSharedCompilation=false', $modernFormsProperty)
 
 Invoke-DotNet -Arguments @('restore', $buildTarget, $modernFormsProperty)
+$validationRun = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
 foreach ($configuration in @('Debug', 'Release')) {
     Invoke-DotNet -Arguments (@('build', $buildTarget, '-c', $configuration, '--no-restore', '-warnaserror') + $serialBuildProperties)
-    $resultsRoot = Join-Path $artifactsRoot "validation\$configuration"
+    $resultsRoot = Join-Path $artifactsRoot "validation\$validationRun\$configuration"
     Invoke-DotNet -Arguments (@('test', $testProject, '-c', $configuration, '--no-build', '--logger', 'trx;LogFileName=release-validation.trx', '--results-directory', $resultsRoot) + $serialBuildProperties)
     [xml] $testResults = Get-Content -LiteralPath (Join-Path $resultsRoot 'release-validation.trx') -Raw
     $counters = $testResults.TestRun.ResultSummary.Counters

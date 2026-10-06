@@ -97,10 +97,18 @@ public sealed class QueueProcessorTests : IAsyncLifetime
 
         harness.Executor.Fail(firstTwo[1]);
         await WaitUntilAsync(() => harness.Queue.Find(firstTwo[1])?.Status == DownloadStatus.Failed, TimeSpan.FromSeconds(5));
-        var remaining = processor.ActiveItemIds.Single();
+        // Failed is published before the final durable save retires the worker.
+        // Observe scheduler retirement, not just the item's visible status.
+        await WaitUntilAsync(() => !processor.ActiveItemIds.Contains(firstTwo[1]), TimeSpan.FromSeconds(5));
+        var remaining = Assert.Single(processor.ActiveItemIds);
+        Assert.DoesNotContain(remaining, firstTwo);
         harness.Executor.Complete(remaining);
         await WaitUntilAsync(() => harness.Queue.Find(remaining)?.Status == DownloadStatus.Completed, TimeSpan.FromSeconds(5));
         await processor.StopAsync();
+        Assert.Equal(DownloadStatus.Cancelled, harness.Queue.Find(firstTwo[0])!.Status);
+        Assert.Equal(DownloadStatus.Failed, harness.Queue.Find(firstTwo[1])!.Status);
+        Assert.Empty(processor.ActiveItemIds);
+        Assert.All(harness.Executor.StartCounts.Values, count => Assert.Equal(1, count));
     }
 
     [Fact]

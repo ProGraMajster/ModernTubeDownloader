@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout ModernTubeDownloader
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -39,19 +39,19 @@ jobs:
           }
 
       - name: Checkout pinned ModernFormsNext
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ProGraMajster/ModernFormsNext
           ref: f521f9dfcfe601bf9b6199b88132cccb2380d1bf
           path: .mfn-master-worktree
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
 
@@ -60,7 +60,7 @@ jobs:
         run: .\scripts\Build-Release.ps1 -ModernFormsNextRoot "$env:GITHUB_WORKSPACE\.mfn-master-worktree"
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ModernTubeDownloader-${{ github.ref_name }}-win-x64
           path: |
