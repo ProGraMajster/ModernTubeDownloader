@@ -6,11 +6,11 @@ using System.Text.Json.Nodes;
 namespace ModernTubeDownloader.Services;
 
 /// <summary>One auth source, one ownership scope per logical attempt; no browser database access.</summary>
-public sealed class YtDlpAuthenticationProvider(AppPaths paths, SettingsService settings)
+public sealed class YtDlpAuthenticationProvider(AppPaths paths, SettingsService settings, TimeProvider? refreshClock = null)
 {
     private readonly SettingsService configuration = settings;
     private readonly AsyncLocal<Session?> active = new();
-    private readonly CookieStore store = new(paths.AuthenticationDirectory);
+    private readonly CookieStore store = new(paths.AuthenticationDirectory, refreshClock);
     public CookieStore Store => store;
     public AuthenticationSource Source => configuration.Current.CookieSource ??
         (configuration.Current.UseCookieFile ? AuthenticationSource.ManualFile : AuthenticationSource.None);

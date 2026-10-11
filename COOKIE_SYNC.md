@@ -112,6 +112,8 @@ An enabled profile with **Synchronize before use** consent owns a `connectNative
 4. Only an accepted snapshot with the matching unexpired nonce and `newVersion > oldVersion` proves success. An unrelated sync, process exit zero or stale ACK is insufficient.
 5. The desktop creates a **new attempt jar** and permits exactly **one** automatic retry for the logical attempt, including subsequent subtitle/metadata stages. It never overwrites an active jar.
 
+The rendezvous uses `TimeProvider.System` in production. Regression scenarios inject a controlled clock so the 600 ms expiry case is advanced explicitly, rather than accidentally measuring DPAPI/disk/thread-pool speed on a shared CI worker. An ACK received at the expired deadline cannot establish refresh success. Production wait/heartbeat limits and retry counts are unchanged.
+
 Browser/host unavailable, permission revoked, disabled/missing profile, timeout, rejection and a second auth failure retain the prior snapshot, stop automatic auth retries and show localized manual Sync/Retry guidance.
 
 Upcoming LIVE probes use the same bounded runner. Active start/reconnect defers refresh to the **whole part-attempt boundary**: the existing executor first finalizes/preserves the failed part, then the fresh jar starts the next numbered part. No retry writes into the failed capture or changes LIVE/VOD concurrency.

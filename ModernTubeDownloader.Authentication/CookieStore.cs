@@ -62,8 +62,9 @@ public static class AuthenticationFiles
 }
 
 // The entire index is encrypted, including tombstones. No plaintext snapshot or backup.
-public sealed class CookieStore(string root)
+public sealed class CookieStore(string root, TimeProvider? timeProvider = null)
 {
+    private readonly TimeProvider refreshClock = timeProvider ?? TimeProvider.System;
     private sealed record Entry(string Origin, CookieMessage Snapshot, bool Revoked, int Excluded);
     private sealed record StoreDocument(int Version, Entry[] Entries, bool SyncBlocked = false,
         CookieRefreshRequest[]? Requests = null, CookieBridgePresence[]? Bridges = null);
@@ -131,7 +132,7 @@ public sealed class CookieStore(string root)
             (c.Session || c.ExpirationDate > DateTimeOffset.UtcNow.ToUnixTimeSeconds())).ToArray();
         entries.Add(new(origin, message, revoked, excluded));
         var pending = (document.Requests ?? []).Select(r => r.Origin == origin && r.ProfileId == message.ProfileId && r.Status == "pending" &&
-            r.Deadline > DateTimeOffset.UtcNow && (revoked || r.RequestId == message.RequestId)
+            r.Deadline > refreshClock.GetUtcNow() && (revoked || r.RequestId == message.RequestId)
             ? r with { Status = revoked ? "disabled" : message.RefreshBeforeUse && message.SnapshotVersion > r.OldVersion ? "refreshed" : "rejected",
                 NewVersion = revoked ? 0 : message.SnapshotVersion } : r).ToArray();
         Write(document with { Entries = entries.ToArray(), Requests = pending });
@@ -186,14 +187,14 @@ public sealed class CookieStore(string root)
     public void BridgeHeartbeat(string origin, string browser, string connectionId, bool connected = true) => Locked(() =>
     {
         var document = Read();
-        var bridges = (document.Bridges ?? []).Where(b => b.Expires > DateTimeOffset.UtcNow &&
+        var bridges = (document.Bridges ?? []).Where(b => b.Expires > refreshClock.GetUtcNow() &&
             !(b.Origin == origin && b.Browser == browser && (connected || b.ConnectionId == connectionId))).ToList();
-        if (connected) bridges.Add(new(origin, browser, connectionId, DateTimeOffset.UtcNow.AddSeconds(15)));
+        if (connected) bridges.Add(new(origin, browser, connectionId, refreshClock.GetUtcNow().AddSeconds(15)));
         if (bridges.Count > 8) throw new CookieSecurityException("bridge-limit");
         Write(document with { Bridges = bridges.ToArray() }); return true;
     });
     public IReadOnlyList<CookieRefreshRequest> PendingRefreshes(string origin, string browser) => Locked(() =>
-        (Read().Requests ?? []).Where(r => r.Origin == origin && r.Browser == browser && r.Status == "pending" && r.Deadline > DateTimeOffset.UtcNow).ToArray());
+        (Read().Requests ?? []).Where(r => r.Origin == origin && r.Browser == browser && r.Status == "pending" && r.Deadline > refreshClock.GetUtcNow()).ToArray());
 
     public async Task<CookieRefreshResult> RequestRefreshAsync(CookieRefreshTarget? target, TimeSpan timeout, CancellationToken token = default)
     {
@@ -201,21 +202,21 @@ public sealed class CookieStore(string root)
         if (!target.Consented) return new("disabled");
         if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromSeconds(30)) throw new ArgumentOutOfRangeException(nameof(timeout));
         var request = new CookieRefreshRequest(Guid.NewGuid().ToString("D"), target.Origin, target.Browser, target.ProfileId,
-            target.SnapshotVersion, DateTimeOffset.UtcNow + timeout);
+            target.SnapshotVersion, refreshClock.GetUtcNow() + timeout);
         var initial = Locked(() =>
         {
             var document = Read();
             var profile = document.Entries.FirstOrDefault(e => e.Origin == target.Origin && e.Snapshot.ProfileId == target.ProfileId);
             if (document.SyncBlocked || profile is null || profile.Revoked || !profile.Snapshot.RefreshBeforeUse) return "disabled";
-            if (!(document.Bridges ?? []).Any(b => b.Origin == target.Origin && b.Browser == target.Browser && b.Expires > DateTimeOffset.UtcNow)) return "unavailable";
-            var requests = (document.Requests ?? []).Where(r => r.Deadline > DateTimeOffset.UtcNow).ToList();
+            if (!(document.Bridges ?? []).Any(b => b.Origin == target.Origin && b.Browser == target.Browser && b.Expires > refreshClock.GetUtcNow())) return "unavailable";
+            var requests = (document.Requests ?? []).Where(r => r.Deadline > refreshClock.GetUtcNow()).ToList();
             if (requests.Any(r => r.Origin == target.Origin && r.ProfileId == target.ProfileId && r.Status == "pending") || requests.Count >= CookieProtocol.MaximumProfiles) return "unavailable";
             requests.Add(request); Write(document with { Requests = requests.ToArray() }); return "pending";
         });
         if (initial != "pending") return new(initial);
         try
         {
-            while (DateTimeOffset.UtcNow < request.Deadline)
+            while (refreshClock.GetUtcNow() < request.Deadline)
             {
                 token.ThrowIfCancellationRequested();
                 var result = Locked(() =>
@@ -224,7 +225,7 @@ public sealed class CookieStore(string root)
                     var current = (document.Requests ?? []).FirstOrDefault(r => r.RequestId == request.RequestId);
                     if (current is null) return new CookieRefreshResult("disabled");
                     if (current.Status != "pending") return new CookieRefreshResult(current.Status, current.NewVersion);
-                    return !(document.Bridges ?? []).Any(b => b.Origin == target.Origin && b.Browser == target.Browser && b.Expires > DateTimeOffset.UtcNow)
+                    return !(document.Bridges ?? []).Any(b => b.Origin == target.Origin && b.Browser == target.Browser && b.Expires > refreshClock.GetUtcNow())
                         ? new CookieRefreshResult("unavailable") : null;
                 });
                 if (result is not null) return result.Refreshed && result.SnapshotVersion <= target.SnapshotVersion ? new("rejected") : result;

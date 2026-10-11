@@ -12,6 +12,14 @@ public sealed class CookieRefreshTests : IDisposable
     private readonly string root = Path.Combine(Path.GetTempPath(), "mtd-refresh-tests", Guid.NewGuid().ToString("N"));
     private const string Origin = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/";
     private const string Url = "https://example.test/auth-refresh";
+    private readonly RefreshTestClock clock = new();
+    private sealed class RefreshTestClock : TimeProvider
+    {
+        private readonly DateTimeOffset start = DateTimeOffset.UtcNow;
+        private long elapsedTicks;
+        public override DateTimeOffset GetUtcNow() => start.AddTicks(Interlocked.Read(ref elapsedTicks));
+        public void AdvanceTo(DateTimeOffset instant) => Interlocked.Exchange(ref elapsedTicks, (instant - start).Ticks);
+    }
     private static CookieMessage Snapshot(string profile, long version, string? request = null) => new()
     {
         Type = "cookieSnapshot", Browser = "chrome", ProfileId = profile, SnapshotVersion = version,
@@ -24,16 +32,24 @@ public sealed class CookieRefreshTests : IDisposable
         var paths = AppPaths.Create(root); paths.EnsureCreated();
         var settings = new SettingsService(paths, new NullAppLogger()); await settings.LoadAsync();
         settings.Current.CookieSource = AuthenticationSource.SyncedBrowserProfile;
-        return new(paths, settings) { RefreshTimeout = TimeSpan.FromMilliseconds(600) };
+        // Expiry belongs to the scenario, not DPAPI/disk/thread-pool speed on a CI worker.
+        // The production provider still uses the system clock and its unchanged 20 s budget.
+        return new(paths, settings, clock) { RefreshTimeout = TimeSpan.FromMilliseconds(600) };
     }
     private static ExternalProcessException AuthFailure() => new("Authentication required",
         new(1, [], ["ERROR: Sign in; authentication required"], TimeSpan.Zero));
-    private static async Task Respond(CookieStore store, string mode)
+    private static async Task Respond(CookieStore store, string mode, RefreshTestClock? clock = null)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         CookieRefreshRequest? request;
         while ((request = store.PendingRefreshes(Origin, "chrome").SingleOrDefault()) is null)
             await Task.Delay(10, deadline.Token);
+        if (mode == "timeout")
+        {
+            Assert.NotNull(clock);
+            clock.AdvanceTo(request.Deadline);
+            return;
+        }
         if (mode == "same-version")
         {
             Assert.Throws<CookieSecurityException>(() => NativeCookieProtocol.Handle(store, Origin, "chrome", Snapshot(request.ProfileId, 1, request.RequestId)));
@@ -57,7 +73,8 @@ public sealed class CookieRefreshTests : IDisposable
         var provider = await Provider(); var profile = Guid.NewGuid().ToString("D");
         provider.Store.Apply(Origin, Snapshot(profile, 1));
         if (mode != "unavailable") provider.Store.BridgeHeartbeat(Origin, "chrome", Guid.NewGuid().ToString("D"));
-        var bridge = mode is "unavailable" or "timeout" ? Task.CompletedTask : Respond(provider.Store, mode);
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var bridge = mode == "unavailable" ? Task.CompletedTask : Respond(provider.Store, mode, clock);
         var calls = 0; var paths = new List<string>(); var versions = new List<long>();
         Task<int> Invoke()
         {
@@ -68,20 +85,37 @@ public sealed class CookieRefreshTests : IDisposable
             versions.Add(fresh ? 2 : 1);
             return fresh && mode != "second-auth-failure" ? Task.FromResult(42) : Task.FromException<int>(AuthFailure());
         }
-        if (mode == "refreshed") Assert.Equal(42, await provider.ExecuteAsync(Url, Invoke, CancellationToken.None));
+        if (mode == "refreshed") Assert.Equal(42, await provider.ExecuteAsync(Url, Invoke, watchdog.Token));
         else
         {
-            var error = await Assert.ThrowsAsync<CookieRefreshException>(() => provider.ExecuteAsync(Url, Invoke, CancellationToken.None));
+            var error = await Assert.ThrowsAsync<CookieRefreshException>(() => provider.ExecuteAsync(Url, Invoke, watchdog.Token));
             Assert.Equal(mode == "same-version" ? "rejected" : mode, error.Status);
             Assert.False(DownloadFailureClassifier.Classify(error).Retryable);
         }
-        await bridge;
+        await bridge.WaitAsync(watchdog.Token);
         Assert.Equal(expectedCalls, calls);
         Assert.Equal(expectedCalls, paths.Distinct().Count());
         Assert.Equal(expectedCalls == 2 ? new long[] { 1, 2 } : [1], versions);
         Assert.Empty(provider.Store.PendingRefreshes(Origin, "chrome"));
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "Auth", "tmp")));
         Assert.Equal(expectedCalls == 2 ? 2 : 1, provider.Store.GetProfiles().Single().SnapshotVersion);
+    }
+
+    [Fact]
+    public async Task SnapshotAcknowledgedAtExpiredDeadlineCannotProveRefresh()
+    {
+        var provider = await Provider();
+        var profile = Guid.NewGuid().ToString("D");
+        provider.Store.Apply(Origin, Snapshot(profile, 1));
+        provider.Store.BridgeHeartbeat(Origin, "chrome", Guid.NewGuid().ToString("D"));
+        var outcome = provider.Store.RequestRefreshAsync(provider.Store.GetRefreshTarget(Url), TimeSpan.FromMilliseconds(600));
+        var pending = Assert.Single(provider.Store.PendingRefreshes(Origin, "chrome"));
+        clock.AdvanceTo(pending.Deadline);
+        var ack = NativeCookieProtocol.Handle(provider.Store, Origin, "chrome", Snapshot(profile, 2, pending.RequestId));
+        Assert.True(ack.Ok); // Receipt alone is not timely refresh confirmation.
+        Assert.Equal("timeout", (await outcome.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+        Assert.Equal(2, Assert.Single(provider.Store.GetProfiles()).SnapshotVersion);
+        Assert.Empty(provider.Store.PendingRefreshes(Origin, "chrome"));
     }
 
     [Fact]
