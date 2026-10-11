@@ -139,7 +139,7 @@ internal sealed class DownloadsView : UserControl
             TextAlign = ContentAlignment.MiddleLeft
         };
         AppUi.Input(urlInput);
-        urlInput.Font = new Font("Segoe UI", 12.5f);
+        AppTypography.Bind(urlInput, 12.5f);
         pasteButton = new Button { Height = 48, Width = 48, AccessibleAutomationId = "PasteButton" };
         analyzeButton = new Button { Height = 48, Enabled = false, AccessibleAutomationId = "AnalyzeButton" };
         AppUi.Secondary(pasteButton);
@@ -275,27 +275,33 @@ internal sealed class DownloadsView : UserControl
         SetPreviewState(PreviewState.Empty);
         BuildQueueCards();
         UpdateLayout();
+        AppTypography.RegisterLayout(this, UpdateLayout);
     }
 
     private void UpdateLayout()
     {
+        AutoScroll = AppTypography.Scale > 1.25;
+        var displayOrigin = DisplayRectangle.Location;
         const int page = 28;
         const int gap = 14;
         var compactHeight = ClientSize.Height < 660;
         var width = Math.Max(560, ClientSize.Width - (page * 2));
-        var statusInline = width >= 620;
+        var statusInline = width >= 620 && AppTypography.Scale <= 1.25f;
         var statusWidth = statusInline ? 292 : Math.Min(292, width);
         var headerHeight = statusInline
             ? compactHeight ? 52 : 62
             : compactHeight ? 96 : 102;
-        header.SetBounds(page, compactHeight ? 8 : 14, width, headerHeight);
+        header.SetBounds(page, compactHeight ? 8 : 14, width, AppTypography.TextHeight(headerHeight));
         pageTitle.SetBounds(0, 0, statusInline ? width - statusWidth - 16 : width, 36);
         enginePill.SetBounds(width - statusWidth, statusInline ? 1 : 36, statusWidth, 34);
         toolStatus.Width = statusWidth - 44;
         pageSubtitle.SetBounds(0, statusInline ? compactHeight ? 32 : 38 : 74, width, 24);
+        AppTypography.ReflowRows(header);
+        toolStatus.SetBounds(32, (enginePill.Height - AppTypography.TextHeight(24)) / 2, enginePill.Width - 44, AppTypography.TextHeight(24));
+        toolStatusDot.Top = (enginePill.Height - toolStatusDot.Height) / 2;
 
         var sectionGap = compactHeight ? 4 : 8;
-        urlPanel.SetBounds(page, header.Bottom + sectionGap, width, compactHeight ? 96 : 108);
+        urlPanel.SetBounds(page, header.Bottom + sectionGap, width, AppTypography.TextHeight(compactHeight ? 96 : 108));
         urlLabel.SetBounds(22, compactHeight ? 8 : 12, width - 310, 24);
         supportedSourcesButton.SetBounds(width - 276, compactHeight ? 7 : 11, 254, 28);
         var analyzeWidth = width < 760 ? 112 : 136;
@@ -304,9 +310,11 @@ internal sealed class DownloadsView : UserControl
         analyzeButton.SetBounds(width - 22 - analyzeWidth, inputTop, analyzeWidth, inputHeight);
         pasteButton.SetBounds(analyzeButton.Left - 10 - inputHeight, inputTop, inputHeight, inputHeight);
         urlInput.SetBounds(22, inputTop, Math.Max(220, pasteButton.Left - 32), inputHeight);
+        AppTypography.ReflowRows(urlPanel);
 
         var previewTop = urlPanel.Bottom + gap;
-        var previewHeight = GetPreviewHeight(compactHeight);
+        compactHeight |= AppearancePresentation.Current.Downloads.AnalysisDensity == AppearanceDensity.Compact;
+        var previewHeight = AppTypography.TextHeight(GetPreviewHeight(compactHeight) + Math.Max(0, AppearancePresentation.DensityExtra(AppearancePresentation.Current.Downloads.AnalysisDensity)));
         previewPanel.SetBounds(page, previewTop, width, previewHeight);
         clearPreviewButton.SetBounds(width - 42, 10, 30, 30);
         playlistPreview.SetBounds(page, previewTop, width, previewHeight);
@@ -340,9 +348,9 @@ internal sealed class DownloadsView : UserControl
             containerLabel.SetBounds(detailsLeft + comboWidth + fieldGap, 64, comboWidth, 15);
             quality.SetBounds(detailsLeft, 80, comboWidth, 32);
             container.SetBounds(quality.Right + fieldGap, 80, comboWidth, 32);
-            rangeEditor.SetBounds(detailsLeft, 118, detailsWidth, 34);
-            var rangeOffset = rangeEditor.IsCustom ? 20 : 0;
-            rangeHint.SetBounds(detailsLeft, 152, detailsWidth, 18);
+            rangeEditor.SetBounds(detailsLeft, 118, detailsWidth, rangeEditor.IsCustom && AppTypography.Scale > 1.25 ? 76 : 34);
+            var rangeOffset = rangeEditor.IsCustom ? AppTypography.Scale > 1.25 ? 60 : 20 : 0;
+            rangeHint.SetBounds(detailsLeft, 152 + Math.Max(0, rangeOffset - 20), detailsWidth, 18);
             feedback.SetBounds(detailsLeft, (compactHeight ? 148 : 154) + rangeOffset, detailsWidth, 17);
             var actionTop = (compactHeight ? 168 : 176) + rangeOffset;
             var detailsActionWidth = Math.Min(132, Math.Max(112, detailsWidth / 4));
@@ -364,13 +372,17 @@ internal sealed class DownloadsView : UserControl
             analysisProgress.SetBounds(detailsLeft, previewFacts.Bottom + 8, Math.Max(180, detailsWidth - 12), 10);
         }
 
-        queueToolbar.SetBounds(page, previewTop + previewHeight + gap, width, compactHeight ? 44 : 50);
+        AppTypography.ReflowRows(previewPanel);
+        // Thumbnails keep their independent 16:9 bounds, not text scaling.
+        previewPlaceholder.Top = previewImage.Top = thumbnailTop;
+        queueToolbar.SetBounds(page, previewTop + previewHeight + gap, width, AppTypography.TextHeight(compactHeight ? 44 : 50));
         moreButton.SetBounds(width - 44, compactHeight ? 3 : 5, 44, 40);
         pauseButton.SetBounds(moreButton.Left - 12 - 164, compactHeight ? 3 : 5, 164, 40);
         var countdownLeft = Math.Max(180, pauseButton.Left - 190);
         queueTitle.SetBounds(0, compactHeight ? 4 : 7, countdownLeft - 8, 34);
         admissionCountdown.SetBounds(countdownLeft, compactHeight ? 8 : 11,
             Math.Max(0, pauseButton.Left - countdownLeft - 8), 28);
+        AppTypography.ReflowRows(queueToolbar);
 
         var queueTop = queueToolbar.Bottom + 4;
         queueArea.SetBounds(page, queueTop, width, Math.Max(100, ClientSize.Height - queueTop - 16));
@@ -379,6 +391,7 @@ internal sealed class DownloadsView : UserControl
         queueEmptyTitle.SetBounds(24, queueEmptyIcon.Bottom + 8, Math.Max(200, queueEmpty.Width - 48), 34);
         queueEmptyBody.SetBounds(48, queueEmptyTitle.Bottom + 4, Math.Max(160, queueEmpty.Width - 96), 48);
         ResizeCards();
+        foreach (var control in new Control[] { header, urlPanel, previewPanel, playlistPreview, queueToolbar, queueArea }) { control.Left += displayOrigin.X; control.Top += displayOrigin.Y; }
     }
 
     private int GetPreviewHeight(bool compact)
@@ -387,13 +400,13 @@ internal sealed class DownloadsView : UserControl
             (PreviewState.Empty, false) => EmptyPreviewHeight,
             (PreviewState.Analyzing, false) => AnalyzingPreviewHeight,
             (PreviewState.Failed, false) => FailedPreviewHeight,
-            (PreviewState.Analyzed, false) => AnalyzedPreviewHeight + (rangeEditor.IsCustom ? 20 : 0),
+            (PreviewState.Analyzed, false) => AnalyzedPreviewHeight + (rangeEditor.IsCustom ? AppTypography.Scale > 1.25 ? 60 : 20 : 0),
             (PreviewState.PlaylistAnalyzed, false) => ClientSize.Width >= 1016 ? 380 : 420,
             (PreviewState.Empty, true) => CompactEmptyPreviewHeight,
             (PreviewState.Analyzing, true) => CompactAnalyzingPreviewHeight,
             (PreviewState.Failed, true) => CompactFailedPreviewHeight,
             (PreviewState.PlaylistAnalyzed, true) => ClientSize.Width >= 1016 ? 310 : 350,
-            _ => CompactAnalyzedPreviewHeight + (rangeEditor.IsCustom ? 20 : 0)
+            _ => CompactAnalyzedPreviewHeight + (rangeEditor.IsCustom ? AppTypography.Scale > 1.25 ? 60 : 20 : 0)
         };
 
     private async void PasteClicked(object? sender, EventArgs e)
@@ -883,7 +896,7 @@ internal sealed class DownloadsView : UserControl
         services.Logger.Info($"Opening video details for id={videoId}.");
         try
         {
-            using var form = new VideoDetailsForm(metadata, text);
+            using var form = new VideoDetailsForm(metadata, text, services.Thumbnails);
 #if DEBUG
             using var automationRegistration = RegisterDetailsForAutomation?.Invoke(form);
 #endif

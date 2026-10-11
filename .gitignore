@@ -12,6 +12,8 @@
 **/[Oo]bj/
 TestResults/
 artifacts/
+# Local completion report contains machine-specific post-publication evidence.
+/FINAL_RELEASE_1_2_0.md
 test-profiles/
 qa-profiles/
 screenshots/

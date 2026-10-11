@@ -46,6 +46,12 @@ public sealed class SettingsService(AppPaths paths, IAppLogger logger)
 
     private static void Normalize(AppSettings settings)
     {
+        settings.Startup ??= new();
+        settings.Updates ??= new();
+        if (!Enum.IsDefined(settings.Updates.Frequency)) settings.Updates.Frequency = default;
+        if (!Enum.IsDefined(settings.Updates.Mode)) settings.Updates.Mode = default;
+        if (!Enum.IsDefined(settings.Startup.MinimizeBehavior)) settings.Startup.MinimizeBehavior = default;
+        if (!Enum.IsDefined(settings.Startup.CloseBehavior)) settings.Startup.CloseBehavior = default;
         settings.Notifications ??= new();
         if (!Enum.IsDefined(settings.Notifications.Sound)) settings.Notifications.Sound = NotificationSound.Default;
         if (!Enum.IsDefined(settings.Notifications.Presentation)) settings.Notifications.Presentation = NotificationPresentation.Normal;

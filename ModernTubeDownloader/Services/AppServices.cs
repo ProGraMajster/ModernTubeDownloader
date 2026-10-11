@@ -56,6 +56,8 @@ public sealed class AppServices : IDisposable
     public WebRemoteHost WebRemote { get; private set; } = null!;
     public SupportedSourcesService Sources { get; private set; } = null!;
     public SourceCheckService SourceCheck { get; private set; } = null!;
+    public ApplicationUpdateService Updates { get; private set; } = null!;
+    public ModernTubeDownloader.Batch.BatchImportService Batch { get; private set; } = null!;
 
     public static AppServices Create(
         AppPaths paths,
@@ -69,7 +71,7 @@ public sealed class AppServices : IDisposable
         var settings = new SettingsService(paths, logger);
         settings.LoadAsync().GetAwaiter().GetResult();
         var localization = new LocalizationService(settings.Current.Language);
-        var appearance = new AppAppearanceService(settings, logger);
+        var appearance = new AppAppearanceService(settings, logger, Path.Combine(paths.RootDirectory, "appearance.json"));
         var processRunner = new AsyncProcessRunner(logger);
         httpClient ??= new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
         if (!httpClient.DefaultRequestHeaders.UserAgent.Any())
@@ -100,6 +102,7 @@ public sealed class AppServices : IDisposable
         var thumbnails = new ThumbnailCacheService(paths, logger, () => settings.Current.DownloadThumbnail);
         var services = new AppServices(paths, logger, settings, localization, appearance, tools, metadata, queue, processor, history, thumbnails, httpClient);
         services.Live = live;
+        services.Updates = new ApplicationUpdateService(paths, settings, httpClient, logger);
         services.Authentication = authentication;
         services.LiveScheduler = liveScheduler;
         if (notifications is not null)
@@ -113,6 +116,10 @@ public sealed class AppServices : IDisposable
         tools.Start();
         services.Sources = new SupportedSourcesService(tools, processRunner, logger);
         services.SourceCheck = new SourceCheckService(metadata, logger);
+        services.Batch = new(new ModernTubeDownloader.Batch.BatchSessionStore(Path.Combine(paths.RootDirectory, "Batch")),
+            services.SourceCheck.CheckAsync, queue, settings, logger);
+        services.Updates.UpdatePrepared += (_, version) => services.Notifications?.UpdateReady(version);
+        services.Batch.AnalysisCompleted += (_, counts) => services.Notifications?.BatchCompleted(counts.Analyzed, counts.Total);
         services.WebRemote = new WebRemoteHost(services);
         services.WebRemote.ReconcileAsync().GetAwaiter().GetResult();
         return services;
@@ -120,6 +127,8 @@ public sealed class AppServices : IDisposable
 
     public async Task ShutdownAsync()
     {
+        await Updates.StopAsync().ConfigureAwait(false);
+        await Batch.StopAsync().ConfigureAwait(false);
         if (Notifications is not null) await Notifications.DisposeAsync().ConfigureAwait(false);
         await WebRemote.StopAsync().ConfigureAwait(false);
         await Task.WhenAll(Processor.StopAsync(), LiveScheduler.StopAsync()).ConfigureAwait(false);
@@ -136,6 +145,8 @@ public sealed class AppServices : IDisposable
 
         disposed = true;
         WebRemote.Dispose();
+        Updates.Dispose();
+        Batch.Dispose();
         Thumbnails.Dispose();
         Processor.Dispose();
         LiveScheduler.Dispose();

@@ -58,17 +58,23 @@ internal sealed class HistoryEntryCard : UserControl
         text.LanguageChanged += LanguageChanged;
         ApplyLocalization();
         LayoutControls();
+        AppTypography.RegisterLayout(this, () => { ApplyLocalization(); LayoutControls(); });
         _ = LoadThumbnailAsync();
     }
 
     private void LayoutControls()
     {
+        var appearance = AppearancePresentation.Current.History;
+        // Compact list is a density choice, not the narrow-window stacked layout.
         var compact = Width < 760;
-        Height = compact ? 184 : 132;
-        placeholder.SetBounds(18, 18, compact ? 144 : 168, compact ? 81 : 94);
-        thumbnail.SetBounds(18, 18, compact ? 144 : 168, compact ? 81 : 94);
-        var textLeft = placeholder.Right + 16;
-        var actionWidth = compact ? 0 : 132;
+        Height = AppTypography.TextHeight(compact ? (appearance.CompactList ? 172 : 184) : (appearance.CompactList ? 120 : 132));
+        var imageWidth = AppearancePresentation.ImageWidth(appearance.ThumbnailSize, compact ? 144 : 168);
+        placeholder.SetBounds(18, 18, imageWidth, imageWidth * 9 / 16);
+        thumbnail.SetBounds(18, 18, imageWidth, imageWidth * 9 / 16);
+        placeholder.Visible = imageWidth > 0 && thumbnail.Image is null; thumbnail.Visible = imageWidth > 0 && thumbnail.Image is not null;
+        path.Visible = appearance.ShowOutputPath;
+        var textLeft = imageWidth == 0 ? 18 : placeholder.Right + AppearancePresentation.Spacing(16);
+        var actionWidth = compact ? 0 : Math.Min(Width / 3, AppTypography.TextHeight(132));
         var textRight = compact ? Width - 18 : Width - 18 - actionWidth - 18;
         var textWidth = Math.Max(230, textRight - textLeft);
         title.SetBounds(textLeft, 16, textWidth, 30);
@@ -81,9 +87,10 @@ internal sealed class HistoryEntryCard : UserControl
         }
         else
         {
-            openFile.SetBounds(Width - 150, 18, 132, 40);
-            openFolder.SetBounds(Width - 150, 68, 132, 40);
+            openFile.SetBounds(Width - 18 - actionWidth, 18, actionWidth, 40);
+            openFolder.SetBounds(Width - 18 - actionWidth, 68, actionWidth, 40);
         }
+        AppTypography.ReflowRows(this);
     }
 
     private void ApplyLocalization()
@@ -93,7 +100,9 @@ internal sealed class HistoryEntryCard : UserControl
         var qualityId = entry.QualityPresetId ?? QualityPreset.All
             .FirstOrDefault(item => string.Equals(item.DisplayName, entry.Quality, StringComparison.OrdinalIgnoreCase))?.Id;
         var quality = qualityId is not null ? text[$"Quality.{qualityId}"] : entry.Quality;
-        facts.Text = $"{entry.Channel}  •  {quality}  •  {text.Get("History.CompletedAt", entry.CompletedAt.ToLocalTime().ToString("g", text.Culture))}" +
+        var appearance = AppearancePresentation.Current.History;
+        facts.Text = string.Join("  •  ", new[] { entry.Channel, appearance.ShowSource ? SourcePresentation.Host(entry.SourceUrl) : null, appearance.ShowQuality ? quality : null,
+            appearance.ShowContainer ? System.IO.Path.GetExtension(entry.FinalPath).TrimStart('.').ToUpperInvariant() : null, appearance.ShowDate ? text.Get("History.CompletedAt", entry.CompletedAt.ToLocalTime().ToString("g", text.Culture)) : null }.Where(value => !string.IsNullOrEmpty(value))) +
             (entry.WasLiveRecording ? $"  •  LIVE{(entry.WasPartial ? " • " + text["Live.State.Partial"] : string.Empty)}" : string.Empty) +
             (string.IsNullOrWhiteSpace(entry.PlaylistTitle) ? string.Empty : $"  •  {text.Get("Queue.PlaylistPart", entry.PlaylistTitle)}");
         path.Text = text.Get("History.Path", entry.FinalPath);
@@ -111,7 +120,7 @@ internal sealed class HistoryEntryCard : UserControl
             if (disposed || lifetimeCancellation.IsCancellationRequested)
                 return;
             thumbnail.Image = image;
-            thumbnail.Visible = true;
+            thumbnail.Visible = AppearancePresentation.Current.History.ThumbnailSize != AppearanceSize.None;
             placeholder.Visible = false;
         });
     }

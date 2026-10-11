@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.2.0 — 2026-10-11
+
+### Added
+
+- Add a centralized native MFN tray controller, work-aware close confirmation, hidden autostart and same-instance manual restore.
+- Add explicit current-user Windows Run registration/repair and localized startup/tray settings.
+- Add stable GitHub application-update checking, bounded SHA-verified staging and an independent wait/backup/rollback updater.
+- Add Other as a working Batch/recent-session hub.
+- Add streaming TXT/CSV/JSON batch preparation, bounded metadata workers, durable sessions, filtering/paging and explicit canonical queue handoff.
+- Add versioned appearance profiles, four presets, semantic custom colors/contrast preview, per-page options and import/export/reset.
+- Add central absolute 80–200% logical text scaling, independent of Windows DPI, with live updates and persistence.
+- Organize Settings into eleven localized categories; keep operational settings independent of appearance.
+
+### Changed
+
+- Update the shared MFN development/CI/release pin to clean master `d36015711f63945a49025675acb9aca3df60101d`.
+- Use the canonical `ModernTubeDownloader.slnx`, including the independent Updater project.
+- Package the self-contained GUI, NativeHost and Updater together, with notices, operational
+  guides, a separate symbols archive and SHA-256. Release contains no Debug Automation endpoint.
+
+### Known limitations / post-1.2 follow-up
+
+- Some tab labels and numeric editors do not fully follow global text scaling due to
+  ModernFormsNext [#204](https://github.com/ProGraMajster/ModernFormsNext/issues/204) and
+  [#205](https://github.com/ProGraMajster/ModernFormsNext/issues/205). Owner-accepted, not release blockers.
+- Niektóre etykiety kart i edytory liczb nie podążają w pełni za skalowaniem tekstu.
+  Po naprawach #204/#205 planowana jest aktualizacja pinu MFN i poprawa w 1.2.1.
+- Exhaustive DPI/large-font/theme/resize, login/tray soak, clean-PC updater, physical
+  devices, native file/color dialogs and 20 distinct real Batch sources remain post-release QA.
+- SponsorBlock Remove remains Experimental/default OFF with confirmed edit-point defects;
+  LIVE FromStart remains Experimental/source-dependent. No new account-session qualification.
+- No code signing or Chrome Web Store/Edge Add-ons/NuGet publication.
+
 ## 1.1.0 — 2026-10-11
 
 - Browser extension: PL/EN live language switching, real Options/reset, generic HTTP/HTTPS Analyze/QuickQueue handoff and preserved YouTube watch/Shorts/playlist/LIVE modals. Completed `/live/` replays are classified by desktop metadata as VOD; active/upcoming recordings require confirmation. Stale content-script cleanup prevents extension-reload errors without page reload loops.

@@ -18,9 +18,11 @@ public sealed class ReleaseReadinessTests : IDisposable
             .Single(attribute => attribute.Key == "RepositoryUrl");
         var file = FileVersionInfo.GetVersionInfo(assembly.Location);
 
-        Assert.Equal(new Version(1, 1, 0, 0), assembly.GetName().Version);
-        Assert.Equal("1.1.0", informationalVersion?.InformationalVersion);
-        Assert.Equal("1.1.0.0", file.FileVersion);
+        // Both projects inherit the same central version props, including candidate suffixes.
+        var expected = typeof(ReleaseReadinessTests).Assembly;
+        Assert.Equal(expected.GetName().Version, assembly.GetName().Version);
+        Assert.Equal(expected.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion, informationalVersion?.InformationalVersion);
+        Assert.Equal(FileVersionInfo.GetVersionInfo(expected.Location).FileVersion, file.FileVersion);
         Assert.Equal("ModernTubeDownloader", file.ProductName);
         Assert.Equal("ProGraMajster", file.CompanyName);
         Assert.Equal("https://github.com/ProGraMajster/ModernTubeDownloader", repository.Value);

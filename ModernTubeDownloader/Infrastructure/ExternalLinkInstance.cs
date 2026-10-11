@@ -7,6 +7,7 @@ namespace ModernTubeDownloader.Infrastructure;
 /// <summary>Production, per-user URL hand-off. Kept separate from the Debug automation bridge.</summary>
 public sealed class ExternalLinkInstance : IDisposable
 {
+    private const string OpenWindowPayload = "mtd-internal:open-window:v1";
     private readonly Semaphore instanceGate;
     private readonly string pipeName;
     private readonly CancellationTokenSource stop = new();
@@ -25,14 +26,14 @@ public sealed class ExternalLinkInstance : IDisposable
     public bool IsPrimary => ownsInstance;
 
     public void Start(Func<ExternalMediaRequest, Task> onRequest, IAppLogger? logger = null,
-        Func<NotificationNavigation, Task>? onNotification = null)
+        Func<NotificationNavigation, Task>? onNotification = null, Func<Task>? onOpenWindow = null)
     {
         if (!ownsInstance || listener is not null) throw new InvalidOperationException("Not an unstarted primary instance.");
-        listener = ListenAsync(onRequest, logger, onNotification);
+        listener = ListenAsync(onRequest, logger, onNotification, onOpenWindow);
     }
 
     private async Task ListenAsync(Func<ExternalMediaRequest, Task> onRequest, IAppLogger? logger,
-        Func<NotificationNavigation, Task>? onNotification)
+        Func<NotificationNavigation, Task>? onNotification, Func<Task>? onOpenWindow)
     {
         while (!stop.IsCancellationRequested)
         {
@@ -50,7 +51,9 @@ public sealed class ExternalLinkInstance : IDisposable
                 var data = new byte[length];
                 await server.ReadExactlyAsync(data, timeout.Token);
                 var payload = new UTF8Encoding(false, true).GetString(data);
-                if (NotificationNavigation.TryParse(payload, out var notification) && notification is not null && onNotification is not null)
+                if (payload == OpenWindowPayload && onOpenWindow is not null)
+                    await onOpenWindow();
+                else if (NotificationNavigation.TryParse(payload, out var notification) && notification is not null && onNotification is not null)
                     await onNotification(notification);
                 else if (ExternalMediaRequest.TryParseProtocol(payload, out var request) && request is not null)
                     await onRequest(request);
@@ -76,6 +79,9 @@ public sealed class ExternalLinkInstance : IDisposable
     public Task<bool> ForwardNotificationAsync(NotificationNavigation navigation, CancellationToken cancellationToken = default)
         => NotificationNavigation.TryParse(navigation.Encode(), out _) && !ownsInstance
             ? ForwardPayloadAsync(navigation.Encode(), cancellationToken) : Task.FromResult(false);
+
+    public Task<bool> ForwardOpenWindowAsync(CancellationToken cancellationToken = default)
+        => !ownsInstance ? ForwardPayloadAsync(OpenWindowPayload, cancellationToken) : Task.FromResult(false);
 
     private async Task<bool> ForwardPayloadAsync(string protocolUrl, CancellationToken cancellationToken)
     {

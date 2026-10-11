@@ -16,7 +16,8 @@ if ([string]::IsNullOrWhiteSpace($ModernFormsNextRoot)) {
 }
 
 $ModernFormsNextRoot = [System.IO.Path]::GetFullPath($ModernFormsNextRoot)
-$buildTarget = if ([string]::Equals($ModernFormsNextRoot, $defaultModernFormsNextRoot, [System.StringComparison]::OrdinalIgnoreCase)) { $solutionPath } else { $testProject }
+$buildTarget = if ([string]::Equals($ModernFormsNextRoot, $defaultModernFormsNextRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+    (Test-Path -LiteralPath $solutionPath -PathType Leaf)) { $solutionPath } else { $testProject }
 $modernFormsProject = Join-Path $ModernFormsNextRoot 'ModernFormsNext\ModernFormsNext.csproj'
 if (-not (Test-Path -LiteralPath $modernFormsProject -PathType Leaf)) {
     throw "ModernFormsNext was not found at '$ModernFormsNextRoot'. Pass -ModernFormsNextRoot with a checkout containing ModernFormsNext/ModernFormsNext.csproj."
@@ -136,6 +137,14 @@ Invoke-DotNet -Arguments (@('publish', $nativeProject, '-c', 'Release', '-r', 'w
     '-p:PublishTrimmed=false', '-p:PublishSingleFile=false', '-warnaserror', '-o', $nativePublish) + $serialBuildProperties)
 Get-ChildItem -LiteralPath $nativePublish -File | Where-Object Extension -in @('.pdb','.xml') | Remove-Item -Force
 
+# Updater runs from a private staging copy after waiting for the GUI process to exit.
+$updaterProject = Join-Path $repositoryRoot 'ModernTubeDownloader.Updater\ModernTubeDownloader.Updater.csproj'
+$updaterPublish = Join-Path $publishRoot 'updater'
+Invoke-DotNet -Arguments (@('restore', $updaterProject, '-r', 'win-x64', '-p:SelfContained=true') + $serialBuildProperties)
+Invoke-DotNet -Arguments (@('publish', $updaterProject, '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '--no-restore',
+    '-p:PublishTrimmed=false', '-p:PublishSingleFile=false', '-warnaserror', '-o', $updaterPublish) + $serialBuildProperties)
+Get-ChildItem -LiteralPath $updaterPublish -File | Where-Object Extension -in @('.pdb','.xml') | Remove-Item -Force
+
 Get-ChildItem -LiteralPath $publishRoot | ForEach-Object {
     if ($_.Extension -notin @('.pdb', '.xml') -and
         $_.Name -notlike 'ModernFormsNext.WindowKit.Backend.Tools.MicroCom*') {
@@ -148,6 +157,10 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') -Des
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'SUPPORTED_SOURCES.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'SYSTEM_NOTIFICATIONS.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'COOKIE_SYNC.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'UPDATES.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'TRAY_AND_STARTUP.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'BATCH_IMPORT.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'PERSONALIZATION.md') -Destination $releaseRoot
 Copy-Item -LiteralPath $licensePath -Destination $releaseRoot
 
 # Keep redistribution notices from the exact restored packages, not a moving web page.

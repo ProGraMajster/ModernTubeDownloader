@@ -36,6 +36,7 @@ internal sealed class MediaRangeEditor : Panel
         SizeChanged += (_, _) => LayoutControls();
         ApplyLocalization();
         LayoutControls();
+        AppTypography.RegisterLayout(this, LayoutControls);
     }
 
     public bool TryGetRange(double? durationSeconds, bool activeLive, out MediaTimeRange range, out string? error)
@@ -89,6 +90,11 @@ internal sealed class MediaRangeEditor : Panel
         from.SetBounds(274, 0, Math.Max(66, Math.Min(96, (available - 338) / 2)), 34);
         toLabel.SetBounds(from.Right + 8, 7, 28, 24);
         to.SetBounds(toLabel.Right + 4, 0, Math.Max(66, Math.Min(96, available - toLabel.Right - 4)), 34);
+        AppTypography.ReflowRows(this);
+        if (AppTypography.Scale > 1.25) {
+            label.Width = AppTypography.TextHeight(88); mode.Left = label.Right + 4; mode.Width = AppTypography.TextHeight(142);
+            if (IsCustom) { fromLabel.SetBounds(0, mode.Bottom + 6, AppTypography.TextHeight(36), AppTypography.TextHeight(24)); from.SetBounds(fromLabel.Right + 4, mode.Bottom + 2, AppTypography.TextHeight(96), AppTypography.TextHeight(34)); toLabel.SetBounds(from.Right + 8, fromLabel.Top, AppTypography.TextHeight(32), AppTypography.TextHeight(24)); to.SetBounds(toLabel.Right + 4, from.Top, AppTypography.TextHeight(96), AppTypography.TextHeight(34)); }
+        }
     }
 
     private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(ApplyLocalization);

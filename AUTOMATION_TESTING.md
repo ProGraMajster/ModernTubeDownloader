@@ -4,11 +4,11 @@ ModernTubeDownloader uses the existing ModernFormsNext `AccessibleObject` tree t
 
 ## Start and discover
 
-Candidate.3 adds `NotificationsSection`, `NotificationEnabled`, all individual `Notification<Property>` checkboxes, `NotificationSound`, `NotificationPresentation`, `NotificationDiagnostics`, `NotificationsTest` and `NotificationsReset`. Native smoke: `scripts/Test-Automation.ps1 -NotificationsSmoke -CaptureVisual -Language pl -Theme Dark`. Add `-NotificationManualHoldSeconds 180` only when a human is ready to observe/click the real OS notification. The test uses an isolated data root and fake media tools; OS provider/submission is real, but fake media is not a real download qualification. Close that owned QA process before rebuild or another smoke. Settings now has 14 sections; the scroll regression explicitly checks the new canonical section count.
+Candidate.3 added `NotificationsSection`, `NotificationEnabled`, all individual `Notification<Property>` checkboxes, `NotificationSound`, `NotificationPresentation`, `NotificationDiagnostics`, `NotificationsTest` and `NotificationsReset`. Native smoke: `scripts/Test-Automation.ps1 -NotificationsSmoke -CaptureVisual -Language pl -Theme Dark`. Add `-NotificationManualHoldSeconds 180` only when a human is ready to observe/click the real OS notification. The test uses an isolated data root and fake media tools; OS provider/submission is real, but fake media is not a real download qualification. Close that owned QA process before rebuild or another smoke. Candidate 1.2 Settings has eleven categories; the original scroll regression uses DEBUG-only all-cards mode and checks exactly 18 cards. The old 14-card count is historical.
 
 The UI harness captures only its owned HWND. Native banner/center/cold-click evidence is separate; see [candidate report](CANDIDATE3_NOTIFICATIONS_PIPELINE_REPORT.md). Running with an isolated environment-variable data root does not propagate that root to an Explorer/COM cold launch: do not claim an isolated cold-start test unless profile/identity ownership is established.
 
-Build the Debug application and the CLI from the same pinned ModernFormsNext source checkout (`69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3`, origin/master fetched 2026-10-10):
+Build the Debug application and the CLI from the same pinned ModernFormsNext source checkout (`d36015711f63945a49025675acb9aca3df60101d`, origin/master fetched 2026-10-11):
 
 ```powershell
 dotnet build .\ModernTubeDownloader\ModernTubeDownloader.csproj -c Debug -m:1 /p:UseSharedCompilation=false
@@ -40,7 +40,12 @@ For `SetValue`, supply the value through `--value-stdin`; do not pass URLs or po
 
 | Area | Automation IDs |
 | --- | --- |
-| Main window and navigation | `MainWindow`, `NavDownloads`, `NavLive`, `NavHistory`, `NavSettings` |
+| Main window and navigation | `MainWindow`, `NavDownloads`, `NavLive`, `NavHistory`, `NavOther`, `NavSettings` |
+| Settings categories | `SettingsCategoryGeneral`, `SettingsCategoryDownloads`, `SettingsCategoryLive`, `SettingsCategoryNotifications`, `SettingsCategoryAuthentication`, `SettingsCategoryBrowser`, `SettingsCategoryWebRemote`, `SettingsCategoryUpdates`, `SettingsCategoryStartup`, `SettingsCategoryPersonalization`, `SettingsCategoryAdvanced` |
+| Tray/startup | `TrayEnabled`, `TrayMinimizeBehavior`, `TrayCloseBehavior`, `WindowsAutostartEnabled`, `WindowsAutostartHidden`, `StartupApply` |
+| App updater | `ApplicationUpdatesSection`, `ApplicationUpdateCheck`, `ApplicationUpdateStatus`, `ApplicationUpdateFrequency`, `ApplicationUpdateMode`, `ApplicationUpdateDownload`, `ApplicationUpdateInstall` |
+| Typography/profile | `AppearanceTextPreset`, `AppearanceTextScale`, `AppearanceTextReset`, `AppearanceSection`, `AppearancePresetDefault`, `AppearancePresetCompact`, `AppearancePresetLarge`, `AppearancePresetMinimal`, `AppearanceColorAccent` |
+| Batch | `BatchWindow`, `BatchFilePath`, `BatchSearch`, `BatchQuality`, `BatchContainer`, `BatchWorkers`, `BatchFilter`, `BatchRows`, `BatchStatus`, `BatchSelect<N>`, `BatchEntryTitle<N>`, `BatchEntryStatus<N>` |
 | LIVE | `LiveUrlInput`, `LiveAnalyzeButton`, `LiveStartButton`, `LiveQualitySelector`, `LiveContainerSelector`, `LiveFromNowOption`, `LiveFromStartOption`, `LiveActiveList`, `LiveScheduledList`, `LivePartialList`, `LiveStatistics`, per-session `LiveStopSaveButton-<guid>`, `LiveCancelButton-<guid>`, `LiveResumeButton-<guid>` |
 | Analysis | `DownloadUrlInput`, `PasteButton`, `AnalyzeButton`, `PreviewCard`, `QualitySelector`, `VideoRangeMode`, `VideoRangeStart`, `VideoRangeEnd`, `AddToQueueButton`, `DetailsButton` |
 | Playlist preview | `PlaylistPreview`, `PlaylistTitle`, `PlaylistEntriesList`, `PlaylistEntryToggle<N>`, `PlaylistSelectedCount`, `PlaylistQualitySelector`, `PlaylistRangeMode`, `PlaylistRangeStart`, `PlaylistRangeEnd`, `PlaylistSelectAllButton`, `PlaylistClearSelectionButton`, `PlaylistPreviousPageButton`, `PlaylistNextPageButton`, `PlaylistPageCount`, `PlaylistAddSelectedButton`, `PlaylistAddResult` |
@@ -53,6 +58,45 @@ For `SetValue`, supply the value through `--value-stdin`; do not pass URLs or po
 The Details `*Tab` IDs belong to ModernFormsNext's logical `TabItem` peers. Selecting one exposes the corresponding `Details*Content` page. IDs are independent of PL/EN text and screen geometry. Hidden views and inactive tab pages are not necessarily exposed until selected.
 
 ## Smoke and headless tests
+
+Version 1.2.0 adds these serial native smokes:
+
+```powershell
+.\scripts\Test-Automation.ps1 -TraySmoke -Language pl -Theme Dark
+.\scripts\Test-Automation.ps1 -UpdateSmoke -Language en -Theme Light
+.\scripts\Test-Automation.ps1 -BatchSmoke -Language pl -Theme Dark -AppTextScale 200 -CaptureVisual
+.\scripts\Test-Automation.ps1 -AppearanceSmoke -Language en -Theme Light -WindowWidth 1400 -WindowHeight 950
+.\scripts\Test-Automation.ps1 -SettingsScrollRepro -Language en -Theme Light
+.\scripts\Test-Automation.ps1 -PublishStartupSmoke -ApplicationPath .\artifacts\release\win-x64\ModernTubeDownloader.exe
+.\scripts\Test-Automation.ps1 -PublishStartupSmoke -PublishedUiSmoke -PublishedNoUpdate -ApplicationPath .\artifacts\release\win-x64\ModernTubeDownloader.exe
+```
+
+`-TraySmoke` tests hidden startup/secondary-launch restore/NotifyIcon lifetime without
+changing the user's HKCU Run value; it is not shell pointer/login evidence.
+`-AppearanceSmoke` applies 125/150/175/200/100% on all pages, reopens Details and changes
+presets/accent. Native captures expose MFN composite-font limitations (PERSONALIZATION.md);
+passing actions alone are not complete visual/global-font qualification.
+Appearance capture allocates its bitmap using the same owned HWND measured by GetWindowRect
+as PrintWindow, not potentially clipped semantic-peer bounds. A queued ordinary smoke must
+observe and explicitly accept the active-work ShutdownChoiceWindow before asserting clean
+shutdown; it never disables the production confirmation to make cleanup pass.
+The scheduled-LIVE smoke also requires its active-work shutdown confirmation and
+explicitly chooses Exit; completed LIVE can close without that pending-work dialog.
+`-RealBatchSmoke` checks public metadata, not media downloads; 20 alias rows do not
+mean 20 distinct successful sources. `-PublishStartupSmoke` uses isolated custom QA
+tools, not first-run real provisioning. Historical evidence: candidate implementation report.
+Final local runs are recorded in FINAL_RELEASE_1_2_0.md. MFN #204/#205 are accepted
+post-1.2 typography limitations, not failures of the tested navigation/lifecycle flows.
+
+`-PublishedUiSmoke` launches an external Windows PowerShell UI Automation client
+(`scripts/Test-PublishedUI.ps1`) against only the owned production HWND/PID. It invokes
+Downloads/LIVE/Other, opens/closes Batch, checks Updates/Startup/Personalization and
+persists/resets text scale. `-PublishedNoUpdate` additionally requires the stable
+installed version to report Current with no offered/staged update or install intent.
+Release has no Debug named-pipe endpoint; neither coordinates nor screenshots drive
+these actions. The harness restores any temporary owned URI association to its prior
+values, does not change HKCU Run and retains the isolated profile/logs as local evidence.
+This is published-binary UI smoke, not real provisioning, login or shell-menu evidence.
 
 Quality-dropdown diagnostics now write `quality-dropdown-native-trace.jsonl` in the isolated profile: iteration/timestamp, fresh canonical handle/states/actions, action result, foreground/active/focus/mouse-capture HWND and visible owned popup HWND/dimensions. Assertions are unchanged and the capture no longer inserts an arbitrary delay. Accepted Expand is an action result, not a promise that real outside clicks/window deactivation cannot close the popup before a later request. Preserve such failures and native evidence; do not retry Expand, reset focus, weaken assertions or mislabel correct Collapsed state as a stale peer. Native ComboBox is windowless; its popup/Form, not the control, owns HWNDs. The current minimal native 100-cycle variants and environmental-interruption trace are documented in STABILIZATION_REPORT.md.
 

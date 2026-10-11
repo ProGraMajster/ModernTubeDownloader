@@ -5,6 +5,7 @@ namespace ModernTubeDownloader.Services;
 
 public static class SourcePresentation
 {
+    public static string Host(string? url) => Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : "—";
     public static string Summary(VideoMetadata metadata, LocalizationService text)
     {
         var facts = ExtractorIdentityService.Facts(metadata);

@@ -4,9 +4,28 @@
 
 A Windows desktop application for analyzing, downloading and recording media through [yt-dlp](https://github.com/yt-dlp/yt-dlp), with a native [ModernFormsNext](https://github.com/ProGraMajster/ModernFormsNext) interface.
 
-**[Download v1.1.0 for Windows x64](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.1.0)** · [Changelog](CHANGELOG.md) · [Supported sources](SUPPORTED_SOURCES.md)
+**[Download v1.2.0 for Windows x64](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.2.0)** · [Changelog](CHANGELOG.md) · [Supported sources](SUPPORTED_SOURCES.md)
 
-Current version: **1.1.0**. Historical v1.0.0 remains unchanged. See [cookie synchronization](COOKIE_SYNC.md), [release checklist](RELEASE_CHECKLIST.md) and [yt-dlp feature audit/roadmap](YTDLP_FEATURE_GAP_AUDIT.md).
+Stable version: **1.2.0**. Published assets and workflow results are authoritative on
+the release page. Historical releases remain unchanged. See [cookie synchronization](COOKIE_SYNC.md),
+[release checklist](RELEASE_CHECKLIST.md) and [yt-dlp feature audit/roadmap](YTDLP_FEATURE_GAP_AUDIT.md).
+
+## New in 1.2.0
+
+Adds [tray/autostart](TRAY_AND_STARTUP.md), [SHA-verified application updates](UPDATES.md),
+Other/[Batch import](BATCH_IMPORT.md), [versioned appearance profiles and text scaling](PERSONALIZATION.md),
+and eleven categorized Settings pages. End users of the self-contained ZIP need no
+framework checkout. Text scaling is separate from Windows DPI; two framework composite
+controls have the [known typography limits](#known-limitations) described below.
+
+- Tray supports restore, queue pause/resume, LIVE navigation and work-aware exit confirmation.
+  Windows autostart/hidden start is opt-in and registration repair is explicit.
+- Application updates use stable GitHub Releases, SHA-256 verification and a separate
+  wait-for-exit installer with backup/rollback; media-tool updates remain independent.
+- Other opens Batch import: TXT/CSV/JSON preparation, bounded analysis, paging/filtering,
+  saved sessions and explicit handoff to the existing queue.
+- Personalization adds live 80–200% text scaling, presets, semantic colors, per-page
+  presentation options and validated JSON profile import/export/reset.
 
 ## Features
 
@@ -28,13 +47,42 @@ Current version: **1.1.0**. Historical v1.0.0 remains unchanged. See [cookie syn
 
 Windows 10/11 **x64**, and internet access to install the tools on first start. The self-contained ZIP includes .NET 10: no separate .NET or manual yt-dlp/FFmpeg/Deno installation is required.
 
-1. Download `ModernTubeDownloader-1.1.0-win-x64.zip` from [Releases](https://github.com/ProGraMajster/ModernTubeDownloader/releases).
+1. Download `ModernTubeDownloader-1.2.0-win-x64.zip` from [Releases](https://github.com/ProGraMajster/ModernTubeDownloader/releases).
 2. Extract it to a writable folder. Do not run it from inside the ZIP.
 3. Run `ModernTubeDownloader.exe`.
 
 The ZIP contains the application and runtime, **not** downloaded media tools. First start downloads official yt-dlp, the GPL-configured yt-dlp FFmpeg-Builds archive and Deno into per-user AppData, checks available checksums, safely extracts them and validates executable versions. Failed updates retain the previous working version. Automatic checks are limited to once per 24 hours; installed tools are reused.
 
 This release is not code-signed. Windows may display an unknown-publisher/SmartScreen warning; verify the release source and published SHA-256 before deciding whether to run it.
+
+## Updates
+
+Settings → Application updates checks stable releases. Choose Notify only,
+Auto-download or Install on exit; installation waits for real shutdown and preserves
+local data. Verify published checksums; they are not code signing. See [UPDATES.md](UPDATES.md).
+
+## Tray & startup
+
+Settings → Startup configures minimize/close behavior and optional start with Windows.
+The tray restores the same window and controls the existing queue/LIVE. Active work
+requires confirmation before exit. See [TRAY_AND_STARTUP.md](TRAY_AND_STARTUP.md).
+
+## Other / Batch Import
+
+Other → Batch Import prepares TXT/CSV/JSON URL lists with bounded analysis, statuses,
+filters, pages and saved sessions. Review ready rows and explicitly add them to the
+existing queue. See [BATCH_IMPORT.md](BATCH_IMPORT.md).
+
+## Personalization
+
+Settings → Personalization provides presets, semantic colors, density and per-page
+presentation. Import/export/reset uses validated local JSON and never resets jobs
+or authentication. See [PERSONALIZATION.md](PERSONALIZATION.md).
+
+### Text size
+
+Choose 80–200% live application text size or reset to 100%. This does not change
+Windows DPI or stretch icons/images. See the composite-control limits below.
 
 ## Downloads
 
@@ -70,12 +118,20 @@ SponsorBlock is off by default. **Mark requires explicit MKV** and is the suppor
 
 ## Known limitations
 
+- Text scaling: some tab labels and numeric editors do not fully follow global scaling
+  due to ModernFormsNext [#204](https://github.com/ProGraMajster/ModernFormsNext/issues/204)
+  and [#205](https://github.com/ProGraMajster/ModernFormsNext/issues/205). These are accepted
+  post-1.2 follow-ups, not crashes; no framework workaround is included.
+- Polski: niektóre etykiety kart i edytory liczb nie podążają w pełni za globalnym
+  skalowaniem tekstu z powodu ograniczeń ModernFormsNext #204/#205. Poprawa jest planowana
+  po naprawach frameworka, prawdopodobnie w 1.2.1.
 - yt-dlp/site behavior can change; extractor availability is not an all-URL/all-feature guarantee. DRM circumvention is not implemented.
 - FromStart depends on retained source fragments and is Experimental. Real upcoming/natural-end behavior is source-dependent; scheduled monitoring needs the app running.
 - Resume depends on matching formats, source/protocol and yt-dlp support. An unexplained terminated yt-dlp process can become Failed/Unknown and require explicit Retry; retained partial data is preserved.
 - Custom ranges cannot combine with subtitles or SponsorBlock; Remove cannot combine with subtitles. Active LIVE excludes these VOD post-processing options.
 - Missing subtitle languages or embedding failures produce warnings without discarding completed media. No automatic media transcoding, part concatenation or channel expansion.
-- Exhaustive DPI/device/browser/source matrices and uninterrupted multi-hour soak remain post-1.0 follow-up, not universal compatibility claims.
+- Exhaustive DPI/scale/page/theme, login/tray soak, clean-PC update and multi-source Batch,
+  physical-device and native picker matrices remain post-1.2 QA, not universal compatibility claims.
 
 ## Supported services
 
@@ -85,24 +141,24 @@ Use Supported services to search the runtime catalog from the selected yt-dlp ex
 
 Settings, VOD queue, LIVE sessions, history, metadata/thumbnail caches, `logs/`, crash diagnostics and `Tools/` live under `%LOCALAPPDATA%\ModernTubeDownloader`. Opt-in encrypted cookie profiles and public native manifests use `Auth/`; temporary user-only credential jars use `Auth/tmp/` and are removed at the operation boundary or safe abandoned-jar cleanup. Temporary media defaults to the current user's Downloads/ModernTubeDownloader/Temp folder; final media uses Settings' output directory.
 
-There is no application-owned telemetry or account requirement. Network activity includes tool-release metadata/downloads, yt-dlp's media services/CDNs and optional SponsorBlock requests, and metadata thumbnail retrieval. Web Remote listens only when explicitly enabled. Third-party services/tools have their own terms and privacy policies.
+There is no application-owned telemetry or account requirement. Network activity includes application/tool GitHub release metadata/downloads, yt-dlp's media services/CDNs and optional SponsorBlock requests, and metadata thumbnail retrieval. Application update checks can be disabled in Settings. Appearance, Updates and Batch data stay in the application's local data directory. Web Remote listens only when explicitly enabled. Third-party services/tools have their own terms and privacy policies.
 
 Logs are local and redact common credential/URL data. Known auth values are scrubbed before process callbacks/errors and metadata output; header/cookie/password/authorization metadata fields are removed recursively. Optional JSON sidecars retain other original metadata and can still include source URLs/account-related details: review them and logs before sharing. This is not a guarantee against every unknown upstream secret or forensic recovery.
 
 ## Build from source
 
-Requires the .NET 10 SDK and Node.js for JavaScript tests. Development, CI and Release use ModernFormsNext `69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3` (origin/master fetched 2026-10-11), not a private fork or copied framework source:
+Requires the .NET 10 SDK and Node.js for JavaScript tests. Development, CI and Release use ModernFormsNext `d36015711f63945a49025675acb9aca3df60101d` (origin/master fetched 2026-10-11), not a private fork or copied framework source:
 
 ```powershell
 git clone https://github.com/ProGraMajster/ModernTubeDownloader.git
 cd ModernTubeDownloader
 git clone --no-checkout https://github.com/ProGraMajster/ModernFormsNext.git .mfn-master-worktree
-git -C .mfn-master-worktree checkout --detach 69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3
-dotnet restore .\ModernTubeDownloader.slnx
-dotnet build .\ModernTubeDownloader.slnx -c Debug -m:1 /p:UseSharedCompilation=false
+git -C .mfn-master-worktree checkout --detach d36015711f63945a49025675acb9aca3df60101d
+dotnet restore .\ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj
+dotnet build .\ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj -c Debug -m:1 /p:UseSharedCompilation=false
 ```
 
-Open `ModernTubeDownloader.slnx` in Visual Studio after preparing the dependency checkout. A direct project build can instead specify `-p:ModernFormsNextRoot=C:\src\ModernFormsNext`; the solution itself expects `.mfn-master-worktree`. End users of the ZIP need neither repository.
+Open `ModernTubeDownloader.slnx` or the app project in Visual Studio after preparing the dependency checkout. A direct project build can instead specify `-p:ModernFormsNextRoot=C:\src\ModernFormsNext`; solution references expect `.mfn-master-worktree`. The solution includes the independent Updater. End users of the ZIP need neither repository.
 
 `scripts/Build-Release.ps1` validates and creates the self-contained Windows x64 ZIP, separate symbols ZIP and SHA-256 under ignored `artifacts/release`. Publishing is multi-file, untrimmed, without NativeAOT or ReadyToRun. Debug-only opt-in UI automation is documented in [AUTOMATION_TESTING.md](AUTOMATION_TESTING.md); it is absent from Release.
 

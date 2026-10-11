@@ -80,6 +80,10 @@ public sealed class SystemNotificationCoordinator : IAsyncDisposable
     public bool CenterOnlySupported => Capabilities.GetPlatform<WindowsSystemNotificationCapabilities>()?.Supports(WindowsSystemNotificationFeatures.SuppressPopup) == true;
     public Task<SystemNotificationAccess> GetStatusAsync() => service.GetStatusAsync();
     public Task DrainAsync() { lock (sync) return tail; }
+    public void UpdateReady(string version)
+    { lock (sync) { if (preferences().UpdateReady) Enqueue(() => ShowAsync("update-ready", "application", Guid.Empty, "downloads", "UpdateReady", () => version)); } }
+    public void BatchCompleted(int analyzed, int total)
+    { lock (sync) { if (preferences().BatchAnalysisCompleted) Enqueue(() => ShowAsync("batch-completed", "application", Guid.Empty, "downloads", "BatchAnalysisCompleted", () => text.Get("Notification.BatchSummary", analyzed, total))); } }
 
     public void Attach(DownloadQueueService queue, LiveSessionService sessions)
     {

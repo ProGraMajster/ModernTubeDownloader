@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="ModernTubeDownloader.Authentication/ModernTubeDownloader.Authentication.csproj" />
   <Project Path="ModernTubeDownloader.NativeHost/ModernTubeDownloader.NativeHost.csproj" />
+  <Project Path="ModernTubeDownloader.Updater/ModernTubeDownloader.Updater.csproj" />
   <Project Path="ModernTubeDownloader/ModernTubeDownloader.csproj" />
   <Project Path="ModernTubeDownloader.FakeTool/ModernTubeDownloader.FakeTool.csproj" />
   <Project Path="ModernTubeDownloader.Tests/ModernTubeDownloader.Tests.csproj" />

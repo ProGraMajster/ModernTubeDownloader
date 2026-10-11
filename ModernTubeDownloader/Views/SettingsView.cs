@@ -28,6 +28,17 @@ internal sealed class SettingsView : UserControl
     private readonly Panel resilienceCard;
     private readonly Panel liveCard;
     private readonly NotificationSettingsPanel notificationCard;
+    private readonly StartupSettingsPanel startupCard;
+    private readonly UpdateSettingsPanel updatesCard;
+    private readonly TextScaleSettingsPanel textScaleCard;
+    private readonly PersonalizationSettingsPanel personalizationCard;
+    private readonly FlowLayoutPanel categories = new() { WrapContents = true };
+    private readonly Dictionary<string, Button> categoryButtons = [];
+    private readonly Dictionary<Control, string> cardCategories = [];
+    private string currentCategory = "General";
+    private readonly IDisposable typographyLayout;
+    private readonly Dictionary<Control, int> logicalCardHeights = [];
+    public event EventHandler? InstallUpdateRequested;
     private readonly NumericUpDown liveConcurrency;
     private readonly CheckBox preserveLive;
     private readonly CheckBox resumeLive;
@@ -407,9 +418,24 @@ internal sealed class SettingsView : UserControl
         logs.Click += (_, _) => ShellService.OpenFolderForFile(services.Paths.LogDirectory);
 
         notificationCard = new NotificationSettingsPanel(services);
+        startupCard = new StartupSettingsPanel(services);
+        updatesCard = new UpdateSettingsPanel(services);
+        textScaleCard = new TextScaleSettingsPanel(services);
+        personalizationCard = new PersonalizationSettingsPanel(services);
+        updatesCard.InstallRequested += (_, _) => InstallUpdateRequested?.Invoke(this, EventArgs.Empty);
         scroll.Controls.AddRange([generalCard, toolsCard, behaviorCard, resilienceCard, liveCard, notificationCard, subtitlesCard, sponsorCard,
-            cookiesCard, appearanceCard, browserCard, remoteCard, advancedCard, actionsCard]);
-        Controls.AddRange([header, scroll]);
+            cookiesCard, appearanceCard, textScaleCard, personalizationCard, browserCard, remoteCard, updatesCard, startupCard, advancedCard, actionsCard]);
+        foreach (var card in scroll.Controls) logicalCardHeights[card] = card.Height;
+        foreach (var (name, cards) in new (string, Control[])[] {
+            ("General", [appearanceCard, toolsCard]), ("Downloads", [generalCard, behaviorCard, resilienceCard, subtitlesCard, sponsorCard]),
+            ("Live", [liveCard]), ("Notifications", [notificationCard]), ("Authentication", [cookiesCard]), ("Browser", [browserCard]),
+            ("WebRemote", [remoteCard]), ("Updates", [updatesCard]), ("Startup", [startupCard]), ("Personalization", [textScaleCard, personalizationCard]), ("Advanced", [advancedCard]) })
+        {
+            foreach (var card in cards) cardCategories[card] = name;
+            var button = new Button { AccessibleAutomationId = "SettingsCategory" + name, Width = 160, Height = 36, Margin = new Padding(0, 0, 8, 8) };
+            AppUi.Secondary(button); button.Click += (_, _) => ShowCategory(name); categories.Controls.Add(button); categoryButtons[name] = button;
+        }
+        AppUi.BindBackground(categories); Controls.AddRange([header, categories, scroll]);
         SizeChanged += ViewSizeChanged;
         scroll.SizeChanged += ScrollSizeChanged;
         services.Tools.Changed += ToolsChanged;
@@ -417,11 +443,25 @@ internal sealed class SettingsView : UserControl
         text.LanguageChanged += LanguageChanged;
         ApplyLocalization();
         LoadValues();
+#if DEBUG
+        // Opt-in regression fixture only: retain the original all-card scroll test.
+        // Production always uses categorized Settings, with no extra user-facing route.
+        if (Environment.GetEnvironmentVariable("MODERNTUBEDOWNLOADER_QA_ALL_SETTINGS") == "1") currentCategory = "All";
+#endif
         UpdateLayout();
+        typographyLayout = AppTypography.RegisterLayout(UpdateLayout);
         remoteClock = new System.Threading.Timer(_ =>
         {
             if (!remoteDisposed) Application.RunOnUIThread(() => { if (!remoteDisposed) UpdatePairingCode(); });
         }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+    internal void ShowCategory(string category)
+    {
+        currentCategory = category;
+        scroll.VerticalScrollProperties.Value = 0;
+        foreach (var (card, name) in cardCategories) card.Visible = category == "All" || category == name;
+        foreach (var (name, button) in categoryButtons) AppUi.NavigationButton(button, name == category);
+        UpdateLayout();
     }
 
     private Panel CreateSection(int height, string titleKey, string descriptionKey)
@@ -524,25 +564,38 @@ internal sealed class SettingsView : UserControl
 
     private void UpdateLayout()
     {
+        foreach (var card in logicalCardHeights.Keys) AppTypography.UnflowRows(card, true);
         const int page = 24;
         var width = Math.Max(560, ClientSize.Width - (page * 2));
-        header.SetBounds(page, 14, width, 60);
-        pageTitle.SetBounds(0, 0, width, 32);
-        pageSubtitle.SetBounds(0, 34, width, 24);
-        scroll.SetBounds(0, 82, ClientSize.Width, Math.Max(120, ClientSize.Height - 82));
+        header.SetBounds(page, 14, width, AppTypography.TextHeight(60));
+        pageTitle.SetBounds(0, 0, width, AppTypography.TextHeight(32));
+        pageSubtitle.SetBounds(0, pageTitle.Bottom + 2, width, AppTypography.TextHeight(24));
+        var categoryWidth = Math.Max(540, ClientSize.Width - 48);
+        var buttonWidth = Math.Min(categoryWidth, AppTypography.TextHeight(160));
+        foreach (var button in categoryButtons.Values) { button.Width = buttonWidth; button.Height = AppTypography.TextHeight(36); }
+        categories.SetBounds(24, header.Bottom + 8, categoryWidth, (int)Math.Ceiling(11d / Math.Max(1, categoryWidth / (buttonWidth + 8))) * AppTypography.TextHeight(44));
+        scroll.SetBounds(0, categories.Bottom + 8, ClientSize.Width, Math.Max(120, ClientSize.Height - categories.Bottom - 8));
 
         var cardWidth = Math.Max(540, scroll.ClientSize.Width - 60);
         notificationCard.LayoutForWidth(cardWidth);
+        startupCard.LayoutForWidth(cardWidth);
+        updatesCard.LayoutForWidth(cardWidth);
+        textScaleCard.LayoutForWidth(cardWidth);
+        personalizationCard.LayoutForWidth(cardWidth);
         // ScrollableControl physically offsets child bounds while scrolling. Rebuild the
         // explicit card layout from its translated display origin, not from unscrolled Y=0.
         var displayOrigin = scroll.DisplayRectangle.Location;
+        remoteCard.Height = AppTypography.TextHeight((remoteRequireAuth.Checked ? 472 : 372) + (remoteHttps.Checked ? 264 : 158) + (remoteQr.Visible ? 150 : 0));
         var top = displayOrigin.Y;
         foreach (var card in new[] { generalCard, toolsCard, behaviorCard, resilienceCard, liveCard, notificationCard, subtitlesCard, sponsorCard,
-                     cookiesCard, appearanceCard, browserCard, remoteCard, advancedCard, actionsCard })
+                     cookiesCard, appearanceCard, textScaleCard, personalizationCard, browserCard, remoteCard, updatesCard, startupCard, advancedCard, actionsCard })
         {
+            if (card != actionsCard) card.Visible = currentCategory == "All" || cardCategories.GetValueOrDefault(card) == currentCategory;
+            if (!card.Visible) continue;
+            if (card != textScaleCard && card != remoteCard && card != personalizationCard) card.Height = AppTypography.TextHeight(logicalCardHeights.GetValueOrDefault(card, card.Height));
             card.SetBounds(page + displayOrigin.X, top, cardWidth, card.Height);
-            top = card.Bottom + 14;
-            if (!ReferenceEquals(card, actionsCard) && !ReferenceEquals(card, notificationCard))
+            top = card.Bottom + services.Appearance.Profile.Settings.SectionSpacing;
+            if (!ReferenceEquals(card, actionsCard) && !ReferenceEquals(card, notificationCard) && !ReferenceEquals(card, startupCard) && !ReferenceEquals(card, updatesCard) && !ReferenceEquals(card, textScaleCard) && card != personalizationCard)
                 ResizeSectionHeader(card);
         }
 
@@ -649,6 +702,13 @@ internal sealed class SettingsView : UserControl
         save.SetBounds(24, 22, 166, 40);
         logs.SetBounds(200, 22, 178, 40);
         feedback.SetBounds(394, 30, Math.Max(120, cardWidth - 418), 28);
+        foreach (var card in logicalCardHeights.Keys) if (card != textScaleCard && card != personalizationCard) AppTypography.ReflowRows(card, true);
+        // Compact cards trim only spare bottom space, never any visible setting.
+        if (services.Appearance.Profile.Settings.CompactCards)
+            foreach (var card in cardCategories.Keys.Where(c => c.Visible && c != personalizationCard && c != textScaleCard))
+                card.Height = Math.Max(AppTypography.TextHeight(100), card.Controls.Where(c => c.Visible).Select(c => c.Bottom + 12).DefaultIfEmpty(card.Height).Max());
+        top = displayOrigin.Y;
+        foreach (var card in scroll.Controls.Where(c => c.Visible)) { card.Top = top; top = card.Bottom + services.Appearance.Profile.Settings.SectionSpacing; }
     }
 
     private static void ResizeSectionHeader(Panel card)
@@ -1133,6 +1193,7 @@ internal sealed class SettingsView : UserControl
     private void ApplyLocalization()
     {
         cookieSync.Localize();
+        foreach (var (name, button) in categoryButtons) button.Text = text["Settings.Category." + name];
         pageTitle.Text = text["Settings.Title"];
         pageSubtitle.Text = text["Settings.Subtitle"];
         foreach (var pair in localizedText)
@@ -1348,6 +1409,7 @@ internal sealed class SettingsView : UserControl
         if (disposing)
         {
             remoteDisposed = true;
+            typographyLayout.Dispose();
             remoteClock.Dispose();
             services.Tools.Changed -= ToolsChanged;
             services.WebRemote.Changed -= RemoteChanged;

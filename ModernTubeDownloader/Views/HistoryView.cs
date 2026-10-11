@@ -71,17 +71,20 @@ internal sealed class HistoryView : UserControl
         ApplyLocalization();
         RefreshItems();
         UpdateLayout();
+        AppTypography.RegisterLayout(this, UpdateLayout);
     }
 
     private void UpdateLayout()
     {
         const int page = 28;
         var width = Math.Max(540, ClientSize.Width - (page * 2));
-        header.SetBounds(page, 14, width, 62);
+        header.SetBounds(page, 14, width, AppTypography.TextHeight(62));
         pageTitle.SetBounds(0, 0, width, 36);
         pageSubtitle.SetBounds(0, 38, width, 24);
-        searchPanel.SetBounds(page, 84, width, 76);
+        AppTypography.ReflowRows(header);
+        searchPanel.SetBounds(page, header.Bottom + 8, width, AppTypography.TextHeight(76));
         search.SetBounds(18, 16, width - 36, 44);
+        AppTypography.ReflowRows(searchPanel);
         var contentTop = searchPanel.Bottom + 14;
         var contentHeight = Math.Max(120, ClientSize.Height - contentTop - 18);
         list.SetBounds(page, contentTop, width, contentHeight);

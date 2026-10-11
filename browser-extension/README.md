@@ -1,4 +1,4 @@
-# ModernTubeDownloader Browser Extension (1.1.0)
+# ModernTubeDownloader Browser Extension (1.2.0)
 
 Unpacked Manifest V3 extension for Chrome/Edge. Toolbar and page/link menus hand off ordinary HTTP/HTTPS URLs to the desktop. yt-dlp determines actual support; accepting a URL is not a promise it can be downloaded. In-page buttons are adapter-based enhancements, currently YouTube only. No browser-store release is published.
 

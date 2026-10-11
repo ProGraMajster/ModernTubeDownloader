@@ -73,7 +73,7 @@ internal sealed class QueueItemCard : UserControl
         {
             Visible = false,
             TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font("Segoe UI", 10.5f, FontStyle.Bold)
+            Font = AppTypography.Font(10.5f, FontStyle.Bold)
         };
         AppUi.BindBackground(positionBadge, AppThemeTokens.NavigationSelected);
         AppUi.BindForeground(positionBadge, AppThemeTokens.NavigationSelectedText);
@@ -82,9 +82,9 @@ internal sealed class QueueItemCard : UserControl
         title = AppUi.Heading(string.Empty, 13.5f);
         subtitle = AppUi.Muted();
         status = AppUi.Muted();
-        status.Font = new Font("Segoe UI", 10.5f, FontStyle.Bold);
+        AppTypography.Bind(status, 10.5f, FontStyle.Bold);
         transfer = AppUi.Muted();
-        transfer.Font = new Font("Segoe UI", 10.25f);
+        AppTypography.Bind(transfer, 10.25f);
         transfer.TextAlign = ContentAlignment.TopRight;
         progress = new ProgressBar { Minimum = 0, Maximum = 100 };
         primaryAction = new Button();
@@ -111,6 +111,9 @@ internal sealed class QueueItemCard : UserControl
         Controls.AddRange([thumbnail, title, subtitle, status, transfer, progress, primaryAction, secondaryAction, moreAction, positionBadge]);
         positionBadge.BringToFront();
         LayoutControls();
+        AppTypography.RegisterLayout(this, () => { LayoutControls(); if (currentItem is not null) UpdateItem(currentItem, selected); });
+        MouseEnter += (_, _) => ShowActions(true); MouseLeave += (_, _) => ShowActions(false);
+        foreach (var button in new[] { primaryAction, secondaryAction, moreAction }) { button.GotFocus += (_, _) => ShowActions(true); button.MouseEnter += (_, _) => ShowActions(true); }
     }
 
     public event EventHandler<QueueItemActionEventArgs>? ActionRequested;
@@ -132,7 +135,8 @@ internal sealed class QueueItemCard : UserControl
         secondaryAction.AccessibleAutomationId = $"QueueSecondaryAction-{item.Id:N}";
         selected = isSelected;
         title.Text = item.Title;
-        subtitle.Text = $"{item.Channel}  •  {text[$"Quality.{QualityPreset.Find(item.QualityPresetId).Id}"]}" +
+        var appearance = AppearancePresentation.Current.Downloads;
+        subtitle.Text = (appearance.ShowAuthor ? item.Channel + "  •  " : "") + (appearance.ShowSource ? SourcePresentation.Host(item.SourceUrl) + "  •  " : "") + $"{text[$"Quality.{QualityPreset.Find(item.QualityPresetId).Id}"]}" +
             (string.IsNullOrWhiteSpace(item.PlaylistTitle) ? string.Empty : $"  •  {text.Get("Queue.PlaylistPart", item.PlaylistTitle)}") +
             (item.RequestedRange is { Mode: MediaRangeMode.Custom } ? $"  •  {item.RequestedRange.DisplayText}" : string.Empty);
         var localizedStatus = item.Status == DownloadStatus.Waiting && item.RetryDelaySeconds > 0
@@ -154,6 +158,7 @@ internal sealed class QueueItemCard : UserControl
             _ => AppThemeTokens.TextSecondary
         });
         ConfigureActions(item);
+        ShowActions(selected);
         BuildContextMenu(item);
         AppUi.BindBackground(this, isSelected ? AppThemeTokens.NavigationSelected : AppThemeTokens.Surface);
 
@@ -168,10 +173,13 @@ internal sealed class QueueItemCard : UserControl
     {
         var innerWidth = Math.Max(460, Width - 36);
         var compact = innerWidth < 760;
-        Height = compact ? 204 : 150;
-        thumbnail.SetBounds(18, 18, compact ? 144 : 168, compact ? 81 : 94);
+        var appearance = AppearancePresentation.Current.Downloads;
+        var density = AppearancePresentation.DensityExtra(appearance.CardDensity);
+        Height = AppTypography.TextHeight((compact ? 204 : 150) + density);
+        var imageWidth = AppearancePresentation.ImageWidth(appearance.ThumbnailSize, compact ? 144 : 168);
+        thumbnail.Visible = imageWidth > 0; thumbnail.SetBounds(18, 18, imageWidth, imageWidth * 9 / 16);
         positionBadge.SetBounds(thumbnail.Left + 8, thumbnail.Top + 8, 34, 27);
-        var infoLeft = thumbnail.Right + 16;
+        var infoLeft = imageWidth == 0 ? 18 : thumbnail.Right + AppearancePresentation.Spacing(16);
         var actionsWidth = compact ? 0 : 132;
         var actionsLeft = Width - 18 - actionsWidth;
         var infoRight = compact ? Width - 18 : actionsLeft - 18;
@@ -182,6 +190,8 @@ internal sealed class QueueItemCard : UserControl
         status.SetBounds(infoLeft, 76, statusWidth, 24);
         transfer.SetBounds(infoLeft + statusWidth, 76, Math.Max(80, infoWidth - statusWidth), 24);
         progress.SetBounds(compact ? 18 : infoLeft, compact ? 119 : 112, compact ? Width - 36 : infoWidth, 10);
+        progress.Visible = appearance.Progress != ProgressPresentation.Hidden;
+        progress.Height = appearance.Progress == ProgressPresentation.Compact ? 4 : 10;
 
         if (compact)
         {
@@ -195,6 +205,8 @@ internal sealed class QueueItemCard : UserControl
             secondaryAction.SetBounds(actionsLeft, 59, 132, 38);
             moreAction.SetBounds(actionsLeft + 88, 103, 44, 34);
         }
+        if (density < 0) { primaryAction.Top = Math.Max(15, primaryAction.Top + density); secondaryAction.Top = Math.Max(59, secondaryAction.Top + density); moreAction.Top += density; progress.Top += density / 2; }
+        AppTypography.ReflowRows(this);
     }
 
     private void AnimateProgressTo(int target)
@@ -203,9 +215,10 @@ internal sealed class QueueItemCard : UserControl
         if (start == target)
             return;
 
+        if (!AppearancePresentation.Current.Global.Animations) { progress.Value = target; return; }
         progress.Animate(
             "QueueProgress",
-            TimeSpan.FromMilliseconds(180),
+            TimeSpan.FromMilliseconds(AppearancePresentation.AnimationMilliseconds(180)),
             eased => progress.Value = (int)Math.Round(start + ((target - start) * eased)),
             Easings.CubicOut);
     }
@@ -230,11 +243,12 @@ internal sealed class QueueItemCard : UserControl
     private string BuildTransferText(DownloadQueueItem item)
     {
         var parts = new List<string> { $"{item.ProgressPercent:F0}%" };
-        if (item.DownloadedBytes is { } downloaded)
+        var appearance = AppearancePresentation.Current.Downloads;
+        if (appearance.ShowFileSize && item.DownloadedBytes is { } downloaded)
             parts.Add(item.TotalBytes is { } total ? $"{FormatBytes(downloaded)} / {FormatBytes(total)}" : FormatBytes(downloaded));
-        if (item.SpeedBytesPerSecond is { } speed)
+        if (appearance.ShowSpeed && item.SpeedBytesPerSecond is { } speed)
             parts.Add($"{FormatBytes((long)speed)}/s");
-        if (item.Eta is { } eta)
+        if (appearance.ShowEta && item.Eta is { } eta)
             parts.Add(text.Get("Queue.Eta", eta.ToString(@"mm\:ss")));
         return string.Join("  ", parts);
     }
@@ -273,6 +287,11 @@ internal sealed class QueueItemCard : UserControl
                 SetAction(secondaryAction, text["Common.OpenFolder"], QueueItemAction.OpenFolder);
                 break;
         }
+    }
+    private void ShowActions(bool show)
+    {
+        show |= AppearancePresentation.Current.Downloads.Actions == ActionPresentation.Always || selected || primaryAction.Focused || secondaryAction.Focused || moreAction.Focused;
+        foreach (var button in new[] { primaryAction, secondaryAction, moreAction }) button.Opacity = show ? 1 : 0;
     }
 
     private void BuildContextMenu(DownloadQueueItem item)

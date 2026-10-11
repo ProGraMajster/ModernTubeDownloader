@@ -13,13 +13,18 @@ internal sealed class VideoDetailsForm : Form
     private readonly VideoMetadata metadata;
     private readonly LocalizationService text;
     private readonly TabControl tabs;
+    private readonly ThumbnailCacheService? thumbnails;
+    private readonly CancellationTokenSource lifetime = new();
+    private bool disposed;
+    private readonly IDisposable typographyLayout;
 
-    public VideoDetailsForm(VideoMetadata metadata, LocalizationService text)
+    public VideoDetailsForm(VideoMetadata metadata, LocalizationService text, ThumbnailCacheService? thumbnails = null)
     {
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(text);
         this.metadata = metadata;
         this.text = text;
+        this.thumbnails = thumbnails;
         AccessibilityObject.AutomationId = "DetailsWindow";
         AppBranding.Apply(this);
         Size = new System.Drawing.Size(980, 740);
@@ -29,12 +34,17 @@ internal sealed class VideoDetailsForm : Form
         Controls.Add(tabs);
         text.LanguageChanged += LanguageChanged;
         BuildTabs();
+        typographyLayout = AppTypography.RegisterLayout(BuildTabs);
     }
 
     private void BuildTabs()
     {
         Text = text.Get("Details.WindowTitle", DisplayValue(metadata.Title, text["Details.Untitled"]));
+        var selected = tabs.SelectedIndex;
+        foreach (var oldPage in tabs.TabPages.ToArray()) oldPage.Dispose();
         tabs.TabPages.Clear();
+        tabs.TabSpacing = AppearancePresentation.Current.Details.Tabs == DetailsTabStyle.Compact ? 0 : 6;
+        tabs.TabMinWidth = AppearancePresentation.Current.Details.Tabs == DetailsTabStyle.Compact ? 64 : 100;
         AddTextTab(text["Details.Overview"], "DetailsOverviewContent", BuildOverview());
         AddTextTab(text["Sources.Source"], "DetailsSourceContent", SourcePresentation.Details(metadata, text));
         AddTextTab(text["Details.Metadata"], "DetailsMetadataContent", BuildMetadata());
@@ -50,6 +60,7 @@ internal sealed class VideoDetailsForm : Form
             if (accessible.GetChild(child) is { ControlType: AccessibleControlType.TabItem } peer)
                 peer.AutomationId = ids[index++];
         }
+        if (selected >= 0 && selected < tabs.TabPages.Count) tabs.SelectedIndex = selected;
     }
 
     private void AddTextTab(string title, string automationId, string value)
@@ -63,13 +74,28 @@ internal sealed class VideoDetailsForm : Form
             MultiLine = true,
             ReadOnly = true,
             Text = value,
-            Padding = new Padding(16),
+            Padding = new Padding(AppearancePresentation.Current.Details.MetadataDensity switch { AppearanceDensity.Compact => 8, AppearanceDensity.Comfortable => 24, _ => 16 }),
             TextAlign = ContentAlignment.TopLeft,
             ScrollBars = ScrollBars.Vertical
         };
         content.AccessibleAutomationId = automationId + "Text";
         AppUi.Input(content);
         page.Controls.Add(content);
+        if (automationId == "DetailsMetadataContent" && AppearancePresentation.Current.Details.CollapseTechnical)
+        {
+            var show = new Button { Text = text["Appearance.ShowTechnical"], Dock = DockStyle.Top, Height = AppTypography.TextHeight(40), AccessibleAutomationId = "DetailsShowTechnical" }; AppUi.Secondary(show);
+            content.Visible = false; show.Click += (_, _) => { content.Visible = true; show.Visible = false; }; page.Controls.Add(show);
+        }
+        if (automationId == "DetailsOverviewContent" && thumbnails is not null && AppearancePresentation.Current.Details.ThumbnailSize != AppearanceSize.None)
+        {
+            var image = new PictureBox { Dock = DockStyle.Top, Height = AppearancePresentation.ImageWidth(AppearancePresentation.Current.Details.ThumbnailSize, 160) * 9 / 16, SizeMode = PictureBoxSizeMode.Zoom };
+            page.Controls.Add(image); _ = LoadImageAsync(image);
+        }
+    }
+    private async Task LoadImageAsync(PictureBox image)
+    {
+        try { var bitmap = await thumbnails!.GetAsync(metadata.ThumbnailUrl, lifetime.Token); if (!disposed && image.Parent is not null) image.Image = bitmap; }
+        catch (OperationCanceledException) { }
     }
 
     private string BuildOverview() => string.Join(Environment.NewLine,
@@ -182,8 +208,11 @@ internal sealed class VideoDetailsForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !disposed)
+        {
+            disposed = true; typographyLayout.Dispose(); lifetime.Cancel(); lifetime.Dispose();
             text.LanguageChanged -= LanguageChanged;
+        }
         base.Dispose(disposing);
     }
 }

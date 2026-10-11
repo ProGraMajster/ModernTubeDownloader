@@ -1,5 +1,50 @@
 # Current status
 
+## Release 1.2.0 — 2026-10-11
+
+Qualification: **READY WITH KNOWN LIMITATIONS**. Published status is recorded by the
+linked GitHub Release/workflow; final post-publication results are in the local report.
+
+Version/InformationalVersion: **1.2.0**; AssemblyVersion/FileVersion: **1.2.0.0**.
+Clean MFN origin/master fetched 2026-10-11: `d36015711f63945a49025675acb9aca3df60101d`.
+No framework edits. The owner explicitly authorized master push, exact-head CI,
+annotated v1.2.0 and the existing public release workflow on 2026-10-11.
+The [release page](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.2.0)
+is the published-asset authority; local `FINAL_RELEASE_1_2_0.md` records final run URLs,
+hashes and downloaded-asset smoke without a post-tag status commit.
+Implemented: tray/hidden startup, owned HKCU Run registration boundary, independent
+GitHub app updater with SHA-256/transactional rollback, Other tools hub, streaming
+Batch preparation with bounded workers/paged UI, central 80–200% typography,
+schema-1 appearance profiles/presets/live per-page settings and eleven Settings categories.
+Existing queue/LIVE/auth/notification ownership is retained.
+
+Fresh final local validation: restore, Debug/Release **713/713 each**, extension/Web Remote
+JS **92/92**, zero warnings/errors/skips, self-contained GUI/NativeHost/Updater publish
+and **810-entry** ZIP hygiene. Native tray/hidden start/same-instance restore, update check,
+PL/Dark Batch at 200%, EN/Light appearance at 100/125/150/175/200/reset, 20-toggle Settings
+scrolling, EN/Dark range/Details, active and scheduled LIVE fixtures and cookie Settings pass.
+The Release UIA client uses production accessibility without a Debug endpoint: Downloads,
+LIVE, Other/Batch, Updates, Startup, Personalization, text 125/reset, Current/no self-update
+and clean close pass in an isolated profile. No HKCU Run changes; temporary URI association
+restored. Custom QA tools/fixtures are not real provisioning/media-download evidence.
+Synthetic updater installation/checksum rejection/rollback preserves userdata; source/history
+privacy scan has no findings. Historical real Batch YouTube metadata/one paused handoff passed;
+Vimeo failed upstream. Multi-source acceptance is PARTIAL. Candidate baseline counts/hash and
+the earlier release decision are preserved in its dated implementation report.
+
+Known limitation, **NOT RELEASE BLOCKER**: MFN implicit TabStrip labels/NumericUpDown
+digits do not follow their owner's font; complete global text scaling remains PARTIAL.
+Tracked by [#204](https://github.com/ProGraMajster/ModernFormsNext/issues/204) and
+[#205](https://github.com/ProGraMajster/ModernFormsNext/issues/205); repro: PERSONALIZATION.md.
+Physical DPI/login/shell tray gestures, clean-PC update/restart, exhaustive large-font
+clipping, human file/color dialogs and long-running soak are NOT EXECUTED.
+These gaps are accepted **POST-1.2 QA / PARTIAL / NOT EXECUTED**, not evidence of PASS
+and not blockers. Crashes, data loss, corrupt state, security leaks, broken core flows,
+CI or package failures still block publication. Fresh final validation is recorded
+in the final report; the candidate report retains historical counts/hash/earlier decision.
+Planned: fix MFN #204, then #205 upstream, update the app's pin, qualify a likely 1.2.1.
+The v1.1.0 and older records below describe historical pins/results, not current release qualification.
+
 ## Release 1.1.0 — 2026-10-11
 
 Version/InformationalVersion: **1.1.0**; AssemblyVersion/FileVersion: **1.1.0.0**. Development, CI and Release use clean ModernFormsNext master `69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3`, freshly fetched 2026-10-11; no framework edits. Public publication is governed by the exact-SHA CI/tag workflow and [GitHub Release](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.1.0), not by the historical candidate records below. The post-publication local `FINAL_RELEASE_1_1_0.md` records final hashes/run URLs without adding a post-tag status commit.

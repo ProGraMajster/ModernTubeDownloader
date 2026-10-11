@@ -68,6 +68,7 @@ internal sealed class LiveView : UserControl
         services.Live.Changed += StateChanged; text.LanguageChanged += LanguageChanged;
         clock = new System.Threading.Timer(_ => QueueRefresh(), null, 1000, 1000);
         ApplyText(); RefreshSessions(); LayoutPage();
+        AppTypography.RegisterLayout(this, LayoutPage);
     }
 
     public event EventHandler<string>? OpenDownloadsRequested;
@@ -203,9 +204,9 @@ internal sealed class LiveView : UserControl
     {
         var width = Math.Max(480, scroll.ClientSize.Width - 56);
         var origin = scroll.DisplayRectangle.Location;
-        heading.SetBounds(origin.X + 28, origin.Y + 16, width, 38);
-        statistics.SetBounds(origin.X + 28, origin.Y + 54, width, 24);
-        analysis.SetBounds(origin.X + 28, origin.Y + 90, width, start.Visible ? 318 : vod.Visible ? 208 : 160);
+        heading.SetBounds(origin.X + 28, origin.Y + 16, width, AppTypography.TextHeight(38));
+        statistics.SetBounds(origin.X + 28, heading.Bottom, width, AppTypography.TextHeight(24));
+        analysis.SetBounds(origin.X + 28, statistics.Bottom + 16, width, AppTypography.TextHeight(start.Visible ? 318 : vod.Visible ? 208 : 160));
         url.SetBounds(18, 18, Math.Max(220, width - 190), 40);
         analyze.SetBounds(width - 158, 18, 140, 40);
         title.SetBounds(18, 72, width - 36, 28);
@@ -214,14 +215,16 @@ internal sealed class LiveView : UserControl
         fromNow.SetBounds(18, 198, width - 36, 30);
         fromStart.SetBounds(18, 232, width - 36, 30);
         start.SetBounds(18, 272, 260, 36); vod.SetBounds(18, 152, 280, 38);
+        AppTypography.ReflowRows(analysis);
         var top = analysis.Bottom + 18;
         foreach (var section in sections)
         {
-            section.Panel.SetBounds(origin.X + 28, top, width, 52 + section.List.Controls.Count * LiveSessionCard.CardHeight);
-            section.Heading.SetBounds(0, 0, width, 32);
-            section.List.SetBounds(0, 38, width, Math.Max(1, section.List.Controls.Count * LiveSessionCard.CardHeight));
+            var listHeight = section.List.Controls.Sum(c => c.Height + c.Margin.Bottom);
+            section.Panel.SetBounds(origin.X + 28, top, width, AppTypography.TextHeight(52) + listHeight);
+            section.Heading.SetBounds(0, 0, width, AppTypography.TextHeight(32));
+            section.List.SetBounds(0, AppTypography.TextHeight(38), width, Math.Max(1, listHeight));
             foreach (var card in section.List.Controls.OfType<LiveSessionCard>()) card.Width = width;
-            section.Empty.SetBounds(0, 34, width, 22); section.Empty.Visible = section.List.Controls.Count == 0;
+            section.Empty.SetBounds(0, AppTypography.TextHeight(34), width, AppTypography.TextHeight(22)); section.Empty.Visible = section.List.Controls.Count == 0;
             top = section.Panel.Bottom + 14;
         }
     }
@@ -276,6 +279,10 @@ internal sealed class LiveSessionCard : Panel
     private readonly Button details = new();
     private readonly Button folder = new();
     private LiveSession? current;
+    private readonly PictureBox thumbnail = new() { SizeMode = PictureBoxSizeMode.Zoom };
+    private string? imageUrl;
+    private readonly CancellationTokenSource imageLifetime = new();
+    private bool imageDisposed;
 #if DEBUG
     internal Func<Form, IDisposable?>? RegisterDetailsForAutomation { get; set; }
 #endif
@@ -285,11 +292,12 @@ internal sealed class LiveSessionCard : Panel
         Height = CardHeight - 12; Margin = new Padding(0, 0, 0, 12); AppUi.Card(this);
         AppUi.Primary(primary); AppUi.Secondary(secondary); AppUi.Secondary(details);
         AppUi.Secondary(folder);
-        facts.Multiline = true; Controls.AddRange([title, state, facts, primary, secondary, details, folder]);
+        facts.Multiline = true; Controls.AddRange([title, state, facts, primary, secondary, details, folder, thumbnail]);
         primary.Click += (_, _) => Act(); secondary.Click += (_, _) => Secondary(); details.Click += async (_, _) => await ShowDetailsAsync();
         folder.Click += (_, _) => { if (current?.Parts.LastOrDefault() is { } path && Directory.Exists(Path.GetDirectoryName(path)))
             Process.Start(new ProcessStartInfo("explorer.exe", Path.GetDirectoryName(path)!) { UseShellExecute = true }); };
         SizeChanged += (_, _) => LayoutCard(); LayoutCard();
+        AppTypography.RegisterLayout(this, () => { LayoutCard(); if (current is not null) UpdateSession(current); });
     }
     public void UpdateSession(LiveSession session)
     {
@@ -302,12 +310,17 @@ internal sealed class LiveSessionCard : Panel
             ? text.Get("Live.ScheduledStart", scheduled.ToLocalTime().ToString("g", text.Culture)) + " • "
             : session.RecordingStartedAt is { } started
                 ? text["Live.StartedLabel"] + ": " + started.ToLocalTime().ToString("g", text.Culture) + " • " : string.Empty;
-        facts.Text = $"{session.RecordedDuration:hh\\:mm\\:ss} • {session.BytesWritten / 1048576d:F1} MiB • " +
-            (session.CurrentSpeed is { } speed ? $"{speed / 1048576d:F2} MiB/s" : "—") +
-            $" • {text[$"Quality.{session.QualityPresetId}"]} • MKV • {text[session.StartPolicy == LiveStartPolicy.FromStart ? "Live.FromStart" : "Live.FromNow"]}\n" +
-            timingText + (session.State == LiveSessionState.Reconnecting ? text.Get("Live.ResumeAttempt", session.AttemptCount, session.MaximumAttempts) + " • " : string.Empty) +
-            (countdown is { } due ? text.Get("Live.NextCheck", Math.Max(0, (int)(due - DateTimeOffset.UtcNow).TotalSeconds))
-                : session.FailureMessageKey is { } failure ? text[failure] : text.Get("Live.PartCount", session.Parts.Count));
+        var appearance = AppearancePresentation.Current.Live;
+        var pieces = new List<string>();
+        if (appearance.ShowElapsed) pieces.Add(session.RecordedDuration.ToString(@"hh\:mm\:ss"));
+        if (appearance.ShowBytes) pieces.Add($"{session.BytesWritten / 1048576d:F1} MiB");
+        if (appearance.ShowSource) pieces.Add(SourcePresentation.Host(session.SourceUrl));
+        if (appearance.ShowParts) pieces.Add(text.Get("Live.PartCount", session.Parts.Count));
+        if (appearance.ShowReconnectCount) pieces.Add(text["Live.ReconnectCount"] + ": " + session.ResumeCount);
+        facts.Text = string.Join(" • ", pieces) + Environment.NewLine + timingText +
+            (countdown is { } next ? text.Get("Live.NextCheck", Math.Max(0, (int)(next - DateTimeOffset.UtcNow).TotalSeconds)) : session.FailureMessageKey is { } failureKey ? text[failureKey] : text[$"Quality.{session.QualityPresetId}"]);
+        AppUi.BindBackground(this, appearance.EmphasizeActive && session.IsActive ? AppThemeTokens.NavigationSelected : AppThemeTokens.Surface);
+        if (appearance.ThumbnailSize != AppearanceSize.None && imageUrl != session.ThumbnailUrl) { imageUrl = session.ThumbnailUrl; _ = LoadImageAsync(imageUrl); }
         primary.Visible = session.IsActive || session.CanResume || session.State == LiveSessionState.WaitingForLive;
         primary.Text = text[session.IsActive ? "Live.StopAndSave" : session.State == LiveSessionState.WaitingForLive ? "Live.Edit" : "Live.Resume"];
         primary.AccessibleAutomationId = (session.IsActive ? "LiveStopSaveButton-" : session.State == LiveSessionState.WaitingForLive ? "LiveEditButton-" : "LiveResumeButton-") + session.Id.ToString("N");
@@ -317,6 +330,13 @@ internal sealed class LiveSessionCard : Panel
         details.Text = text["Common.Details"]; details.AccessibleAutomationId = "LiveDetailsButton-" + session.Id.ToString("N");
         folder.Visible = session.Parts.Count > 0;
         folder.Text = text["Common.OpenFolder"]; folder.AccessibleAutomationId = "LiveOpenFolderButton-" + session.Id.ToString("N");
+        LayoutCard();
+    }
+    private async Task LoadImageAsync(string? expected)
+    {
+        try { var image = await services.Thumbnails.GetAsync(expected, imageLifetime.Token); if (!imageDisposed && imageUrl == expected) thumbnail.Image = image; }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { services.Logger.Error("LIVE thumbnail unavailable.", ex); }
     }
     private void Act()
     {
@@ -341,7 +361,7 @@ internal sealed class LiveSessionCard : Panel
         form.AccessibilityObject.AutomationId = "LiveDetailsWindow";
         AppBranding.Apply(form);
         var body = new TextBox { Dock = DockStyle.Fill, MultiLine = true, ScrollBars = ScrollBars.Vertical, ReadOnly = true,
-            TextAlign = ContentAlignment.TopLeft, Font = new Font("Segoe UI", 11f), Padding = new Padding(16),
+            TextAlign = ContentAlignment.TopLeft, Font = AppTypography.Font(11f), Padding = new Padding(16),
             AccessibleAutomationId = "LiveDetailsContent", Text =
             $"{session.Title}\n{text[$"Live.State.{session.State}"]}\n" +
             $"{text["Live.SourceState"]}: {session.SourceLiveStatus ?? "—"}\n" +
@@ -365,11 +385,22 @@ internal sealed class LiveSessionCard : Panel
     }
     private void LayoutCard()
     {
-        title.SetBounds(18, 14, Math.Max(200, Width - 36), 28);
-        state.SetBounds(18, 46, Math.Max(200, Width - 36), 22);
-        facts.SetBounds(18, 74, Math.Max(200, Width - 36), 48);
+        var appearance = AppearancePresentation.Current.Live;
+        var compactWaiting = appearance.CompactWaiting && current?.State == LiveSessionState.WaitingForLive;
+        var gap = appearance.CardDensity == AppearanceDensity.Compact ? 4 : appearance.CardDensity == AppearanceDensity.Comfortable ? 16 : 8;
+        var imageWidth = AppearancePresentation.ImageWidth(appearance.ThumbnailSize, 120); thumbnail.Visible = imageWidth > 0;
+        thumbnail.SetBounds(Width - imageWidth - 18, 14, imageWidth, imageWidth * 9 / 16);
+        title.SetBounds(18, 14, Math.Max(200, Width - 36 - imageWidth), 28);
+        var textWidth = Math.Max(200, Width - 36 - (imageWidth > 0 ? imageWidth + 12 : 0));
+        state.SetBounds(18, 46, textWidth, 22);
+        facts.SetBounds(18, 74, textWidth, 48);
         var actionWidth = Math.Max(150, (Width - 48) / 2);
         primary.SetBounds(18, 128, actionWidth, 34); secondary.SetBounds(24 + actionWidth, 128, actionWidth, 34);
         details.SetBounds(18, 168, actionWidth, 34); folder.SetBounds(24 + actionWidth, 168, actionWidth, 34);
+        AppTypography.ReflowRows(this);
+        primary.Top = compactWaiting ? facts.Top : facts.Bottom + gap; secondary.Top = primary.Top;
+        details.Top = primary.Bottom + gap; folder.Top = details.Top;
+        facts.Visible = !compactWaiting; Height = Math.Max(details.Bottom + 18, thumbnail.Bottom + 18);
     }
+    protected override void Dispose(bool disposing) { if (disposing && !imageDisposed) { imageDisposed = true; imageLifetime.Cancel(); imageLifetime.Dispose(); } base.Dispose(disposing); }
 }

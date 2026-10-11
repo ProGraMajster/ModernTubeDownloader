@@ -10,6 +10,18 @@ namespace ModernTubeDownloader.Tests;
 
 public sealed class SystemNotificationCoordinatorTests
 {
+    [Theory]
+    [InlineData("pl")] [InlineData("en")]
+    public async Task NewFeatureNotificationsRemainAggregateOptInAndRespectMasterSwitch(string language)
+    {
+        var fake = new FakeNotifications(); var preferences = new NotificationSettings { Enabled = false, UpdateReady = true, BatchAnalysisCompleted = true };
+        await using var coordinator = new SystemNotificationCoordinator(fake, () => preferences, new(language), new NullAppLogger());
+        coordinator.UpdateReady("1.2.0"); coordinator.BatchCompleted(100, 50000); await coordinator.DrainAsync(); Assert.Empty(fake.Shown);
+        preferences.Enabled = true; preferences.BatchAnalysisCompleted = false;
+        coordinator.UpdateReady("1.2.0"); coordinator.BatchCompleted(100, 50000); await coordinator.DrainAsync(); Assert.Single(fake.Shown);
+        preferences.BatchAnalysisCompleted = true; coordinator.BatchCompleted(100, 50000); await coordinator.DrainAsync(); Assert.Equal(2, fake.Shown.Count);
+        Assert.All(fake.Shown, item => { Assert.Empty(item.Images); Assert.DoesNotContain("[Notification", item.Title); Assert.DoesNotContain("[Notification", item.Message); });
+    }
     private static DownloadNotificationState Item(Guid id, DownloadStatus state, double percent = 0, int retryDelay = 0)
         => new(id, state, "Private title https://private.invalid", "https://thumbnail.invalid", percent, 1, retryDelay);
 

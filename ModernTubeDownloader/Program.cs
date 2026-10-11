@@ -42,15 +42,18 @@ internal static class Program
                 return 0;
             }
             var enableAutomation = args.Length == 1 && args[0] == "--automation";
+            var autostart = args.Length is 1 or 2 && args[0] == "--autostart" &&
+                (args.Length == 1 || args[1] == "--start-hidden");
+            var hiddenArgument = autostart && args.Length == 2;
             // Windows App SDK COM startup markers carry no application command/payload.
             // Register lets the official provider decode the copied native activation instead.
             var notificationLaunch = args.Length is 1 or 2 && args[0] == "----AppNotificationActivated:" &&
                 (args.Length == 1 || args[1].Equals("-Embedding", StringComparison.OrdinalIgnoreCase));
             ExternalMediaRequest? initialRequest = null;
-            if (args.Length == 1 && !enableAutomation && !notificationLaunch &&
+            if (args.Length == 1 && !enableAutomation && !notificationLaunch && !autostart &&
                 !ExternalMediaRequest.TryParseProtocol(args[0], out initialRequest))
                 return 2;
-            if (args.Length > 1 && !notificationLaunch) return 2;
+            if (args.Length > 1 && !notificationLaunch && !autostart) return 2;
 #if !DEBUG
             if (enableAutomation)
                 throw new InvalidOperationException("UI automation is available only in Debug builds.");
@@ -67,7 +70,7 @@ internal static class Program
                     Application.Run(relay); // No Form, AppServices, tool setup, scheduler or worker in this process.
                     return relay.Forwarded ? 0 : 1;
                 }
-                if (initialRequest is null) return 0;
+                if (initialRequest is null) return autostart ? 0 : instance.ForwardOpenWindowAsync().GetAwaiter().GetResult() ? 0 : 1;
                 return instance.ForwardAsync(args[0]).GetAwaiter().GetResult() ? 0 : 1;
             }
             if (initialRequest is not null)
@@ -98,7 +101,13 @@ internal static class Program
             services.WebRemote.Changed += (_, _) => UiCrashDiagnostics.Record("web-remote.changed");
             if (initialRequest is not null && !services.Settings.Current.BrowserIntegrationEnabled)
                 return 3;
-            if (OperatingSystem.IsWindows())
+            var configureProtocol = OperatingSystem.IsWindows();
+#if DEBUG
+            // Native QA uses an isolated data profile, never the owner's URL association.
+            if (enableAutomation || Environment.GetEnvironmentVariable("MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL") == "1")
+                configureProtocol = false;
+#endif
+            if (configureProtocol)
             {
                 try
                 {
@@ -123,8 +132,13 @@ internal static class Program
             {
                 Application.RunOnUIThread(() => form.HandleNotification(request));
                 return Task.CompletedTask;
+            }, () =>
+            {
+                Application.RunOnUIThread(form.RestoreWindow);
+                return Task.CompletedTask;
             });
-            Application.Run(form);
+            ModernFormsNext.WindowKit.Threading.Dispatcher.UIThread.Post(() => form.StartRuntime(autostart, hiddenArgument));
+            Application.Run((ModernFormsNext.WindowKit.ICloseable)form);
             return 0;
         }
         catch (Exception exception)

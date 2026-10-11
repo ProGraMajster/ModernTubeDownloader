@@ -19,10 +19,12 @@ internal sealed class AppVectorIcon : UserControl
 {
     private readonly List<(Shape Shape, bool Fill)> shapes = [];
     private string colorToken;
+    private readonly AppIconKind kind;
 
     public AppVectorIcon(AppIconKind kind, int size = 24, string colorToken = AppThemeTokens.TextSecondary)
     {
         this.colorToken = colorToken;
+        this.kind = kind;
         Width = size;
         Height = size;
         Style.BackgroundColor = SKColors.Transparent;
@@ -39,6 +41,14 @@ internal sealed class AppVectorIcon : UserControl
     public void SetColorToken(string token)
     {
         colorToken = token;
+        ApplyTheme();
+    }
+    public void SetIconSize(int size)
+    {
+        if (Width == size && Height == size) return;
+        foreach (var (shape, _) in shapes) { Controls.Remove(shape); shape.Dispose(); }
+        shapes.Clear(); Width = Height = size; Build(kind, size / 24f);
+        foreach (var (shape, _) in shapes) { shape.Click += ChildClicked; Controls.Add(shape); }
         ApplyTheme();
     }
 

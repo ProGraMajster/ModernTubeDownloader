@@ -372,7 +372,7 @@ internal sealed class PlaylistEntryRow : Panel
         title.AccessibleAutomationId = $"PlaylistEntryTitle{ordinal + 1}";
         title.AutoEllipsis = true;
         title.Multiline = true;
-        title.Font = new Font("Segoe UI", 10.5f);
+        AppTypography.Bind(title, 10.5f);
         AppUi.BindForeground(title, entry.IsAvailable ? AppThemeTokens.TextPrimary : AppThemeTokens.TextSecondary);
         detail = AppUi.Muted();
         detail.AccessibleAutomationId = $"PlaylistEntryDetail{ordinal + 1}";

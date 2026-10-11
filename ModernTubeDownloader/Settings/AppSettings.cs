@@ -20,6 +20,8 @@ public enum AppThemeMode
 
 public sealed class AppSettings
 {
+    public StartupSettings Startup { get; set; } = new();
+    public UpdateSettings Updates { get; set; } = new();
     public NotificationSettings Notifications { get; set; } = new();
     public AppThemeMode ThemeMode { get; set; } = AppThemeMode.System;
     public string Language { get; set; } = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.Equals("pl", StringComparison.OrdinalIgnoreCase)

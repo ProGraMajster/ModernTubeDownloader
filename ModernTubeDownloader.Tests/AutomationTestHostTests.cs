@@ -236,6 +236,8 @@ public sealed class AutomationTestHostTests
             using (var host = ModernFormsTestHost.Create())
             {
                 var view = new SettingsView(services);
+                // Preserve the original multi-section scrolled layout regression scenario.
+                view.ShowCategory("All");
                 var window = host.Show(view, 1200, 800);
                 host.ProcessPendingWork();
                 Assert.NotEmpty(window.CaptureTree().Children);

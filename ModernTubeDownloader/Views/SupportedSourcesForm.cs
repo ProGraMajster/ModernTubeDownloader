@@ -53,7 +53,7 @@ internal sealed class SupportedSourcesForm : Form
         AppUi.BindBackground(body); AppUi.BindBackground(popular); AppUi.BindBackground(list);
         hint.Multiline = generic.Multiline = true;
         AppUi.Input(search); AppUi.Input(url); AppUi.Input(result);
-        result.Font = new Font("Segoe UI", 11);
+        AppTypography.Bind(result, 11);
         AppUi.BindForeground(technical); AppUi.Primary(check); AppUi.Primary(open);
         foreach (var button in new[] { previous, next, close }) AppUi.Secondary(button);
         body.Controls.AddRange([heading, hint, version, popularLabel, popular, search, technical, list,
@@ -148,7 +148,7 @@ internal sealed class SupportedSourcesForm : Form
             tooltip.SetToolTip(button, label);
             tooltip.SetToolTip(status, row.Length == 1 && item.IsBroken ? text["Sources.Broken"] : text["Sources.TechnicalHint"]);
             var content = new TextBox { ReadOnly = true, MultiLine = true, TextAlign = ContentAlignment.TopLeft,
-                ScrollBars = ScrollBars.Vertical, Visible = panel.Height > 72, Font = new Font("Segoe UI", 10) };
+                ScrollBars = ScrollBars.Vertical, Visible = panel.Height > 72, Font = AppTypography.Font(10) };
             AppUi.Input(content);
             content.Text = string.Join(Environment.NewLine, row.Select(source =>
                 $"{source.ExtractorKey} — {SourcePresentation.Status(source, text)}{Environment.NewLine}{source.Description}" +

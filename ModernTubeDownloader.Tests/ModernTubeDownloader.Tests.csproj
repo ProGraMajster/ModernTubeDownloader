@@ -29,5 +29,7 @@
     <Copy SourceFiles="@(FakeToolFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
     <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net10.0-windows\ModernTubeDownloader.NativeHost.*" /></ItemGroup>
     <Copy SourceFiles="@(NativeHostFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <ItemGroup><UpdaterTestFiles Include="..\ModernTubeDownloader.Updater\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>
+    <Copy SourceFiles="@(UpdaterTestFiles)" DestinationFolder="$(OutDir)updater" SkipUnchangedFiles="true" />
   </Target>
 </Project>

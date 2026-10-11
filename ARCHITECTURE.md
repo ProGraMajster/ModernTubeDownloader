@@ -2,13 +2,14 @@
 
 ## Boundaries
 
-The solution contains five projects:
+The canonical `ModernTubeDownloader.slnx` contains six application/test projects plus the pinned framework source graph:
 
 - `ModernTubeDownloader` — the production .NET 10 Windows application and ModernFormsNext UI.
 - `ModernTubeDownloader.Tests` — xUnit unit/integration tests.
 - `ModernTubeDownloader.FakeTool` — a deterministic process-level test double built only for tests.
 - `ModernTubeDownloader.Authentication` — bounded cookie contracts, DPAPI store, jar ownership and native authority/protocol; no GUI services.
 - `ModernTubeDownloader.NativeHost` — standalone one-shot framed stdin/stdout process. No MainForm, queue/LIVE scheduler, tools or Web Remote; own self-contained runtime in `native-host/`.
+- `ModernTubeDownloader.Updater` — independent package validation/installation runner, parent-exit wait, write-ahead backup and rollback. No UI/framework, authentication, queue or registry services.
 
 Production code is divided by responsibility:
 
@@ -23,6 +24,30 @@ Production code is divided by responsibility:
 - `WebRemote` — optional in-process Kestrel adapter, authenticated bounded API, and embedded mobile HTML/CSS/JS; no second queue or download backend.
 
 `MainForm` composes services and navigation. It does not contain download or process logic.
+
+### 1.2.0 boundaries
+
+`TrayApplicationController` owns native NotifyIcon/menu and window lifecycle, not
+notifications or workers. `WindowsStartupService` is an explicit current-user Run
+registration boundary with a fake for tests; startup reads do not modify HKCU.
+`ApplicationUpdateService` checks Stable GitHub metadata asynchronously and stages
+only exact SHA-verified assets. The external updater runs from a staging copy and
+waits for actual parent exit before touching validated installation files.
+
+`BatchImportService` is a preparation layer over the existing source check/auth
+provider and DownloadQueueService. It owns sessions and bounded metadata workers,
+not downloads. Streaming input → immutable JSONL → journal/metadata → paged UI
+(20 rows) → explicit queue handoff. Source LIVE/playlists needing confirmation do
+not silently become ordinary batch jobs. The Other view hosts only working tools.
+
+`AppearanceProfile` schema 1 stores presentation separately in appearance.json.
+AppAppearanceService applies semantic resources and publishes live changes;
+AppTypography assigns absolute logical token sizes and owns bounded layout leases.
+Its constructor does not touch UI; Initialize must run on the UI thread. No DPI
+transform or backend render scale is changed. Per-page consumers retain controls,
+jobs and canonical metadata. Settings uses eleven sub-navigation categories;
+expensive profile edits are coalesced at 80 ms. Strict JSON cannot execute code or
+refer to external files. See PERSONALIZATION.md for composite-control limitations.
 
 The opt-in `WebRemoteHost` is owned by `AppServices`. Settings changes reconcile a single Kestrel listener bound to one explicitly selected loopback/private IPv4 address; shutdown stops it before the queue worker and tool manager. The host calls the existing queue, processor, metadata, format selector, and thumbnail-cache services. Its endpoints return narrow presentation DTOs, never file paths or raw metadata. A volatile 40-bit single-use pairing code exchanges for a 256-bit opaque HttpOnly/SameSite session; absolute expiry, logout, stop/restart and auth changes revoke it. Cookie mutations require same-origin plus a custom header. Host/Origin checks, CSP, body/rate limits and the YouTube-only HTTPS add allowlist remain. Browser-local language selection uses PL/EN resources and only a non-secret localStorage preference; DTO localization uses a request language header without changing shared desktop locale. Optional HTTPS uses explicitly generated IP-SAN certificates in a DPAPI-protected restricted per-user directory and public-only export. HTTP stays default; root trust, UPnP, wildcard binding, WAN relay and automatic firewall changes are never performed. See [WEB_REMOTE.md](WEB_REMOTE.md) for operational details and HTTP caveats.
 
@@ -150,7 +175,7 @@ For isolated process/UI integration tests, `MODERNTUBEDOWNLOADER_DATA_ROOT` can 
 
 ## Build and release packaging
 
-Application and assembly versioning is centralized in `Directory.Build.props`. The application builds against a configurable `ModernFormsNextRoot`; local development defaults to the ignored `.mfn-master-worktree`, while CI checks out the exact `ModernFormsNextCommit` (`69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3`, origin/master fetched 2026-10-10) into an ignored dependency directory. CI/release read that central pin, verify the clean checkout and do not maintain a second hardcoded SHA. This source reference keeps development, CI, and release on the same framework revision; a NuGet migration is a separate decision.
+Application and assembly versioning is centralized in `Directory.Build.props`. The application builds against a configurable `ModernFormsNextRoot`; local development defaults to the ignored `.mfn-master-worktree`, while CI checks out the exact `ModernFormsNextCommit` (`d36015711f63945a49025675acb9aca3df60101d`, origin/master fetched 2026-10-11) into an ignored dependency directory. CI/release read that central pin, verify the clean checkout and do not maintain a second hardcoded SHA. This source reference keeps development, CI, and release on the same framework revision; a NuGet migration is a separate decision.
 
 The supported 1.0.0 distribution is self-contained `win-x64`. Publishing is deliberately multi-file, untrimmed, and without ReadyToRun or NativeAOT so ModernFormsNext reflection, resources, and native Skia dependencies retain their validated behavior. `scripts/Build-Release.ps1` creates a clean end-user directory, excludes PDB/test/fake-tool/managed-tool files, produces a separate symbols archive, and writes a SHA-256 checksum.
 

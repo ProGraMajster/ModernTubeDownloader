@@ -1,5 +1,42 @@
 # ModernTubeDownloader release checklist
 
+## Final 1.2.0 — READY WITH KNOWN LIMITATIONS
+
+Publication authorized by the owner on 2026-10-11: master push, exact-head green CI,
+annotated tag and existing Release workflow. No browser-store/NuGet publication.
+Final completion and run URLs/hashes: local `FINAL_RELEASE_1_2_0.md` and the
+[public release](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.2.0).
+Earlier candidate evidence: [implementation report](CANDIDATE_1_2_IMPLEMENTATION_REPORT.md).
+
+- [x] Version 1.2.0 / assembly 1.2.0.0, canonical solution includes Updater; clean central MFN pin `d36015711f63945a49025675acb9aca3df60101d`.
+- [x] Stages A–F implemented, canonical queue/LIVE/auth/UI ownership preserved.
+- [x] Fresh final restore, Debug/Release **713/713 each**, JS **92/92**, zero warnings/errors/skips; unchanged safety assertions.
+- [x] Synthetic external updater parent wait/install/failure rollback preserves userdata.
+- [x] Native tray/hidden startup/restore, update check, Other/Batch, appearance and original Settings scrolling.
+- [x] Self-contained GUI + NativeHost + Updater ZIP/symbols/checksum/notices/docs, 810-entry hygiene and published startup/clean close with custom QA tools.
+- [x] Owner accepts MFN #204/#205 as KNOWN LIMITATION / POST-1.2 FOLLOW-UP / NOT RELEASE BLOCKER, without app workarounds.
+- [x] Wider DPI/login/tray soak/clean-PC updater/20 real sources/native picker matrices classified POST-1.2 QA, not fabricated PASS.
+- [x] Fresh native regression and local production Release UIA smoke: views/Batch/Updates/Startup/Personalization, text 125/reset, no self-update, clean close; no Debug endpoint or HKCU Run changes.
+- [x] Build-Release, package hygiene and source/reachable-history privacy scan (no findings); final staged identity/scan enforced before commit.
+
+Publication completion is recorded by the linked **GitHub Release/workflow and local final
+report**, not prospective PASS checkboxes or an unnecessary post-tag status commit. Gates:
+
+1. Review staged diff, commit/push master, wait for terminal CI success at that exact SHA.
+2. Annotate/push v1.2.0 at that SHA; existing Release workflow publishes three stable assets.
+3. Download official ZIP/checksum/symbols; verify size/hash/entries, extract to a clean folder.
+4. Native production Release UIA smoke and Current/no-update; retain prior tray evidence if
+   another physical shell gesture is unavailable. Record published completion in the final report.
+
+### Post-1.2 QA (not release blockers)
+
+- MFN [#204](https://github.com/ProGraMajster/ModernFormsNext/issues/204),
+  [#205](https://github.com/ProGraMajster/ModernFormsNext/issues/205) → upstream fixes → update pin → likely 1.2.1.
+- Exhaustive 80–200% long-label/resize/page/theme and physical 100/125/150% Windows DPI.
+- Actual login autostart, tray shell pointer/background soak; no user HKCU Run changes in QA.
+- Clean-PC update/restart/moved-path repair, staging retention, 20 distinct real Batch sources.
+- Native ColorDialog/profile file pickers/reset confirmation and physical device/media checks.
+
 ## Final 1.1.0 gates
 
 Publication authority: user-approved master push, annotated v1.1.0 tag after exact-head CI success, then the existing release workflow. No Web Store/Edge Add-ons/NuGet publication. Historical v1.0.0 is immutable. The local `FINAL_RELEASE_1_1_0.md` records final completion/run URLs/asset hashes; the [release page](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.1.0) is the published-asset authority.

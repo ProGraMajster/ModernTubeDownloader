@@ -30,4 +30,6 @@ public sealed class NotificationSettings
     public bool LiveFailed { get; set; } = true;
     public bool LiveCancelled { get; set; }
     public bool CriticalErrors { get; set; } = true;
+    public bool UpdateReady { get; set; } = true;
+    public bool BatchAnalysisCompleted { get; set; }
 }

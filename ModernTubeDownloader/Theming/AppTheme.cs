@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Diagnostics;
 using ModernFormsNext;
 using ModernFormsNext.Drawing;
 using ModernFormsNext.WindowKit.Backend;
@@ -44,16 +45,41 @@ public sealed class AppAppearanceService : IDisposable
     private readonly ModernFormsNext.Timer systemThemeTimer;
     private ThemeVariant effectiveVariant;
     private bool initialized;
+    private readonly AppearanceProfileStore? profiles;
+    public AppearanceProfile Profile { get; private set; } = new();
 
-    public AppAppearanceService(SettingsService settings, IAppLogger logger)
+    public AppAppearanceService(SettingsService settings, IAppLogger logger, string? profileFile = null)
     {
         this.settings = settings;
         this.logger = logger;
+        if (profileFile is not null) { profiles = new(profileFile); Profile = profiles.LoadAsync(logger).GetAwaiter().GetResult(); if (!File.Exists(profileFile)) Profile.Global.Theme = (AppearanceTheme)(int)settings.Current.ThemeMode; }
+        else Profile.Global.Theme = (AppearanceTheme)(int)settings.Current.ThemeMode;
+        if (Profile.Global.Theme != AppearanceTheme.Custom) settings.Current.ThemeMode = (AppThemeMode)(int)Profile.Global.Theme;
         systemThemeTimer = new ModernFormsNext.Timer { Interval = 2000 };
         systemThemeTimer.Tick += SystemThemeTimerTick;
     }
 
     public event EventHandler? ModeChanged;
+    public async Task ApplyProfileAsync(AppearanceProfile profile)
+    {
+        var elapsed = Stopwatch.StartNew();
+        Profile = profile.Copy();
+        AppearancePresentation.Current = Profile;
+        if (Profile.Global.Theme != AppearanceTheme.Custom) settings.Current.ThemeMode = (AppThemeMode)(int)Profile.Global.Theme;
+        ApplyCurrent(animated: false); AppTypography.SetScale(Profile.Typography.AppTextScale); UpdateSystemMonitoring();
+        ModeChanged?.Invoke(this, EventArgs.Empty);
+        logger.Info($"Appearance UI apply completed in {elapsed.Elapsed.TotalMilliseconds:F1} ms before persistence.");
+        if (profiles is not null) await profiles.SaveAsync(Profile);
+    }
+    public async Task SetTextScaleAsync(int percent)
+    {
+        var elapsed = Stopwatch.StartNew();
+        if (percent is < 80 or > 200) throw new ArgumentOutOfRangeException(nameof(percent));
+        Profile.Typography.AppTextScale = percent; AppTypography.SetScale(percent);
+        ModeChanged?.Invoke(this, EventArgs.Empty);
+        logger.Info($"Text scale UI apply completed in {elapsed.Elapsed.TotalMilliseconds:F1} ms before persistence.");
+        if (profiles is not null) await profiles.SaveAsync(Profile);
+    }
 
     public AppThemeMode Mode => settings.Current.ThemeMode;
     public ThemeVariant EffectiveVariant => effectiveVariant;
@@ -64,6 +90,9 @@ public sealed class AppAppearanceService : IDisposable
             return;
 
         initialized = true;
+        AppearancePresentation.Current = Profile;
+        // Constructing services (including worker-thread test services) must not mutate an existing UI.
+        AppTypography.SetScale(Profile.Typography.AppTextScale);
         var manager = ThemeManager.Current;
         manager.Register(CreateLightTheme(), replace: true);
         manager.Register(CreateDarkTheme(), replace: true);
@@ -74,10 +103,14 @@ public sealed class AppAppearanceService : IDisposable
     public async Task SetModeAsync(AppThemeMode mode)
     {
         settings.Current.ThemeMode = mode;
+        Profile.Global.Theme = (AppearanceTheme)(int)mode;
+        AppearancePresentation.Current = Profile;
         ApplyCurrent(animated: true);
         UpdateSystemMonitoring();
-        await settings.SaveAsync().ConfigureAwait(false);
+        // Subscribers own native controls; publish before the asynchronous file continuation.
         ModeChanged?.Invoke(this, EventArgs.Empty);
+        await settings.SaveAsync().ConfigureAwait(false);
+        if (profiles is not null) await profiles.SaveAsync(Profile);
     }
 
     public void RefreshSystemTheme()
@@ -104,12 +137,26 @@ public sealed class AppAppearanceService : IDisposable
     private void Apply(ThemeVariant variant, bool animated)
     {
         var definition = variant == ThemeVariant.Dark ? CreateDarkTheme() : CreateLightTheme();
+        if (Profile.Global.Theme == AppearanceTheme.Custom)
+        {
+            var mapping = new Dictionary<string, string[]> {
+                ["Accent"] = [AppThemeTokens.Accent, AppThemeTokens.AccentHover, AppThemeTokens.AccentPressed, ThemeTokens.Colors.Primary.Name, ThemeTokens.Colors.PrimaryHover.Name, ThemeTokens.Colors.PrimaryPressed.Name],
+                ["Background"] = [AppThemeTokens.Background, ThemeTokens.Colors.Background.Name],
+                ["Surface"] = [AppThemeTokens.Surface, ThemeTokens.Colors.Surface.Name, "Legacy.ControlLowColor"],
+                ["SurfaceSecondary"] = [AppThemeTokens.SurfaceSecondary, AppThemeTokens.SurfaceHover, AppThemeTokens.Navigation, AppThemeTokens.NavigationHover, AppThemeTokens.NavigationSelected, ThemeTokens.Colors.SurfaceVariant.Name, "Legacy.ControlMidColor", "Legacy.ControlHighlightLowColor"],
+                ["Border"] = [AppThemeTokens.Border, ThemeTokens.Colors.Border.Name],
+                ["TextPrimary"] = [AppThemeTokens.TextPrimary, AppThemeTokens.NavigationSelectedText, ThemeTokens.Colors.TextPrimary.Name, "Legacy.ForegroundColor"],
+                ["TextSecondary"] = [AppThemeTokens.TextSecondary, ThemeTokens.Colors.TextSecondary.Name] };
+            foreach (var (key, color) in Profile.Global.Colors) foreach (var token in mapping[key]) Set(definition, token, color);
+            if (Profile.Global.Colors.TryGetValue("Accent", out var accent))
+            { var c = ColorTranslator.FromHtml(accent); var foreground = ColorContrast(c, Color.White) >= ColorContrast(c, Color.Black) ? "#FFFFFF" : "#000000"; Set(definition, AppThemeTokens.AccentText, foreground); Set(definition, ThemeTokens.Colors.PrimaryText.Name, foreground); }
+        }
         var result = ThemeManager.Current.Apply(definition, new ThemeApplyOptions
         {
             Transition = new ThemeTransitionOptions
             {
-                Enabled = animated,
-                Duration = TimeSpan.FromMilliseconds(220),
+                Enabled = animated && Profile.Global.Animations,
+                Duration = TimeSpan.FromMilliseconds(AppearancePresentation.AnimationMilliseconds(220)),
                 Easing = ThemeEasing.EaseInOut,
                 RespectReducedMotion = true
             }
@@ -283,6 +330,11 @@ public sealed class AppAppearanceService : IDisposable
         var color = ColorTranslator.FromHtml(hex);
         theme.Colors[key] = color;
         theme.Brushes[key] = new SolidColorBrush(color);
+    }
+    public static double ColorContrast(Color first, Color second)
+    {
+        static double Light(Color color) { static double Channel(byte b) { var c = b / 255d; return c <= .04045 ? c / 12.92 : Math.Pow((c + .055) / 1.055, 2.4); } return .2126 * Channel(color.R) + .7152 * Channel(color.G) + .0722 * Channel(color.B); }
+        var a = Light(first); var b = Light(second); return (Math.Max(a, b) + .05) / (Math.Min(a, b) + .05);
     }
 
     public void Dispose()
