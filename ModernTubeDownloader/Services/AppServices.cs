@@ -45,10 +45,12 @@ public sealed class AppServices : IDisposable
     public AppAppearanceService Appearance { get; }
     public ToolManager Tools { get; }
     public YtDlpMetadataService Metadata { get; }
+    public YtDlpAuthenticationProvider Authentication { get; private set; } = null!;
     public DownloadQueueService Queue { get; }
     public QueueProcessor Processor { get; }
     public HistoryService History { get; }
     public ThumbnailCacheService Thumbnails { get; }
+    public SystemNotificationCoordinator? Notifications { get; private set; }
     public LiveSessionService Live { get; private set; } = null!;
     public LiveRecordingScheduler LiveScheduler { get; private set; } = null!;
     public WebRemoteHost WebRemote { get; private set; } = null!;
@@ -59,7 +61,8 @@ public sealed class AppServices : IDisposable
         AppPaths paths,
         HttpClient? httpClient = null,
         IToolReleaseSource? releaseSource = null,
-        IToolBinaryValidator? toolValidator = null)
+        IToolBinaryValidator? toolValidator = null,
+        ModernFormsNext.Notifications.ISystemNotificationService? notifications = null)
     {
         paths.EnsureCreated();
         var logger = new FileAppLogger(paths.LogDirectory);
@@ -75,7 +78,9 @@ public sealed class AppServices : IDisposable
         toolValidator ??= new ProcessToolBinaryValidator(processRunner);
         var packageInstaller = new ToolPackageInstaller(paths, new ToolDownloadService(httpClient), toolValidator);
         var tools = new ToolManager(paths, settings, releaseSource, packageInstaller, toolValidator, logger);
-        var ytDlpRunner = new YtDlpProcessRunner(processRunner, tools, logger);
+        ModernTubeDownloader.Authentication.CookieJarLease.CleanupAbandoned(Path.Combine(paths.AuthenticationDirectory, "tmp"));
+        var authentication = new YtDlpAuthenticationProvider(paths, settings);
+        var ytDlpRunner = new YtDlpProcessRunner(processRunner, tools, logger, authentication);
         var metadata = new YtDlpMetadataService(ytDlpRunner, settings, logger);
         var history = new HistoryService(paths, logger);
         history.LoadAsync().GetAwaiter().GetResult();
@@ -93,12 +98,19 @@ public sealed class AppServices : IDisposable
             new LiveRecordingExecutor(settings, ytDlpRunner, metadata, ffmpeg, history, logger),
             new YtDlpLiveAvailabilityProbe(metadata), settings, logger);
         var thumbnails = new ThumbnailCacheService(paths, logger, () => settings.Current.DownloadThumbnail);
+        var services = new AppServices(paths, logger, settings, localization, appearance, tools, metadata, queue, processor, history, thumbnails, httpClient);
+        services.Live = live;
+        services.Authentication = authentication;
+        services.LiveScheduler = liveScheduler;
+        if (notifications is not null)
+        {
+            services.Notifications = new(notifications, () => settings.Current.Notifications, localization, logger,
+                thumbnails.GetCachedNotificationPath);
+            services.Notifications.Attach(queue, live);
+        }
         processor.Start();
         liveScheduler.Start();
         tools.Start();
-        var services = new AppServices(paths, logger, settings, localization, appearance, tools, metadata, queue, processor, history, thumbnails, httpClient);
-        services.Live = live;
-        services.LiveScheduler = liveScheduler;
         services.Sources = new SupportedSourcesService(tools, processRunner, logger);
         services.SourceCheck = new SourceCheckService(metadata, logger);
         services.WebRemote = new WebRemoteHost(services);
@@ -108,6 +120,7 @@ public sealed class AppServices : IDisposable
 
     public async Task ShutdownAsync()
     {
+        if (Notifications is not null) await Notifications.DisposeAsync().ConfigureAwait(false);
         await WebRemote.StopAsync().ConfigureAwait(false);
         await Task.WhenAll(Processor.StopAsync(), LiveScheduler.StopAsync()).ConfigureAwait(false);
         await Tools.StopAsync().ConfigureAwait(false);

@@ -1,10 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>$(ModernTubeDownloaderTargetFramework)</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <IsPackable>false</IsPackable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Code-first MFN: App SDK's transitive PNG content glob must not duplicate embedded branding. -->
+    <EnableDefaultContentItems>false</EnableDefaultContentItems>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <RootNamespace>ModernTubeDownloader</RootNamespace>
     <AssemblyName>ModernTubeDownloader</AssemblyName>
@@ -20,7 +23,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\ModernTubeDownloader.Authentication\ModernTubeDownloader.Authentication.csproj" />
+    <ProjectReference Include="..\ModernTubeDownloader.NativeHost\ModernTubeDownloader.NativeHost.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext\ModernFormsNext.csproj" />
+    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.SystemNotifications.AppSdk\ModernFormsNext.SystemNotifications.AppSdk.csproj" />
+    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.SystemNotifications.WinRT\ModernFormsNext.SystemNotifications.WinRT.csproj" />
     <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Automation\ModernFormsNext.Automation.csproj" Condition="'$(Configuration)' == 'Debug'" />
     <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Automation.Windows\ModernFormsNext.Automation.Windows.csproj" Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
@@ -30,6 +37,11 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <EmbeddedResource Include="Assets\AppIcon.png" LogicalName="ModernTubeDownloader.Assets.AppIcon.png" />
     <EmbeddedResource Include="Resources\Languages\*.json" />
+    <EmbeddedResource Include="Resources\YtDlpOptions.json" />
     <EmbeddedResource Include="WebRemote\wwwroot\*" />
   </ItemGroup>
+  <Target Name="CopyNativeHostForDevelopment" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == ''">
+    <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>
+    <Copy SourceFiles="@(NativeHostFiles)" DestinationFolder="$(OutDir)native-host" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

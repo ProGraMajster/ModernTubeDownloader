@@ -17,12 +17,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Read central framework pin
+        id: pins
+        shell: pwsh
+        run: |
+          [xml] $props = Get-Content .\Directory.Build.props -Raw
+          $sha = $props.SelectSingleNode('/Project/PropertyGroup/ModernFormsNextCommit').InnerText.Trim()
+          if ($sha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid MFN pin.' }
+          "mfn=$sha" >> $env:GITHUB_OUTPUT
+
       - name: Checkout pinned ModernFormsNext
         uses: actions/checkout@v5
         with:
           repository: ProGraMajster/ModernFormsNext
-          ref: f521f9dfcfe601bf9b6199b88132cccb2380d1bf
+          ref: ${{ steps.pins.outputs.mfn }}
           path: .mfn-master-worktree
+
+      - name: Verify exact clean framework checkout
+        shell: pwsh
+        run: |
+          if ((git -C .mfn-master-worktree rev-parse HEAD) -ne '${{ steps.pins.outputs.mfn }}') { throw 'MFN pin mismatch.' }
+          if (git -C .mfn-master-worktree status --porcelain) { throw 'MFN checkout is dirty.' }
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
@@ -35,22 +50,14 @@ jobs:
           node-version: '22'
 
       - name: Test extension and Web Remote time editor
-        run: node --test browser-extension/tests/*.test.cjs ModernTubeDownloader.Tests/WebRemoteTimeInput.test.cjs
+        run: node --test browser-extension/tests/*.test.cjs ModernTubeDownloader.Tests/WebRemote*.test.cjs
 
       - name: Check public repository hygiene
         run: node scripts/Test-PublicRepository.cjs
 
-      - name: Restore
+      - name: Restore, Debug and Release tests, NativeHost, publish and package gates
         shell: pwsh
-        run: dotnet restore .\ModernTubeDownloader.slnx -p:ModernFormsNextRoot="$env:GITHUB_WORKSPACE\.mfn-master-worktree"
-
-      - name: Build Release
-        shell: pwsh
-        run: dotnet build .\ModernTubeDownloader.slnx -c Release --no-restore -warnaserror -m:1 /p:UseSharedCompilation=false -p:ModernFormsNextRoot="$env:GITHUB_WORKSPACE\.mfn-master-worktree"
-
-      - name: Test Release
-        shell: pwsh
-        run: dotnet test .\ModernTubeDownloader.slnx -c Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=ci-validation.trx" --results-directory artifacts/ci-validation --blame-hang-timeout 3m --blame-hang-dump-type none -m:1 /p:UseSharedCompilation=false -p:ModernFormsNextRoot="$env:GITHUB_WORKSPACE\.mfn-master-worktree"
+        run: .\scripts\Build-Release.ps1 -ModernFormsNextRoot "$env:GITHUB_WORKSPACE\.mfn-master-worktree"
 
       - name: Preserve test results and hang sequence
         if: always()
@@ -58,6 +65,6 @@ jobs:
         with:
           name: ci-test-results
           path: |
-            artifacts/ci-validation/**/*.trx
-            artifacts/ci-validation/**/Sequence_*.xml
+            artifacts/validation/**/*.trx
+            artifacts/validation/**/Sequence_*.xml
           if-no-files-found: error

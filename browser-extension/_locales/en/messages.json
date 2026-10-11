@@ -1,0 +1,221 @@
+{
+  "cookieTitle": { "message": "Cookies / Authentication" },
+  "cookieStatusSynced": { "message": "Synced" },
+  "cookieStatusPending": { "message": "Deletion awaiting acknowledgement" },
+  "cookieStatusRevoked": { "message": "Data deleted" },
+  "cookieStatusNotSynced": { "message": "Not synced yet" },
+  "cookieStatusPermission": { "message": "Permission missing / revoked" },
+  "cookieStatusFailed": { "message": "Synchronization not confirmed" },
+  "cookieBridgeMissing": { "message": "Chrome could not find the native host registration" },
+  "cookieBridgeForbidden": { "message": "Chrome does not allow this extension to use the host" },
+  "cookieBridgeExited": { "message": "Native host exited before replying" },
+  "cookieBridgeProtocol": { "message": "Native host communication failed" },
+  "cookieBridgeApi": { "message": "Native Messaging API is unavailable in this worker. After granting permission, reload the extension and retry." },
+  "cookieSession": { "message": "session" },
+  "cookiePartitioned": { "message": "partitioned (excluded)" },
+  "cookiePrivacy": { "message": "Cookies may grant access to your signed-in account. Only your chosen scope is synchronized. Values are never displayed or logged." },
+  "cookieRegistration": { "message": "First register the native bridge in desktop Settings with this exact extension ID and browser:" },
+  "cookieBrowser": { "message": "Browser" },
+  "cookieScope": { "message": "Scope mode" },
+  "cookieCurrent": { "message": "Current service (enter its exact domain)" },
+  "cookieServices": { "message": "Selected services" },
+  "cookieDomains": { "message": "Selected domains" },
+  "cookieCustom": { "message": "Custom cookie selection" },
+  "cookieDomainInput": { "message": "Domains (comma separated, no URL)" },
+  "cookieDomainHint": { "message": "Access includes these domains and their subdomains over HTTPS. YouTube preset includes only youtube.com. No automatic Google/account scopes." },
+  "cookieBefore": { "message": "Sync before analysis / handoff" },
+  "cookieChanged": { "message": "Sync on cookie changes (coalesced)" },
+  "cookieStartup": { "message": "Sync on browser startup" },
+  "cookiePeriod": { "message": "Periodic sync minutes: 0 = off, or 5–1440" },
+  "cookieConsent": { "message": "The selected cookies will be read by this extension, sent only via Native Messaging, and encrypted with Windows DPAPI in local AppData. Revoke below or delete synced data in desktop Settings. Already running downloads may retain their temporary jar." },
+  "cookieConsentCheck": { "message": "I consent to reading the domains shown above" },
+  "cookieConnect": { "message": "Allow and connect" },
+  "cookieInspect": { "message": "Read metadata for Custom selection" },
+  "cookieSync": { "message": "Sync now" },
+  "cookieRevoke": { "message": "Disable sync and delete data" },
+  "cookieEdit": { "message": "Change scope" },
+  "cookieDelete": { "message": "Delete profile" },
+  "cookieDeleteConfirm": { "message": "Remove this profile from the list? If active, synchronization is disabled and data deletion in the app must be confirmed first. Browser cookies remain unchanged." },
+  "cookieEnabled": { "message": "Permission granted / enabled" },
+  "cookieRevoked": { "message": "Disabled" },
+  "cookieState": { "message": "Status" },
+  "cookieDone": { "message": "Operation acknowledged. Check profile status below." },
+  "cookieFailed": { "message": "Sync/delete could not be acknowledged. Check the native bridge. If revocation is pending, also delete synced cookies in desktop Settings." },
+  "cookieInvalid": { "message": "Check consent, exact domains, and interval. Current service requires one domain." },
+  "cookieMetadataOnly": { "message": "Metadata only. Partitioned cookies are excluded. Select the cookies you consent to sending." },
+  "cookieRevokeConfirm": { "message": "Disable this scope and delete its synced data? Existing downloads cannot be recalled." },
+  "cookieContinue": { "message": "Session refresh failed. Continue using the last available snapshot, or without cookies if none exists?" },
+  "extensionName": {
+    "message": "ModernTubeDownloader"
+  },
+  "extensionDescription": {
+    "message": "Send HTTP/HTTPS media URLs to ModernTubeDownloader; YouTube quick actions."
+  },
+  "download": {
+    "message": "Download"
+  },
+  "downloadTitle": {
+    "message": "Download in ModernTubeDownloader"
+  },
+  "menuPage": {
+    "message": "Analyze page in ModernTubeDownloader"
+  },
+  "menuLink": {
+    "message": "Analyze link in ModernTubeDownloader"
+  },
+  "menuPageQueue": {
+    "message": "Quick queue page in ModernTubeDownloader"
+  },
+  "menuLinkQueue": {
+    "message": "Quick queue link in ModernTubeDownloader"
+  },
+  "quality": {
+    "message": "Quality"
+  },
+  "qualityBest": {
+    "message": "Best available"
+  },
+  "qualityAudio": {
+    "message": "Audio only"
+  },
+  "qualityHint": {
+    "message": "Quality means up to the selected resolution. The app selects the closest lower available quality."
+  },
+  "defaultQuality": {
+    "message": "Default item quality"
+  },
+  "addMedia": {
+    "message": "Add media"
+  },
+  "addPlaylist": {
+    "message": "Add playlist"
+  },
+  "playlist": {
+    "message": "PLAYLIST"
+  },
+  "video": {
+    "message": "VIDEO"
+  },
+  "short": {
+    "message": "SHORTS"
+  },
+  "live": {
+    "message": "LIVE / REPLAY"
+  },
+  "close": {
+    "message": "Close"
+  },
+  "cancel": {
+    "message": "Cancel"
+  },
+  "openApp": {
+    "message": "Analyze in app"
+  },
+  "queue": {
+    "message": "Add to queue"
+  },
+  "queuePlaylist": {
+    "message": "Add playlist to queue"
+  },
+  "playlistDescription": {
+    "message": "Add the entire playlist or analyze it in ModernTubeDownloader to review items."
+  },
+  "mediaDescription": {
+    "message": "Add the media or analyze it in ModernTubeDownloader to choose the file format."
+  },
+  "liveHint": {
+    "message": "The app checks the state: a completed replay goes to the download queue; active or scheduled LIVE requires separate confirmation. Recording never starts automatically."
+  },
+  "unsupported": {
+    "message": "Unavailable page"
+  },
+  "unsupportedHint": {
+    "message": "Open an HTTP/HTTPS page or use the link context menu."
+  },
+  "ready": {
+    "message": "Ready to hand off to the app"
+  },
+  "handoff": {
+    "message": "App launch requested. Confirm the browser prompt if shown. This does not confirm a queued download."
+  },
+  "analyzing": {
+    "message": "The app will analyze the URL and show available options."
+  },
+  "genericHint": {
+    "message": "The desktop app checks yt-dlp support, authentication and media type. Quick queue uses Best / Auto; playlists and LIVE require selection."
+  },
+  "source": {
+    "message": "Source: $1",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "showInjectedButtons": {
+    "message": "Show YouTube buttons"
+  },
+  "contextMenusEnabled": {
+    "message": "Enable page/link context menus"
+  },
+  "defaultAction": {
+    "message": "Default context-menu action"
+  },
+  "analyzeAction": {
+    "message": "Analyze in app (recommended)"
+  },
+  "quickQueueAction": {
+    "message": "Quick queue (Best / Auto on other sites)"
+  },
+  "extensionSettings": {
+    "message": "Extension settings"
+  },
+  "settingsSaved": {
+    "message": "Preferences saved."
+  },
+  "preferencesError": {
+    "message": "Preferences could not be saved. Reopen the extension popup."
+  },
+  "platformNotice": {
+    "message": "Support is determined by desktop yt-dlp, not by the extension."
+  },
+  "language": {
+    "message": "Language"
+  },
+  "languageAuto": {
+    "message": "🌐 Automatic / browser"
+  },
+  "languageSettings": {
+    "message": "⚙ Language settings"
+  },
+  "settingsLink": {
+    "message": "⚙ Settings"
+  },
+  "languageDescription": {
+    "message": "One language for the popup, settings, menus and YouTube buttons. Auto follows the browser, not the desktop app."
+  },
+  "pageIntegration": {
+    "message": "Page integration"
+  },
+  "behavior": {
+    "message": "Behavior"
+  },
+  "savedQuality": {
+    "message": "Last YouTube quality"
+  },
+  "about": {
+    "message": "About"
+  },
+  "aboutTransport": {
+    "message": "The extension hands URLs to the installed app. It does not download media or require an account."
+  },
+  "restoreDefaults": {
+    "message": "Restore defaults"
+  },
+  "resetConfirmation": {
+    "message": "Reset ModernTubeDownloader language, quality, integration and action preferences? Other browser data stays unchanged."
+  },
+  "defaultsRestored": {
+    "message": "Defaults restored."
+  }
+}

@@ -2,11 +2,13 @@
 
 ## Boundaries
 
-The solution contains three projects:
+The solution contains five projects:
 
 - `ModernTubeDownloader` — the production .NET 10 Windows application and ModernFormsNext UI.
 - `ModernTubeDownloader.Tests` — xUnit unit/integration tests.
 - `ModernTubeDownloader.FakeTool` — a deterministic process-level test double built only for tests.
+- `ModernTubeDownloader.Authentication` — bounded cookie contracts, DPAPI store, jar ownership and native authority/protocol; no GUI services.
+- `ModernTubeDownloader.NativeHost` — standalone one-shot framed stdin/stdout process. No MainForm, queue/LIVE scheduler, tools or Web Remote; own self-contained runtime in `native-host/`.
 
 Production code is divided by responsibility:
 
@@ -22,7 +24,7 @@ Production code is divided by responsibility:
 
 `MainForm` composes services and navigation. It does not contain download or process logic.
 
-The opt-in `WebRemoteHost` is owned by `AppServices`. Settings changes reconcile a single Kestrel listener bound to one explicitly selected loopback/private IPv4 address; shutdown stops it before the queue worker and tool manager. The host calls the existing queue, processor, metadata, format selector, and thumbnail-cache services. Its endpoints return narrow presentation DTOs, never file paths or raw metadata. A per-process 256-bit token in an Authorization header, same-origin/Host checks, CSP, body/rate limits, and a YouTube-only HTTPS add allowlist define the MVP security boundary. There is no cookie authentication, UPnP, wildcard binding, WAN relay, or automatic firewall change. See [WEB_REMOTE.md](WEB_REMOTE.md) for operational details and HTTP caveats.
+The opt-in `WebRemoteHost` is owned by `AppServices`. Settings changes reconcile a single Kestrel listener bound to one explicitly selected loopback/private IPv4 address; shutdown stops it before the queue worker and tool manager. The host calls the existing queue, processor, metadata, format selector, and thumbnail-cache services. Its endpoints return narrow presentation DTOs, never file paths or raw metadata. A volatile 40-bit single-use pairing code exchanges for a 256-bit opaque HttpOnly/SameSite session; absolute expiry, logout, stop/restart and auth changes revoke it. Cookie mutations require same-origin plus a custom header. Host/Origin checks, CSP, body/rate limits and the YouTube-only HTTPS add allowlist remain. Browser-local language selection uses PL/EN resources and only a non-secret localStorage preference; DTO localization uses a request language header without changing shared desktop locale. Optional HTTPS uses explicitly generated IP-SAN certificates in a DPAPI-protected restricted per-user directory and public-only export. HTTP stays default; root trust, UPnP, wildcard binding, WAN relay and automatic firewall changes are never performed. See [WEB_REMOTE.md](WEB_REMOTE.md) for operational details and HTTP caveats.
 
 ## UI composition
 
@@ -79,7 +81,7 @@ One shared `HttpClient` is used for release metadata and streaming downloads. A 
 
    `SubtitleOptions` and `SponsorBlockOptions` are copied into each queue item, persisted, and retained on retry. A subtitle-only yt-dlp request selects manual/automatic tracks and language codes after media preparation; matching files become sidecars and optionally pass through an FFmpeg subtitle-embedding step with video/audio stream copy. Missing subtitle languages and subtitle post-processing errors complete media with a warning. SponsorBlock Mark/Remove uses one combined yt-dlp format invocation so yt-dlp can modify both A/V streams together; the app does not request keyframe re-encoding. `DownloadOptionCompatibilityValidator` is shared by desktop, queue admission, worker, and Web Remote: custom range cannot combine with subtitles/SponsorBlock, Remove cannot combine with subtitles, and Mark requires explicit MKV. WebM and Auto Mark remain unsupported until real verification; Remove emits an experimental warning because direct yt-dlp output showed an edit-point timestamp defect. Playlist previews apply one policy to all selected jobs, then each worker resolves its own tracks.
 
-   Opt-in desktop `UseCookieFile`/`CookieFilePath` stores only the location of a user-selected Netscape file. `CookieFileService` performs lightweight bounded header/size/readability validation at Settings save and before each operation, then adds `--cookies <path>` to single-video and playlist analysis, media, and subtitle yt-dlp requests; retry reanalysis uses the current desktop setting. The app does not extract browser databases or copy cookie files to app data. Process logging and crash sanitization redact the registered path, and Web Remote/browser-extension payloads and queue projections do not contain it.
+   `YtDlpAuthenticationProvider` selects exactly one None/ManualFile/SyncedBrowserProfile source, migrating legacy `UseCookieFile`. Manual Netscape validation remains in `CookieFileService`; synced snapshots are DPAPI-owned. `YtDlpProcessRunner` inserts one cookie argument centrally, before the URL boundary, and sanitizes output before callbacks/results/errors. One logical VOD/LIVE attempt retains its jar across stages. After a completed auth-failed invocation, JIT-consented profiles can request a correlated newer snapshot through an extension-owned Native Messaging port. The existing encrypted document holds only bounded request/presence metadata alongside snapshots. The accepted ACK must prove a greater version; a NEW jar and one retry budget are shared across that logical attempt. No active jar is rewritten, no recursive retries, and no account data crosses media URI/Web Remote DTOs. See [cookie architecture and security limits](COOKIE_SYNC.md).
 6. A combined format moves directly to finalization. Separate video/audio files pass through `FfmpegService`, which maps one video and one audio stream and uses `-c copy` for a lossless remux.
 7. Only a non-empty verified output is moved into the final directory. Conflict policy is applied at that final move.
 8. Raw metadata and a history entry are persisted after success.
@@ -148,7 +150,7 @@ For isolated process/UI integration tests, `MODERNTUBEDOWNLOADER_DATA_ROOT` can 
 
 ## Build and release packaging
 
-Application and assembly versioning is centralized in `Directory.Build.props`. The application builds against a configurable `ModernFormsNextRoot`; local development defaults to the ignored `.mfn-master-worktree`, while CI checks out the exact `ModernFormsNextCommit` (`f521f9dfcfe601bf9b6199b88132cccb2380d1bf`, origin/master fetched 2026-10-06) into an ignored dependency directory. This source reference keeps development, CI, and release on the same framework revision; a NuGet migration is a separate decision.
+Application and assembly versioning is centralized in `Directory.Build.props`. The application builds against a configurable `ModernFormsNextRoot`; local development defaults to the ignored `.mfn-master-worktree`, while CI checks out the exact `ModernFormsNextCommit` (`69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3`, origin/master fetched 2026-10-10) into an ignored dependency directory. CI/release read that central pin, verify the clean checkout and do not maintain a second hardcoded SHA. This source reference keeps development, CI, and release on the same framework revision; a NuGet migration is a separate decision.
 
 The supported 1.0.0 distribution is self-contained `win-x64`. Publishing is deliberately multi-file, untrimmed, and without ReadyToRun or NativeAOT so ModernFormsNext reflection, resources, and native Skia dependencies retain their validated behavior. `scripts/Build-Release.ps1` creates a clean end-user directory, excludes PDB/test/fake-tool/managed-tool files, produces a separate symbols archive, and writes a SHA-256 checksum.
 
@@ -158,7 +160,17 @@ The application is MIT-licensed, as explicitly selected by its owner. The tag wo
 
 ## Extension points
 
+`SystemNotificationCoordinator` observes immutable queue snapshots and copied independent LIVE sessions before either scheduler starts. It serializes optional official `ISystemNotificationService` submissions, deduplicates state transitions and throttles existing progress events, without a timer or worker. Queue completion is a round aggregate only after all pending/waiting/retry jobs finish. History remains the trusted action-path lookup; no second notification history is implemented. Async shutdown unsubscribes/drains/disposes the provider while the UI dispatcher still runs. Bounded allowlisted notification intents are routed through the existing per-user `ExternalLinkInstance` pipe; the secondary COM receiver has a closeable MFN loop but no Form/AppServices/tools/schedulers. See [System notifications](SYSTEM_NOTIFICATIONS.md).
+
+Browser integration uses bounded source-neutral v2 Analyze/QuickQueue/Open intents; v1 retains its strict YouTube compatibility validator. `ExternalMediaPolicy` routes canonical `SourceCheckResult` into preview, playlist selection, LIVE confirmation or explicit generic Best/Auto queueing. Desktop yt-dlp remains authoritative. Toolbar/page/link menus work for HTTP(S); only YouTube has an in-page adapter. Chrome i18n resources and local non-secret preferences are independent of Web Remote authentication/language. No second extractor registry, semantic tree, scheduler or transport service is introduced. Publication uses the exact-head CI/tag release pipeline.
+
 - `VideoMetadata` is source-neutral; `SourceUrl` is not named `YouTubeUrl`.
 - `FormatSelection` already records concrete IDs for a future advanced picker.
 - The queue processor is independent of controls; its executor interface allows deterministic bounded-concurrency and cancellation tests without external downloads.
 - Playlist entries use the existing per-item queue processor and history; automatic channel orchestration is intentionally not exposed.
+
+## Candidate.2 browser and remote preference/lifecycle refinement
+
+`WebRemotePairing` owns volatile code state (Inactive/Available/Used/Expired/Blocked), single-use exchange and independent sessions. `EnsureCode` runs on listener enable/save reconciliation, not painting/countdown. Settings remains a projection; changing an unsaved checkbox does not silently change the running backend. The public bootstrap is an allowlisted two-field auth-mode/desktop-language DTO; one polling cadence works before and after pairing. Only language/data changes invalidate rendered lists, preventing idle refresh flicker. Session revisions discard late in-flight responses after logout/401.
+
+Extension language is one storage key (`extensionLanguage`), resolved through the same PL/EN Chrome catalogs by `MTDI18n`. Popup/Options/menus/content subscribe to it; Options resets only the five owned preference keys. Options is a standard MV3 tab with no new permission, runtime service or desktop language channel. Generic protocol transport, SourceCheck authority, YouTube adapters and optional HTTPS security are unchanged.

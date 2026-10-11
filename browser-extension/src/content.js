@@ -1,14 +1,8 @@
 globalThis.MTDContent = (() => {
   const buttonId = 'mtd-download-button';
-  const label = 'Pobierz w ModernTubeDownloader';
 
   async function withExtensionContext(operation, fallback) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (/^extension context invalidated\.?$/i.test(String(error?.message || error))) return fallback;
-      throw error;
-    }
+    return MTDContext.call(operation, fallback);
   }
 
   function createStorageBridge(storage) {
@@ -23,97 +17,18 @@ globalThis.MTDContent = (() => {
     let anchorObserver = null;
     let observedAnchor = null;
     let scheduled = false;
+    let timer = null;
     let started = false;
     let quality = 'best';
+    let enabled = true;
+    const adapter = MTDSiteAdapters.YouTube(doc, win);
     const modal = MTDModal.createController(doc, win, {
       getQuality: () => quality,
       setQuality: value => {
         quality = MTDUrls.qualities.has(value) ? value : 'best';
-        void persistQuality(quality);
+        if (MTDContext.check()) void persistQuality(quality).catch(error => console.warn('MTD quality save failed:', error?.name || 'Error'));
       }
     });
-
-    function visible(element) {
-      if (element.closest?.('[hidden], [aria-hidden="true"]')) return false;
-      const rect = element.getBoundingClientRect?.();
-      return !rect || (rect.width > 0 && rect.height > 0);
-    }
-
-    function firstVisible(selectors) {
-      for (const selector of selectors) {
-        const matches = doc.querySelectorAll?.(selector) || [doc.querySelector(selector)].filter(Boolean);
-        for (const element of matches) if (visible(element)) return element;
-      }
-      return null;
-    }
-
-    function playlistRowHasRoom(row, host) {
-      const nativeItems = [...row.children].filter(child => child.id !== buttonId);
-      const last = nativeItems[nativeItems.length - 1];
-      const right = last?.getBoundingClientRect?.().right;
-      const limit = host.parentElement?.getBoundingClientRect?.().right;
-      return right != null && limit != null && limit - right >= 48;
-    }
-
-    function watchMenuHasRoom(menu) {
-      const menuRect = menu.getBoundingClientRect?.();
-      const nativeItems = [...menu.children]
-        .filter(child => child.id !== buttonId)
-        .map(child => child.getBoundingClientRect?.())
-        .filter(rect => rect?.width > 0 && rect.height > 0);
-      if (!menuRect || nativeItems.length === 0) return false;
-      return menuRect.right - Math.max(...nativeItems.map(rect => rect.right)) >= 112;
-    }
-
-    function findAnchor(kind) {
-      if (kind === 'video' || kind === 'live') {
-        const actions = firstVisible([
-          'ytd-watch-flexy ytd-watch-metadata #actions',
-          'ytd-watch-metadata #actions'
-        ]);
-        if (actions && actions.querySelector?.('ytd-menu-renderer, #menu')) {
-          const menu = actions.querySelector('ytd-menu-renderer');
-          if (menu && visible(menu) && watchMenuHasRoom(menu))
-            return { anchor: menu, placement: 'watch-menu' };
-          return { anchor: actions, placement: 'watch' };
-        }
-        const fallback = firstVisible([
-          'ytd-watch-metadata #actions-inner',
-          'ytd-watch-metadata #menu',
-          'ytd-video-primary-info-renderer #menu'
-        ]);
-        return fallback && { anchor: fallback, placement: 'stack' };
-      }
-
-      if (kind === 'short') {
-        const actions = firstVisible([
-          'ytd-shorts ytd-reel-video-renderer reel-action-bar-view-model',
-          'ytd-reel-video-renderer ytd-reel-player-overlay-renderer reel-action-bar-view-model',
-          'ytd-reel-video-renderer #actions',
-          'ytd-reel-player-overlay-renderer #actions'
-        ]);
-        return actions && { anchor: actions, placement: 'shorts' };
-      }
-
-      if (kind === 'playlist') {
-        const host = firstVisible([
-          'yt-page-header-renderer yt-flexible-actions-view-model',
-          'ytd-playlist-header-renderer yt-flexible-actions-view-model'
-        ]);
-        if (host) {
-          const row = host.querySelector('.ytFlexibleActionsViewModelActionRow');
-          if (row && playlistRowHasRoom(row, host))
-            return { anchor: row, placement: 'playlist-inline' };
-          return { anchor: host, placement: 'playlist-stack' };
-        }
-        const legacy = firstVisible([
-          'ytd-playlist-header-renderer #buttons',
-          'ytd-playlist-header-renderer ytd-menu-renderer'
-        ]);
-        return legacy && { anchor: legacy, placement: 'playlist-inline' };
-      }
-      return null;
-    }
 
     function disconnectAnchor() {
       anchorObserver?.disconnect();
@@ -139,19 +54,20 @@ globalThis.MTDContent = (() => {
       const button = doc.createElement('button');
       button.id = buttonId;
       button.type = 'button';
-      button.title = label;
-      button.setAttribute('aria-label', label);
+      button.title = MTDI18n.t('downloadTitle');
+      button.setAttribute('aria-label', button.title);
       const icon = doc.createElement('img');
       icon.alt = '';
       icon.setAttribute('aria-hidden', 'true');
-      icon.src = typeof chrome === 'undefined' ? '' : chrome.runtime.getURL('assets/icon48.png');
+      icon.src = typeof chrome === 'undefined' ? '' : MTDContext.sync(() => chrome.runtime.getURL('assets/icon48.png'), '');
       button.append(icon);
       const caption = doc.createElement('span');
-      caption.textContent = 'Pobierz';
+      caption.textContent = MTDI18n.t('download');
       caption.className = 'mtd-watch-caption';
       button.append(caption);
       button.addEventListener('click', () => {
-        const media = MTDUrls.detect(win.location.href);
+        if (!MTDContext.check()) return;
+        const media = adapter.getCurrentMedia();
         if (media) modal.open(media, button);
       });
       return button;
@@ -159,16 +75,16 @@ globalThis.MTDContent = (() => {
 
     function reconcile() {
       scheduled = false;
-      if (!started) return;
-      const media = MTDUrls.detect(win.location.href);
+      if (!started || !MTDContext.check()) return;
+      const media = adapter.getCurrentMedia();
       let button = doc.getElementById(buttonId);
-      if (!media) {
+      if (!enabled || !media) {
         modal.close();
         button?.remove();
         disconnectAnchor();
         return;
       }
-      const target = findAnchor(media.kind);
+      const target = adapter.findInsertionPoint(media);
       if (!target) {
         modal.close();
         button?.remove();
@@ -187,21 +103,23 @@ globalThis.MTDContent = (() => {
     }
 
     function schedule() {
-      if (!started || scheduled) return;
+      if (!started || scheduled || !MTDContext.check()) return;
       scheduled = true;
-      win.setTimeout(reconcile, 50);
+      timer = win.setTimeout(reconcile, 50);
     }
 
     function start() {
-      if (started) return;
+      if (started || !MTDContext.check()) return;
       started = true;
       if (doc.body) {
         pageObserver = new MutationObserver(() => {
-          if (MTDUrls.detect(win.location.href) && !doc.getElementById(buttonId)) schedule();
+          if (!MTDContext.check()) return;
+          if (adapter.getCurrentMedia() && !doc.getElementById(buttonId)) schedule();
         });
         pageObserver.observe(doc.body, { childList: true, subtree: true });
       }
-      void loadQuality().then(value => { quality = MTDUrls.qualities.has(value) ? value : 'best'; schedule(); });
+      void loadQuality().then(value => { if (!started || !MTDContext.check()) return; quality = MTDUrls.qualities.has(value) ? value : 'best'; schedule(); })
+        .catch(error => console.warn('MTD quality load failed:', error?.name || 'Error'));
       win.addEventListener('yt-navigate-finish', schedule);
       win.addEventListener('popstate', schedule);
       win.addEventListener('resize', schedule);
@@ -210,6 +128,8 @@ globalThis.MTDContent = (() => {
 
     function stop() {
       started = false;
+      if (timer !== null) win.clearTimeout?.(timer);
+      timer = null; scheduled = false;
       modal.close();
       win.removeEventListener('yt-navigate-finish', schedule);
       win.removeEventListener('popstate', schedule);
@@ -222,17 +142,36 @@ globalThis.MTDContent = (() => {
 
     function setQuality(value) { quality = MTDUrls.qualities.has(value) ? value : 'best'; schedule(); }
 
-    return { start, stop, reconcile, setQuality, modal };
+    function setEnabled(value) { enabled = value !== false; reconcile(); }
+    function updateLanguage() {
+      if (!MTDContext.check()) return;
+      const button = doc.getElementById(buttonId);
+      if (button) {
+        button.title = MTDI18n.t('downloadTitle');
+        button.setAttribute('aria-label', button.title);
+        button.children[1].textContent = MTDI18n.t('download');
+      }
+      modal.updateLanguage();
+    }
+    MTDContext.own(stop);
+    return { start, stop, reconcile, setQuality, setEnabled, updateLanguage, modal };
   }
 
   if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
     const storage = createStorageBridge(chrome.storage);
     const controller = createController(document, window, storage.load, storage.save);
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes.quality)
-        controller.setQuality(changes.quality.newValue);
+    // No Chrome API polling: only read runtime.id to retire even an otherwise idle stale page.
+    const watchdog = window.setInterval(() => MTDContext.check(), 1000);
+    MTDContext.own(() => window.clearInterval(watchdog));
+    MTDContext.own(MTDI18n.subscribe(controller.updateLanguage));
+    MTDContext.subscribe(chrome.storage.onChanged, (changes, area) => {
+      if (area !== 'local') return;
+      if (changes.quality) controller.setQuality(changes.quality.newValue);
+      if (changes.showInjectedButtons) controller.setEnabled(changes.showInjectedButtons.newValue);
     });
-    controller.start();
+    void withExtensionContext(() => chrome.storage.local.get({showInjectedButtons:true}), {showInjectedButtons:true})
+      .then(async value => { await MTDI18n.ready; await globalThis.MTDCookieClient?.ready; if (!MTDContext.check()) return; controller.setEnabled(value.showInjectedButtons); controller.start(); })
+      .catch(error => console.warn('MTD content setup failed:', error?.name || 'Error'));
   }
   return { createController, createStorageBridge };
 })();

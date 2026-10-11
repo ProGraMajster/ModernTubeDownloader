@@ -32,6 +32,7 @@ public sealed class DownloadJobExecutor(
         Action<Action<DownloadQueueItem>, bool> update,
         CancellationToken cancellationToken)
     {
+        using var authenticationSession = ytDlpRunner.BeginAuthenticationSession(item.SourceUrl);
         if (item.LiveSession is not null)
             throw new InvalidOperationException("LIVE sessions must use the independent LIVE subsystem.");
         var requestedRange = item.RequestedRange ?? MediaTimeRange.Full;

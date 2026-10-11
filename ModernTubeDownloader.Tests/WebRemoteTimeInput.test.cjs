@@ -62,7 +62,9 @@ function createPage() {
   element('container').value = 'Auto';
   const requests = [];
   const context = vm.createContext({
-    MTDTimeInput: time, document: { hidden: true, getElementById: element },
+    MTDTimeInput: time, document: { hidden: true, documentElement:{}, getElementById: element },
+    navigator:{languages:['pl-PL']},location:{protocol:'http:'},
+    localStorage:{getItem(){return 'browser'},setItem(){}},
     sessionStorage: { getItem() { return null; }, removeItem() {} },
     setInterval() { return 1; }, clearInterval() {},
     fetch: async (url, options) => {
@@ -71,6 +73,7 @@ function createPage() {
       return { ok: true, status: 200, headers: { get() { return 'application/json'; } }, json: async () => ({}) };
     }
   });
+  vm.runInContext(fs.readFileSync(path.join(assetDirectory, 'i18n.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(assetDirectory, 'app.js'), 'utf8'), context);
   const changeMode = mode => { element('rangeMode').value = mode; element('rangeMode').listeners.change(); };
   const submit = () => element('addForm').listeners.submit({ preventDefault() {} });
@@ -127,9 +130,21 @@ test('language refresh localizes time labels without resetting edits', () => {
   const page = createPage();
   page.changeMode('custom');
   page.element('fromSeconds').value = '2';
-  vm.runInContext('language="en";applyLanguage()', page.context);
+  vm.runInContext('language=i18n.select("en");applyLanguage()', page.context);
   assert.equal(page.element('fromLabel').textContent, 'From');
   assert.equal(page.element('fromHoursLabel').textContent, 'Hours');
   assert.equal(page.element('fromSeconds').value, '2');
   assert.equal(page.element('rangePreview').textContent, '00:00:02 → End of media');
+});
+
+test('unpaired language switch localizes title/status without exposing disconnect', () => {
+  const page = createPage();
+  vm.runInContext('showLogin()', page.context);
+  page.element('language').value = 'en';
+  page.element('language').listeners.change();
+  assert.equal(page.context.document.title, 'ModernTubeDownloader — Local network remote');
+  assert.equal(page.element('connection').textContent, 'Disconnected');
+  assert.equal(page.element('logout').hidden, true);
+  assert.equal(page.element('loginTitle').textContent, 'Pair with the app');
+  assert.equal(page.element('pairingCode').value, '');
 });

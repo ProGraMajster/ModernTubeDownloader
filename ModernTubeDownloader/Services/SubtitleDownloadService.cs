@@ -32,7 +32,6 @@ public sealed class SubtitleDownloadService(YtDlpProcessRunner runner, SettingsS
             "--windows-filenames", "-P", outputDirectory, "-o", "subtitle.%(ext)s"
         };
         arguments.AddRange(CommandLineArgumentTokenizer.ParseSafeYtDlpArguments(settings.Current.CustomYtDlpArguments));
-        CookieFileService.AppendCookieArguments(arguments, settings.Current.UseCookieFile, settings.Current.CookieFilePath);
         if (options.Source is SubtitleSource.Manual or SubtitleSource.Both) arguments.Add("--write-subs");
         if (options.Source is SubtitleSource.Automatic or SubtitleSource.Both) arguments.Add("--write-auto-subs");
         arguments.AddRange(["--sub-langs", string.Join(',', options.Languages)]);

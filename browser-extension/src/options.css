@@ -1,0 +1,15 @@
+:root{color-scheme:light dark;--bg:#f1f5fb;--card:#fff;--text:#16243b;--muted:#4f6078;--line:#c6d2e2;--accent:#126ae0}
+@media(prefers-color-scheme:dark){:root{--bg:#101a2d;--card:#17243a;--text:#eaf2ff;--muted:#b7c7df;--line:#5275a9;--accent:#72b1ff}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,sans-serif}
+main{max-width:760px;margin:32px auto;padding:0 20px 32px}header{display:flex;align-items:center;gap:16px;margin-bottom:24px}
+header img{width:48px;height:48px;object-fit:contain}h1{font-size:22px;overflow-wrap:anywhere;margin:0}header p{margin:0;color:var(--muted)}
+section{padding:24px;margin-bottom:16px;background:var(--card);border:1px solid var(--line);border-radius:14px}
+h2{font-size:18px;margin:0 0 12px}p{color:var(--muted)}label{display:block;margin:14px 0 6px}
+select,button{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+select{width:100%}button{cursor:pointer}.check{display:flex;gap:10px;align-items:center}.check input{width:20px;height:20px;flex:0 0 auto;accent-color:var(--accent)}
+:is(button,select,input):focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:hover{border-color:var(--accent)}
+#status{min-height:24px}dialog{width:min(520px,calc(100% - 32px));padding:24px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:14px}
+dialog::backdrop{background:#0008}.actions{display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+@media(max-width:480px){main{margin:16px auto;padding:0 12px 20px}section{padding:16px}h1{font-size:18px}}
+input[type=text],input[type=number]{box-sizing:border-box;max-width:100%;padding:10px;background:var(--surface,#17243a);color:inherit;border:1px solid #718096;border-radius:8px;width:100%}
+#cookieSelection{max-height:320px;overflow:auto;margin-top:16px}#cookieProfiles article{border-top:1px solid #718096;margin-top:16px;padding-top:8px}#cookieProfiles button{margin:4px}

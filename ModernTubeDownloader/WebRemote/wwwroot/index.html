@@ -8,15 +8,17 @@
   <link rel="stylesheet" href="/remote-queue.css">
   <link rel="stylesheet" href="/time-input.css">
   <script src="/time-input.js" defer></script>
+  <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
   <main class="shell">
-    <header><div class="brand"><span class="mark">▶↓</span><div><strong>ModernTubeDownloader</strong><small id="subtitle">Panel zdalny w sieci lokalnej</small></div></div><span class="pill" id="connection">—</span></header>
+    <header><div class="brand"><span class="mark">▶↓</span><div><strong>ModernTubeDownloader</strong><small id="subtitle">Local network remote</small></div></div><div class="remoteControls"><label for="language" id="languageLabel">Language</label><select id="language"><option value="app">🔄 Z aplikacji / Follow app</option><option value="pl">🇵🇱 Polski</option><option value="en">🇬🇧 English</option><option value="browser">🌐 Przeglądarka / Browser</option></select><span class="pill" id="connection">—</span><button type="button" id="logout" class="secondary" hidden>Disconnect</button></div></header>
+    <p id="authDisabled" role="status" hidden></p>
     <section class="panel" id="loginPanel">
       <h1 id="loginTitle">Połącz z aplikacją</h1>
-      <p id="loginDescription">Wpisz token wyświetlany w ustawieniach aplikacji na komputerze.</p>
-      <form id="loginForm"><label for="token">Token</label><input id="token" type="password" autocomplete="off" required><button type="submit" id="connectButton">Połącz</button></form>
+      <p id="loginDescription">Enter the short pairing code shown in the desktop app.</p>
+      <form id="loginForm"><label for="pairingCode" id="codeLabel">Pairing code</label><input id="pairingCode" type="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="16" placeholder="ABCD-EFGH" required><button type="submit" id="connectButton">Connect</button></form>
     </section>
     <div id="dashboard" hidden>
       <section class="panel"><h1 id="liveHeading">LIVE</h1><h2 id="liveActiveHeading">Aktualnie nagrywane</h2><div id="liveActive"></div><h2 id="liveScheduledHeading">Zaplanowane</h2><div id="liveScheduled"></div><h2 id="livePartialHeading">Częściowe i ostatnie</h2><div id="livePartial"></div></section>

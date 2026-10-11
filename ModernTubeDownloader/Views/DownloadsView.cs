@@ -448,6 +448,47 @@ internal sealed class DownloadsView : UserControl
     {
         if (!Infrastructure.ExternalMediaRequest.TryValidateSource(request.SourceUrl, out var normalized))
             throw new ArgumentException("Unsupported external media URL.", nameof(request));
+        if (request.Intent is not null)
+        {
+            urlInput.Text = normalized;
+            ClearAnalyzedPreview();
+            if (request.Intent == Infrastructure.ExternalMediaIntent.Open) return;
+            await services.Tools.EnsureAnalysisReadyAsync(lifetimeCancellation.Token);
+            var result = await services.SourceCheck.CheckAsync(normalized, lifetimeCancellation.Token);
+            switch (ExternalMediaPolicy.Route(request, result))
+            {
+                case ExternalMediaRoute.LiveConfirmation:
+                    LiveRequested?.Invoke(this, new LiveNavigationRequest(normalized, result.Metadata,
+                        result.Metadata is null ? MediaAvailabilityKind.Upcoming : MediaAvailabilityPolicy.Classify(result.Metadata)));
+                    return;
+                case ExternalMediaRoute.Error:
+                    SetPreviewState(PreviewState.Failed);
+                    feedback.Text = text[result.MessageKey ?? "Error.Download.Authentication"];
+                    return;
+                case ExternalMediaRoute.PlaylistSelection:
+                    if (!request.AutoQueuePlaylist)
+                    {
+                        await AcceptDesktopUrlAsync(normalized, detectedPlaylist: true);
+                        playlistPreview.SetOptions(request.RequestedQualityPresetId, request.RequestedContainer);
+                        return;
+                    }
+                    // Only an explicit YouTube playlist confirmation retains the existing Add entire playlist action.
+                    break;
+                case ExternalMediaRoute.VideoPreview:
+                    await AcceptDesktopUrlAsync(normalized);
+                    if (analyzedMetadata is not null)
+                    {
+                        SelectContainer(request.RequestedContainer);
+                        PopulateAvailableQualities(analyzedMetadata, request.RequestedQualityPresetId);
+                    }
+                    return;
+                case ExternalMediaRoute.QuickQueue:
+                    var uri = new Uri(normalized);
+                    var youtube = uri.Host is "youtube.com" or "www.youtube.com" or "m.youtube.com" or "youtu.be";
+                    if (!youtube) request = request with { RequestedQualityPresetId = "best", RequestedContainer = PreferredVideoContainer.Auto };
+                    break;
+            }
+        }
         if (!request.AutoQueue)
         {
             await AcceptExternalUrlAsync(normalized, request.AutoAnalyze);
@@ -1001,6 +1042,14 @@ internal sealed class DownloadsView : UserControl
         var positions = QueuePositionPresenter.Build(items, services.Settings.Current.ShowQueuePositionNumbers);
         foreach (var (id, card) in cards)
             card.SetQueuePosition(positions.GetValueOrDefault(id));
+    }
+
+    internal void RevealQueueItem(Guid itemId)
+    {
+        if (!cards.ContainsKey(itemId)) return;
+        selectedItemId = itemId;
+        RefreshSelection();
+        ScrollQueueCardIntoView(itemId);
     }
 
     private void ScrollQueueCardIntoView(Guid itemId)

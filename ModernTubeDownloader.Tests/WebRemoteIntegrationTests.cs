@@ -306,7 +306,7 @@ public sealed class WebRemoteIntegrationTests
     private static object Add(string url, string quality = "best", string container = "Auto", string rangeMode = "full", string? from = null, string? to = null)
         => new { url, quality, container, rangeMode, from, to };
 
-    private static int FreeLoopbackPort()
+    internal static int FreeLoopbackPort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -322,7 +322,7 @@ public sealed class WebRemoteIntegrationTests
         Assert.True(condition());
     }
 
-    private static async Task ConfigureFakeToolsAsync(AppPaths paths)
+    internal static async Task ConfigureFakeToolsAsync(AppPaths paths)
     {
         paths.EnsureCreated();
         var settings = new SettingsService(paths, new NullAppLogger());

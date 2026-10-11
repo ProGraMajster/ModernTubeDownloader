@@ -18,9 +18,9 @@ public sealed class ReleaseReadinessTests : IDisposable
             .Single(attribute => attribute.Key == "RepositoryUrl");
         var file = FileVersionInfo.GetVersionInfo(assembly.Location);
 
-        Assert.Equal(new Version(1, 0, 0, 0), assembly.GetName().Version);
-        Assert.Equal("1.0.0", informationalVersion?.InformationalVersion);
-        Assert.Equal("1.0.0.0", file.FileVersion);
+        Assert.Equal(new Version(1, 1, 0, 0), assembly.GetName().Version);
+        Assert.Equal("1.1.0", informationalVersion?.InformationalVersion);
+        Assert.Equal("1.1.0.0", file.FileVersion);
         Assert.Equal("ModernTubeDownloader", file.ProductName);
         Assert.Equal("ProGraMajster", file.CompanyName);
         Assert.Equal("https://github.com/ProGraMajster/ModernTubeDownloader", repository.Value);

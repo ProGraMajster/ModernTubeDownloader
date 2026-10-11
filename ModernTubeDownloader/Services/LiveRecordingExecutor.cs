@@ -19,7 +19,14 @@ public sealed class LiveRecordingExecutor(
 
     public async Task ExecuteAsync(LiveSession live,
         Action<Action<LiveSession>, bool> update, CancellationToken cancellationToken)
+        => await runner.ExecuteAuthenticationAttemptAsync(live.SourceUrl,
+            () => ExecutePartAsync(live, update, cancellationToken), cancellationToken).ConfigureAwait(false);
+
+    private async Task ExecutePartAsync(LiveSession live,
+        Action<Action<LiveSession>, bool> update, CancellationToken cancellationToken)
     {
+        // Auth retry wraps this entire boundary: finalize/preserve raw data before opening
+        // a new part and re-extracting metadata. Never retry ffmpeg into the failed part.
         // Never reuse an expired manifest or direct media URL after a reconnect.
         var metadata = await metadataService.AnalyzeAsync(live.SourceUrl, cancellationToken).ConfigureAwait(false);
         var availability = MediaAvailabilityPolicy.Classify(metadata);

@@ -1,0 +1,221 @@
+{
+  "cookieTitle": { "message": "Cookies / Uwierzytelnianie" },
+  "cookieStatusSynced": { "message": "Zsynchronizowano" },
+  "cookieStatusPending": { "message": "Usunięcie oczekuje na potwierdzenie" },
+  "cookieStatusRevoked": { "message": "Dane usunięte" },
+  "cookieStatusNotSynced": { "message": "Jeszcze nie zsynchronizowano" },
+  "cookieStatusPermission": { "message": "Brak uprawnienia / cofnięto dostęp" },
+  "cookieStatusFailed": { "message": "Synchronizacja niepotwierdzona" },
+  "cookieBridgeMissing": { "message": "Chrome nie znalazł rejestracji hosta" },
+  "cookieBridgeForbidden": { "message": "Chrome nie zezwala temu rozszerzeniu na użycie hosta" },
+  "cookieBridgeExited": { "message": "Host zakończył się przed odpowiedzią" },
+  "cookieBridgeProtocol": { "message": "Błąd komunikacji z hostem" },
+  "cookieBridgeApi": { "message": "API Native Messaging jest niedostępne w workerze. Po przyznaniu uprawnienia odśwież rozszerzenie i ponów operację." },
+  "cookieSession": { "message": "sesyjne" },
+  "cookiePartitioned": { "message": "partycjonowane (pominięte)" },
+  "cookiePrivacy": { "message": "Cookies mogą umożliwiać dostęp do Twojego zalogowanego konta. Synchronizowany jest wyłącznie wybrany zakres. Wartości nie są wyświetlane ani zapisywane w logach." },
+  "cookieRegistration": { "message": "Najpierw zarejestruj most natywny w Ustawieniach aplikacji, używając tego dokładnego ID rozszerzenia i przeglądarki:" },
+  "cookieBrowser": { "message": "Przeglądarka" },
+  "cookieScope": { "message": "Tryb zakresu" },
+  "cookieCurrent": { "message": "Bieżący serwis (wpisz jego dokładną domenę)" },
+  "cookieServices": { "message": "Wybrane serwisy" },
+  "cookieDomains": { "message": "Wybrane domeny" },
+  "cookieCustom": { "message": "Niestandardowy wybór cookies" },
+  "cookieDomainInput": { "message": "Domeny (oddziel przecinkiem, bez URL)" },
+  "cookieDomainHint": { "message": "Dostęp obejmuje te domeny i ich subdomeny przez HTTPS. Preset YouTube obejmuje tylko youtube.com. Domeny Google/konta nie są dodawane automatycznie." },
+  "cookieBefore": { "message": "Synchronizuj przed analizą / przekazaniem" },
+  "cookieChanged": { "message": "Synchronizuj po zmianach cookies (grupowane)" },
+  "cookieStartup": { "message": "Synchronizuj przy starcie przeglądarki" },
+  "cookiePeriod": { "message": "Synchronizacja okresowa w minutach: 0 = wyłączona lub 5–1440" },
+  "cookieConsent": { "message": "Wybrane cookies odczyta rozszerzenie, przekaże wyłącznie przez Native Messaging i zapisze zaszyfrowane przez Windows DPAPI w lokalnym AppData. Cofnij zgodę poniżej lub usuń dane w Ustawieniach aplikacji. Aktywne pobrania mogą zachować swój tymczasowy jar." },
+  "cookieConsentCheck": { "message": "Zgadzam się na odczyt domen podanych powyżej" },
+  "cookieConnect": { "message": "Zezwól i połącz" },
+  "cookieInspect": { "message": "Odczytaj metadane do wyboru Custom" },
+  "cookieSync": { "message": "Synchronizuj teraz" },
+  "cookieRevoke": { "message": "Wyłącz synchronizację i usuń dane" },
+  "cookieEdit": { "message": "Zmień zakres" },
+  "cookieDelete": { "message": "Usuń profil" },
+  "cookieDeleteConfirm": { "message": "Usunąć profil z listy? Jeśli jest aktywny, najpierw wyłączymy synchronizację i potwierdzimy usunięcie danych z aplikacji. Cookies w przeglądarce pozostaną bez zmian." },
+  "cookieEnabled": { "message": "Dostęp przyznany / włączony" },
+  "cookieRevoked": { "message": "Wyłączony" },
+  "cookieState": { "message": "Stan" },
+  "cookieDone": { "message": "Operacja potwierdzona. Sprawdź stan profilu poniżej." },
+  "cookieFailed": { "message": "Nie potwierdzono synchronizacji/usunięcia. Sprawdź most natywny. Jeśli cofnięcie jest oczekujące, usuń też zsynchronizowane cookies w Ustawieniach aplikacji." },
+  "cookieInvalid": { "message": "Sprawdź zgodę, dokładne domeny i interwał. Bieżący serwis wymaga jednej domeny." },
+  "cookieMetadataOnly": { "message": "Wyłącznie metadane. Cookies partycjonowane są pomijane. Wybierz cookies, które zgadzasz się przekazać." },
+  "cookieRevokeConfirm": { "message": "Wyłączyć ten zakres i usunąć jego dane? Aktywnych pobrań nie można cofnąć." },
+  "cookieContinue": { "message": "Odświeżenie sesji nie powiodło się. Kontynuować z ostatnim dostępnym snapshotem lub bez cookies, jeśli go nie ma?" },
+  "extensionName": {
+    "message": "ModernTubeDownloader"
+  },
+  "extensionDescription": {
+    "message": "Przekazuj URL materiałów HTTP/HTTPS do ModernTubeDownloader; szybkie akcje YouTube."
+  },
+  "download": {
+    "message": "Pobierz"
+  },
+  "downloadTitle": {
+    "message": "Pobierz w ModernTubeDownloader"
+  },
+  "menuPage": {
+    "message": "Analizuj stronę w ModernTubeDownloader"
+  },
+  "menuLink": {
+    "message": "Analizuj link w ModernTubeDownloader"
+  },
+  "menuPageQueue": {
+    "message": "Szybko dodaj stronę w ModernTubeDownloader"
+  },
+  "menuLinkQueue": {
+    "message": "Szybko dodaj link w ModernTubeDownloader"
+  },
+  "quality": {
+    "message": "Jakość"
+  },
+  "qualityBest": {
+    "message": "Najlepsza dostępna"
+  },
+  "qualityAudio": {
+    "message": "Tylko dźwięk"
+  },
+  "qualityHint": {
+    "message": "Jakość oznacza „do”. Aplikacja wybierze najbliższą dostępną niższą jakość."
+  },
+  "defaultQuality": {
+    "message": "Domyślna jakość pozycji"
+  },
+  "addMedia": {
+    "message": "Dodaj materiał"
+  },
+  "addPlaylist": {
+    "message": "Dodaj playlistę"
+  },
+  "playlist": {
+    "message": "PLAYLISTA"
+  },
+  "video": {
+    "message": "FILM"
+  },
+  "short": {
+    "message": "SHORTS"
+  },
+  "live": {
+    "message": "LIVE / REPLAY"
+  },
+  "close": {
+    "message": "Zamknij"
+  },
+  "cancel": {
+    "message": "Anuluj"
+  },
+  "openApp": {
+    "message": "Analizuj w aplikacji"
+  },
+  "queue": {
+    "message": "Dodaj do kolejki"
+  },
+  "queuePlaylist": {
+    "message": "Dodaj playlistę do kolejki"
+  },
+  "playlistDescription": {
+    "message": "Dodaj całą playlistę od razu albo przeanalizuj ją w ModernTubeDownloader, aby przejrzeć pozycje."
+  },
+  "mediaDescription": {
+    "message": "Dodaj materiał od razu albo przeanalizuj go w ModernTubeDownloader, aby wybrać format pliku."
+  },
+  "liveHint": {
+    "message": "Aplikacja sprawdzi stan: zakończony zapis trafi do kolejki pobierania, a trwający lub planowany LIVE wymaga osobnego potwierdzenia. Nagrywanie nie rozpocznie się automatycznie."
+  },
+  "unsupported": {
+    "message": "Niedostępna strona"
+  },
+  "unsupportedHint": {
+    "message": "Otwórz stronę HTTP/HTTPS lub użyj menu kontekstowego linku."
+  },
+  "ready": {
+    "message": "Gotowe do przekazania aplikacji"
+  },
+  "handoff": {
+    "message": "Zażądano otwarcia aplikacji. Potwierdź pytanie przeglądarki, jeśli się pojawi. Nie oznacza to dodania do kolejki."
+  },
+  "analyzing": {
+    "message": "Aplikacja przeanalizuje URL i pokaże dostępne opcje."
+  },
+  "genericHint": {
+    "message": "Aplikacja sprawdza obsługę yt-dlp, uwierzytelnianie i typ materiału. Szybka kolejka używa Best / Auto; playlisty i LIVE wymagają wyboru."
+  },
+  "source": {
+    "message": "Źródło: $1",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      }
+    }
+  },
+  "showInjectedButtons": {
+    "message": "Pokaż przyciski YouTube"
+  },
+  "contextMenusEnabled": {
+    "message": "Włącz menu strony/linku"
+  },
+  "defaultAction": {
+    "message": "Domyślna akcja menu"
+  },
+  "analyzeAction": {
+    "message": "Analizuj w aplikacji (zalecane)"
+  },
+  "quickQueueAction": {
+    "message": "Szybka kolejka (Best / Auto poza YouTube)"
+  },
+  "extensionSettings": {
+    "message": "Ustawienia rozszerzenia"
+  },
+  "settingsSaved": {
+    "message": "Zapisano preferencje."
+  },
+  "preferencesError": {
+    "message": "Nie udało się zapisać preferencji. Otwórz ponownie popup rozszerzenia."
+  },
+  "platformNotice": {
+    "message": "Obsługę określa yt-dlp w aplikacji, nie rozszerzenie."
+  },
+  "language": {
+    "message": "Język"
+  },
+  "languageAuto": {
+    "message": "🌐 Automatycznie / przeglądarka"
+  },
+  "languageSettings": {
+    "message": "⚙ Ustawienia języka"
+  },
+  "settingsLink": {
+    "message": "⚙ Ustawienia"
+  },
+  "languageDescription": {
+    "message": "Jeden język dla popupu, ustawień, menu i przycisków YouTube. Auto korzysta z języka przeglądarki, nie aplikacji desktopowej."
+  },
+  "pageIntegration": {
+    "message": "Integracja ze stronami"
+  },
+  "behavior": {
+    "message": "Zachowanie"
+  },
+  "savedQuality": {
+    "message": "Ostatnia jakość YouTube"
+  },
+  "about": {
+    "message": "O rozszerzeniu"
+  },
+  "aboutTransport": {
+    "message": "Rozszerzenie przekazuje adresy do zainstalowanej aplikacji. Samo nie pobiera materiałów ani nie wymaga konta."
+  },
+  "restoreDefaults": {
+    "message": "Przywróć ustawienia domyślne"
+  },
+  "resetConfirmation": {
+    "message": "Zresetować język, jakość oraz preferencje integracji i akcji ModernTubeDownloader? Inne dane przeglądarki pozostaną bez zmian."
+  },
+  "defaultsRestored": {
+    "message": "Przywrócono ustawienia domyślne."
+  }
+}

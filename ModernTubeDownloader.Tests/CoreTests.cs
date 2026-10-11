@@ -150,7 +150,7 @@ public sealed class CoreTests
     [InlineData("--exec calc.exe")]
     [InlineData("https://unexpected.example/video")]
     public void CustomArguments_RejectApplicationOwnedOrAdditionalUrl(string value) =>
-        Assert.Throws<ArgumentException>(() => CommandLineArgumentTokenizer.ParseSafeYtDlpArguments(value));
+        Assert.Throws<CustomArgumentException>(() => CommandLineArgumentTokenizer.ParseSafeYtDlpArguments(value));
 
     [Fact]
     public void CustomArguments_PreserveQuotedValuesWithoutUsingAShell()

@@ -21,7 +21,7 @@ public sealed class YtDlpMetadataService(YtDlpProcessRunner runner, SettingsServ
             throw new ArgumentException(validationError, nameof(sourceUrl));
 
         var arguments = BuildArguments(normalizedUrl, settings.Current.CustomYtDlpArguments,
-            settings.Current.UseCookieFile, settings.Current.CookieFilePath);
+            false, null);
         if (checkSource)
         {
             var bounded = arguments.ToList();
@@ -66,7 +66,7 @@ public sealed class YtDlpMetadataService(YtDlpProcessRunner runner, SettingsServ
         try
         {
             var result = await runner.RunAsync(BuildPlaylistArguments(normalizedUrl, settings.Current.CustomYtDlpArguments,
-                    settings.Current.UseCookieFile, settings.Current.CookieFilePath),
+                    false, null),
                 cancellationToken: timeout.Token).ConfigureAwait(false);
             var json = result.StandardOutput.LastOrDefault(line => !string.IsNullOrWhiteSpace(line));
             if (string.IsNullOrWhiteSpace(json))

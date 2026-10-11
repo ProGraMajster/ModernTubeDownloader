@@ -53,7 +53,7 @@ public sealed class ThumbnailCacheService : IDisposable
         try
         {
             Directory.CreateDirectory(paths.ThumbnailCacheDirectory);
-            var cacheFile = Path.Combine(paths.ThumbnailCacheDirectory, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url))) + ".img");
+            var cacheFile = CachePath(url);
             byte[] bytes;
             if (File.Exists(cacheFile))
             {
@@ -86,6 +86,77 @@ public sealed class ThumbnailCacheService : IDisposable
             logger.Warning($"Could not load thumbnail: {ex.Message}");
             return null;
         }
+    }
+
+    private string CachePath(string url) => Path.Combine(paths.ThumbnailCacheDirectory,
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url))) + ".img");
+
+    private const int NotificationImageLimit = 3 * 1024 * 1024;
+    private const long NotificationPixelLimit = 4 * 1024 * 1024;
+
+    /// <summary>Reuse the persistent cache, normalizing locally to a bounded Windows-compatible PNG.
+    /// Never downloads an image; the derived file survives service disposal and native presentation.</summary>
+    public string? GetCachedNotificationPath(string? url)
+    {
+        if (disposed || isEnabled?.Invoke() == false || string.IsNullOrWhiteSpace(url) || pending.ContainsKey(url)) return null;
+        var file = CachePath(url);
+        try
+        {
+            // Serializes creation with disposal and concurrent notification lookups. No network I/O.
+            lock (lifetimeSync)
+            {
+                if (disposed) return null;
+                var exists = File.Exists(file);
+                var size = exists ? new FileInfo(file).Length : 0;
+                logger.Info($"Notification thumbnail cache: key={Path.GetFileNameWithoutExtension(file)}, path={file}, exists={exists}, extension={Path.GetExtension(file)}, bytes={size}.");
+                if (!exists || size is <= 0 or > NotificationImageLimit) return null;
+                // SKFileStream uses an inheritable CRT file handle on Windows. A concurrent
+                // child-process launch can inherit it even after codec disposal here.
+                // Managed FileStream is non-inheritable; close it BEFORE entering Skia.
+                using var sourceData = ReadNotificationData(file);
+                if (sourceData is null) return null;
+                using var codec = SKCodec.Create(sourceData);
+                if (codec is null) { logger.Warning("Notification thumbnail rejected: invalid image header."); return null; }
+                logger.Info($"Notification thumbnail decoded header: format={codec.EncodedFormat}, width={codec.Info.Width}, height={codec.Info.Height}.");
+                if (codec.Info.Width <= 0 || codec.Info.Height <= 0 || (long)codec.Info.Width * codec.Info.Height > NotificationPixelLimit) return null;
+                var output = Path.ChangeExtension(file, ".notification.png");
+                if (File.Exists(output) && new FileInfo(output).Length is > 0 and <= NotificationImageLimit)
+                {
+                    using var existingData = ReadNotificationData(output);
+                    using var existing = existingData is null ? null : SKCodec.Create(existingData);
+                    if (existing?.EncodedFormat == SKEncodedImageFormat.Png && existing.Info.Width <= 512 && existing.Info.Height <= 512)
+                        return output;
+                }
+                using var bitmap = SKBitmap.Decode(codec);
+                if (bitmap is null) return null;
+                var scale = Math.Min(1d, 512d / Math.Max(bitmap.Width, bitmap.Height));
+                using var resized = scale < 1 ? bitmap.Resize(new SKImageInfo(Math.Max(1, (int)(bitmap.Width * scale)),
+                    Math.Max(1, (int)(bitmap.Height * scale))), new SKSamplingOptions(SKFilterMode.Linear)) : null;
+                using var image = SKImage.FromBitmap(resized ?? bitmap);
+                using var png = image.Encode(SKEncodedImageFormat.Png, 100);
+                if (png is null || png.Size > NotificationImageLimit) return null;
+                var pendingFile = output + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    using (var stream = File.Create(pendingFile)) png.SaveTo(stream);
+                    File.Move(pendingFile, output, overwrite: true);
+                }
+                finally { if (File.Exists(pendingFile)) File.Delete(pendingFile); }
+                logger.Info($"Notification thumbnail normalized: path={output}, extension=.png, format=Png, bytes={new FileInfo(output).Length}; persistent application-owned cache.");
+                return output;
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { logger.Warning($"Notification thumbnail cache unavailable: {error.GetType().Name}."); return null; }
+    }
+
+    private static SKData? ReadNotificationData(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length is <= 0 or > NotificationImageLimit) return null;
+        var bytes = new byte[(int)stream.Length];
+        stream.ReadExactly(bytes);
+        return SKData.CreateCopy(bytes);
     }
 
     public void Dispose()

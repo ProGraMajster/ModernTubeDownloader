@@ -1,5 +1,6 @@
 using System.Globalization;
 using ModernTubeDownloader.Models;
+using ModernTubeDownloader.Authentication;
 
 namespace ModernTubeDownloader.Settings;
 
@@ -19,6 +20,7 @@ public enum AppThemeMode
 
 public sealed class AppSettings
 {
+    public NotificationSettings Notifications { get; set; } = new();
     public AppThemeMode ThemeMode { get; set; } = AppThemeMode.System;
     public string Language { get; set; } = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.Equals("pl", StringComparison.OrdinalIgnoreCase)
         ? "pl"
@@ -35,6 +37,7 @@ public sealed class AppSettings
     public bool BrowserIntegrationEnabled { get; set; } = true;
     public bool EnableWebRemote { get; set; }
     public bool WebRemoteRequireAuthentication { get; set; } = true;
+    public bool WebRemoteUseHttps { get; set; }
     public int WebRemotePort { get; set; } = 18765;
     // Explicit address selection prevents accidentally binding VPN, public or wildcard interfaces.
     public string WebRemoteBindAddress { get; set; } = "127.0.0.1";
@@ -95,6 +98,8 @@ public sealed class AppSettings
     public string CustomYtDlpArguments { get; set; } = string.Empty;
     public SubtitleOptions SubtitleDefaults { get; set; } = new();
     public bool UseCookieFile { get; set; }
+    // Null migrates old UseCookieFile; explicit None never falls back to another source.
+    public AuthenticationSource? CookieSource { get; set; }
     public string? CookieFilePath { get; set; }
     public SponsorBlockOptions SponsorBlockDefaults { get; set; } = new();
 }

@@ -1,0 +1,1829 @@
+{
+  "upstreamCommit": "897341241f2bfb2439fe0367f4c7c9ccd29a3828",
+  "sourceSha256": "3c4f75696a3c7a2528c5bcec38bed4919469f00a6e4e401026ca8b60bb6971f5",
+  "groups": [
+    {
+      "options": [
+        "-h",
+        "--help"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--version"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-U",
+        "--update"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-update"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--update-to"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-i",
+        "--ignore-errors"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-abort-on-error"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--abort-on-error",
+        "--no-ignore-errors"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--list-extractors"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--extractor-descriptions"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--use-extractors",
+        "--ies"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--force-generic-extractor"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--default-search"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--ignore-config",
+        "--no-config"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-config-locations"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--config-locations"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--plugin-dirs"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-plugin-dirs"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--js-runtimes"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-js-runtimes"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--remote-components"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-remote-components"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--flat-playlist"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-flat-playlist"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--live-from-start"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-live-from-start"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--wait-for-video"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-wait-for-video"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--mark-watched"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-mark-watched"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-colors",
+        "--no-colours"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--color"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--compat-options"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--alias"
+      ],
+      "arity": 2
+    },
+    {
+      "options": [
+        "-t",
+        "--preset-alias"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--proxy"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--socket-timeout"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--source-address"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--impersonate"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--list-impersonate-targets"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-4",
+        "--force-ipv4"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-6",
+        "--force-ipv6"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--enable-file-urls"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--geo-verification-proxy"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--xff"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--geo-bypass"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-geo-bypass"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--geo-bypass-country"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--geo-bypass-ip-block"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--playlist-start"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--playlist-end"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-I",
+        "--playlist-items"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--match-title"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--reject-title"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--min-filesize"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--max-filesize"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--date"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--datebefore"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--dateafter"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--min-views"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--max-views"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--match-filters"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-match-filters"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--break-match-filters"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-break-match-filters"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-playlist"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--yes-playlist"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--age-limit"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--download-archive"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-download-archive"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--max-downloads"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--break-on-existing"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-break-on-existing"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--break-on-reject"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--break-per-input"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-break-per-input"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--skip-playlist-after-errors"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-u",
+        "--username"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-p",
+        "--password"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-2",
+        "--twofactor"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-n",
+        "--netrc"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--netrc-location"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--netrc-cmd"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--video-password"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--ap-mso"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--ap-username"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--ap-password"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--ap-list-mso"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--client-certificate"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--client-certificate-key"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--client-certificate-password"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-f",
+        "--format"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-S",
+        "--format-sort"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--format-sort-reset"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--format-sort-force",
+        "--S-force"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-format-sort-force"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--video-multistreams"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-video-multistreams"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--audio-multistreams"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-audio-multistreams"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--all-formats"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--prefer-free-formats"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-prefer-free-formats"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--check-formats"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--check-all-formats"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-check-formats"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-F",
+        "--list-formats"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--list-formats-as-table"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--list-formats-old",
+        "--no-list-formats-as-table"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--merge-output-format"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--allow-unplayable-formats"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-allow-unplayable-formats"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-subs",
+        "--write-srt"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-write-subs",
+        "--no-write-srt"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-auto-subs",
+        "--write-automatic-subs"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-write-auto-subs",
+        "--no-write-automatic-subs"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--all-subs"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--list-subs"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--sub-format"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--sub-langs",
+        "--srt-langs"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-N",
+        "--concurrent-fragments"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-r",
+        "--limit-rate",
+        "--rate-limit"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--throttled-rate"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-R",
+        "--retries"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--file-access-retries"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--fragment-retries"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--retry-sleep"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--skip-unavailable-fragments",
+        "--no-abort-on-unavailable-fragments"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--abort-on-unavailable-fragments",
+        "--no-skip-unavailable-fragments"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--keep-fragments"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-keep-fragments"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--buffer-size"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--resize-buffer"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-resize-buffer"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--http-chunk-size"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--test"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--playlist-reverse"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-playlist-reverse"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--playlist-random"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--lazy-playlist"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-lazy-playlist"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--hls-prefer-native"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--hls-prefer-ffmpeg"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--hls-use-mpegts"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-hls-use-mpegts"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--download-sections"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--downloader",
+        "--external-downloader"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--downloader-args",
+        "--external-downloader-args"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--encoding"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--legacy-server-connect"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-check-certificates"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--prefer-insecure",
+        "--prefer-unsecure"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--user-agent"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--referer"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--add-headers"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--bidi-workaround"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--sleep-requests"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--sleep-interval",
+        "--min-sleep-interval"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--max-sleep-interval"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--sleep-subtitles"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-q",
+        "--quiet"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-quiet"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-warnings"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-s",
+        "--simulate"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-simulate"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--ignore-no-formats-error"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-ignore-no-formats-error"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--skip-download",
+        "--no-download"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-O",
+        "--print"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--print-to-file"
+      ],
+      "arity": 2
+    },
+    {
+      "options": [
+        "-g",
+        "--get-url"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-e",
+        "--get-title"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--get-id"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--get-thumbnail"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--get-description"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--get-duration"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--get-filename"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--get-format"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-j",
+        "--dump-json"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-J",
+        "--dump-single-json"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--print-json"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--force-write-archive",
+        "--force-write-download-archive",
+        "--force-download-archive"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--newline"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-progress"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--progress"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--console-title"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--progress-template"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--progress-delta"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-v",
+        "--verbose"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--dump-pages"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-pages"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--load-pages"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--print-traffic"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-a",
+        "--batch-file"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-batch-file"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--id"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-P",
+        "--paths"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-o",
+        "--output"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--output-na-placeholder"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--autonumber-size"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--autonumber-start"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--restrict-filenames"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-restrict-filenames"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--windows-filenames"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-windows-filenames"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--trim-filenames",
+        "--trim-file-names"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-w",
+        "--no-overwrites"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--force-overwrites",
+        "--yes-overwrites"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-force-overwrites"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-c",
+        "--continue"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-continue"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--part"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-part"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--mtime"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-mtime"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-description"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-write-description"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-info-json"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-write-info-json"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-playlist-metafiles"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-write-playlist-metafiles"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--clean-info-json",
+        "--clean-infojson"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-clean-info-json",
+        "--no-clean-infojson"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-comments",
+        "--get-comments"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-write-comments",
+        "--no-get-comments"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--load-info-json"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--cookies"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-cookies"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--cookies-from-browser"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-cookies-from-browser"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--cache-dir"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-cache-dir"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--rm-cache-dir"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-thumbnail"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-write-thumbnail"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-all-thumbnails"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--list-thumbnails"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-link"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-url-link"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-webloc-link"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--write-desktop-link"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "-x",
+        "--extract-audio"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--audio-format"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--audio-quality"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--remux-video"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--recode-video"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--postprocessor-args",
+        "--ppa"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "-k",
+        "--keep-video"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-keep-video"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--post-overwrites"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-post-overwrites"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--embed-subs"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-embed-subs"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--embed-thumbnail"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-embed-thumbnail"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--embed-metadata",
+        "--add-metadata"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-embed-metadata",
+        "--no-add-metadata"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--embed-chapters",
+        "--add-chapters"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-embed-chapters",
+        "--no-add-chapters"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--embed-info-json"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-embed-info-json"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--metadata-from-title"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--parse-metadata"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--replace-in-metadata"
+      ],
+      "arity": 3
+    },
+    {
+      "options": [
+        "--xattrs",
+        "--xattr"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--concat-playlist"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--fixup"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--ffmpeg-location"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--exec"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-exec"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--exec-before-download"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-exec-before-download"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--convert-subs",
+        "--convert-sub",
+        "--convert-subtitles"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--convert-thumbnails"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--split-chapters",
+        "--split-tracks"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-split-chapters",
+        "--no-split-tracks"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--remove-chapters"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-remove-chapters"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--force-keyframes-at-cuts"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-force-keyframes-at-cuts"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--use-postprocessor"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--sponsorblock-mark"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--sponsorblock-remove"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--sponsorblock-chapter-title"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--no-sponsorblock"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--sponsorblock-api"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--extractor-retries"
+      ],
+      "arity": 1
+    },
+    {
+      "options": [
+        "--allow-dynamic-mpd",
+        "--no-ignore-dynamic-mpd"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--ignore-dynamic-mpd",
+        "--no-allow-dynamic-mpd"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--hls-split-discontinuity"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--no-hls-split-discontinuity"
+      ],
+      "arity": 0
+    },
+    {
+      "options": [
+        "--extractor-args"
+      ],
+      "arity": 1
+    }
+  ]
+}

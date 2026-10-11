@@ -1,5 +1,7 @@
 # Supported sources
 
+**1.1.0 candidate:** extension toolbar and page/link menus now hand off HTTP(S) URLs to canonical desktop yt-dlp analysis. This is transport support, not verification of every extractor. Only YouTube has an in-page adapter; the remote-add YouTube HTTPS allowlist remains unchanged. Active framework pin is `9214c8f5cec66e3731e5bf118cc8bfd5a9fba623`. Dated 1.0.0 results below are historical; current evidence is in [BROWSER_REMOTE_1_1_IMPLEMENTATION.md](BROWSER_REMOTE_1_1_IMPLEMENTATION.md).
+
 **1.0.0 release preparation — 2026-10-06:** active development/CI/release framework pin is `f521f9dfcfe601bf9b6199b88132cccb2380d1bf` (latest fetched `origin/master`). Debug/Release each pass 375 tests and the focused native regression is tracked in the final stabilization closure. The dated platform checks, previous dependency pins and checksums below are historical evidence, not a claim that all extractors are verified. SponsorBlock Remove remains Experimental/default OFF with a known playback defect.
 
 ModernTubeDownloader uses yt-dlp and can work with sources supported by its active extractor set. Selected platforms/features are additionally verified by ModernTubeDownloader. **Extractor availability is not a guarantee that every URL, account state or feature works.**

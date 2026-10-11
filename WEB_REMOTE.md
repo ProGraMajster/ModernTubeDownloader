@@ -1,21 +1,35 @@
-# Local network remote (opt-in MVP)
+# Local network remote (1.1.0 candidate)
 
 The web remote runs **inside** ModernTubeDownloader and uses the same queue, worker, metadata analysis, settings, and history services as the desktop UI. It is disabled by default; no HTTP listener exists until it is enabled in Settings.
 
 ## Enable and connect
 
 1. In **Settings → Local network remote**, choose an active private IPv4 address from the list, set a port (default `18765`), check **Enable web remote**, and save. `127.0.0.1` is for testing on the same PC only; choose a `10.x.x.x`, `172.16–31.x.x`, or `192.168.x.x` address for another device.
-2. Read the address shown in Settings, or choose **Show QR code**. The QR contains **only the HTTP address**, never the token.
-3. On a device connected to the same trusted LAN, open that address. Authentication is **on by default**: enter the token shown in Settings. **Copy token** and **Show token** help with pairing. **New token** immediately invalidates previous browser sessions. The token is random and kept only in process memory; a restart creates a new one. If you explicitly turn off **Require access token** in Settings and save, the panel opens without a token; every device able to reach this LAN address can then control the queue.
+2. Read the address shown in Settings, or choose **Show QR code**. The QR contains only the HTTP/HTTPS address, never a code or credential.
+3. Open the address on a device in the same trusted LAN. **Require pairing** is on by default: enter the short code shown in Settings. **Copy code** and **New code** help with pairing. New code preserves already paired sessions; logout, stopping/restarting the listener or changing authentication revokes them. Code generation is automatic on enable/save when no valid unused code exists, never on repaint. Settings distinguishes Available (mm:ss), Used (existing device keeps its session), Expired, attempt limit and Inactive. Codes and sessions are memory-only. Explicitly disabling pairing permits every reachable device to control the queue; the browser displays a warning.
 4. If Windows Firewall asks about access, allow only private networks you trust. The app does not create firewall rules, enable UPnP, forward ports, or provide a cloud relay. If the page is unreachable, check the selected interface, device network, and firewall policy. The app never binds to `0.0.0.0` or a public IP.
 
 Saving a disabled setting stops the listener without restarting the app. Closing the app stops it cleanly. The address/port is checked against active private IPv4 interfaces at startup; if an interface has changed, select its new IP and save again.
 
 ## Security boundary
 
-This is HTTP, **not HTTPS**: the address and token can be observed by other parties able to inspect traffic on the LAN. Use it only on a trusted private network, not public Wi-Fi or a network with untrusted devices. Do not configure router port-forwarding or expose the port to the Internet. The listener is bound to one explicitly selected IP, but binding alone cannot prevent a router, VPN, or local firewall policy from forwarding traffic; the operator remains responsible for the network boundary.
+HTTP is default and unencrypted: codes and cookies can be observed by parties able to inspect LAN traffic. Optional HTTPS is described below; pairing alone does not encrypt HTTP. Use only trusted private networks, not public Wi-Fi. Never port-forward this listener or expose it to the Internet. Binding alone cannot prevent forwarding by a router, VPN or firewall; the operator remains responsible for the network boundary.
 
-With authentication enabled, every queue API request requires `Authorization: Bearer <token>`; `/api/auth-mode` exposes only whether authentication is required. The token is never put into the URL, QR, normal logs, or server responses. The browser keeps it in tab-scoped `sessionStorage`, not a cookie. Turning authentication off removes the token check, **not** the private IPv4/loopback binding, Host/Origin checks, request size limits, per-IP rate limits, or two-analysis concurrency limit. Foreign `Origin` and `Host` headers are rejected; CORS is not enabled. A content-security policy, frame ban, no-cache policy, and `textContent` rendering reduce injection risks. This does not turn HTTP into an encrypted transport.
+An eight-character code (`23456789ABCDEFGHJKLMNPQRSTUVWXYZ`, displayed `ABCD-EFGH`) has 40 bits of entropy, ten-minute TTL and single-use semantics. Attempts are limited to five per minute per client and eight per code across clients; exhausted codes must be regenerated. `POST /api/pair` exchanges it for a fresh 256-bit opaque session, not a shortened bearer. The browser receives an HttpOnly, SameSite=Strict cookie, Secure on HTTPS, with an absolute eight-hour lifetime. Server-side lookup stores a hash. JavaScript cannot read this cookie; localStorage/sessionStorage contain no credentials. Codes and sessions never enter persistence, QR, URLs or logs. Legacy diagnostic bearer authentication remains supported, but is not exposed by browser UI.
+
+Pairing and cookie-authenticated mutations require exact same Origin and `X-MTD-Request: 1`. Foreign Host/Origin headers are rejected and CORS is not enabled. Disabling pairing does not remove these checks, private-IP binding, body/rate limits or two-analysis concurrency. CSP, frame ban, no-cache and textContent rendering remain.
+
+## Optional HTTPS and certificate trust
+
+Save the selected IP first. Explicitly choose **Generate / regenerate certificate**, enable HTTPS and save. The one-year self-signed RSA certificate has the selected IP SAN and server-authentication usage. Changing IP requires regeneration. Missing, expired, corrupt or mismatched certificates give a localized error; HTTPS never silently downgrades. Return to HTTP only by explicitly disabling HTTPS.
+
+Private PFX bytes are encrypted with per-user Windows DPAPI under `WebRemote/certificate.protected`; ACLs restrict the directory to the current user and LocalSystem. Decrypted PFX bytes exist only in memory. Windows TLS uses a transient per-user key container, not a persisted plaintext PFX. Export saves the public certificate only; Settings displays its SHA-256 fingerprint. No root trust or firewall rule is installed automatically.
+
+Self-signed certificates are not automatically trusted by Chrome or phones. Verify the fingerprint and use your device's deliberate trust procedure if desired. Ignoring a warning is not certificate validation. Real Kestrel TLS tests verify the exact certificate/IP and Secure cookies, not phone trust UX. [Kestrel documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel?view=aspnetcore-10.0).
+
+## Language
+
+Default **🔄 Follow app / Z aplikacji** follows the desktop PL/EN language. Public `/api/auth-mode` returns only `authenticationRequired` and `desktopLanguage`; the unpaired login screen and authenticated dashboard both poll it every two seconds while visible. Changing desktop language updates labels/errors/footer without reload. Explicit **🇵🇱 Polski**, **🇬🇧 English** or **🌐 Browser language** overrides are localStorage preferences, not credentials. Browser mode uses the first preferred browser language (pl-* → PL, otherwise EN); legacy Auto preferences migrate to Browser, while fresh clients default to Follow app. Selecting Follow app resumes sync. Request-specific DTO localization does not change desktop language. Theme follows browser preference. Unchanged polling does not replace queue/LIVE nodes or repeatedly rewrite static labels; a changed language/data snapshot invalidates the relevant view.
 
 The remote add form accepts only YouTube-family HTTPS URLs (`youtube.com`, its subdomains, `youtu.be`, and `youtube-nocookie.com`) in this MVP. This deliberate narrower scope reduces server-side request forgery risk from untrusted remote clients. The desktop application still supports other yt-dlp HTTP(S) sites. API clients cannot supply paths, shell commands, arbitrary yt-dlp/FFmpeg arguments, tool configuration, or raw logs. They cannot shut down the app.
 
@@ -23,11 +37,11 @@ The queue API returns presentation fields, not local file paths or raw metadata.
 
 ## Remote interface and API
 
-The small responsive HTML/CSS/JS panel polls every two seconds while its tab is visible. It shows active/queued items normally and completed items in a collapsed section. Queue pacing countdown comes from the desktop scheduler's transient next-admission time. The panel also shows queue position, title, status, progress, speed/ETA, quality/container, selected time range, retry attempt, error key, and thumbnail when available. It can add a video or playlist, pause/resume the queue, cancel an active item, retry a failed item, remove a non-active item, and move a queued item. UI labels follow the desktop language (PL/EN); it follows the browser's light/dark preference.
+The small responsive HTML/CSS/JS panel polls every two seconds while its tab is visible. It shows active/queued items normally and completed items in a collapsed section. Queue pacing countdown comes from the desktop scheduler's transient next-admission time. The panel also shows queue position, title, status, progress, speed/ETA, quality/container, selected time range, retry attempt, error key, and thumbnail when available. It can add a video or playlist, pause/resume the queue, cancel an active item, retry a failed item, remove a non-active item, and move a queued item. UI labels follow the browser-local PL/EN language; it follows the browser's light/dark preference.
 
 The LIVE section has separate active, scheduled and partial/recoverable groups, elapsed duration, bytes/speed, part count and next-check/reconnect times; no percentage. `/api/live` observes the desktop `LiveSessionService`, not the ordinary queue. Stop and save, Cancel and Resume call that central service and its independent scheduler. Pausing the VOD queue has no effect on LIVE. Adding an active or upcoming URL through the ordinary add endpoint is deliberately rejected with **Open in desktop app**: starting a long recording requires desktop confirmation. Completed replays remain ordinary VOD downloads.
 
-`GET /api/auth-mode` is available without a token so the page can choose its login state. The following endpoints require a token only when authentication is enabled:
+`GET /api/auth-mode` is public and exposes only whether pairing is required and the normalized desktop PL/EN language. `POST /api/pair` and `/api/logout` pair and revoke the current session. Endpoints below require a session (or legacy diagnostic bearer) when pairing is enabled:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -55,4 +69,4 @@ The server contract is unchanged: the client assembles `hh:mm:ss` (or `d.hh:mm:s
 
 ## Validation limits
 
-The automated HTTP test uses a real loopback Kestrel listener and covers opt-in, authentication, token rotation, Origin/Host checks, input validation, add, pause/resume, retry/remove/cancel, mutation rate limiting, enable/disable, and shutdown. It is **not** a phone or multi-device LAN test. Firewall prompts, different router/AP configurations, mobile-browser rendering, and actual untrusted-network resistance require separate manual validation before release.
+Real loopback HTTP/HTTPS tests cover opt-in, pairing, single-use/expiry/attempt limits, cookie attributes, logout/restart/auth-mode revocation, Origin/Host checks, queue actions and shutdown. Certificate tests cover SAN, protected storage/ACL, public-only export and regeneration. These are not phone or multi-device LAN tests. Dated 1.0.0 feedback above is historical; candidate evidence and limitations are in [BROWSER_REMOTE_1_1_IMPLEMENTATION.md](BROWSER_REMOTE_1_1_IMPLEMENTATION.md).

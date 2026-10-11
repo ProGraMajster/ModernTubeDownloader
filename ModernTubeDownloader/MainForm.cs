@@ -483,6 +483,34 @@ public sealed class MainForm : Form
         catch (Exception error) { return "unavailable:" + error.GetType().Name; }
     }
 
+    public void HandleNotification(NotificationNavigation request)
+    {
+        if (shutdownStarted || !NotificationNavigation.TryParse(request.Encode(), out _)) return;
+        try
+        {
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            Show(); Activate();
+            if (request.View == "live") ShowView(liveView);
+            else if (request.View == "history") ShowView(historyView);
+            else ShowView(downloadsView);
+            // Resolve only our own persisted state. Native/IPC payload never supplies a path or URL.
+            if (request.Group == "downloads")
+            {
+                var item = services.Queue.Find(request.ItemId);
+                var history = services.History.Snapshot().FirstOrDefault(entry => entry.QueueItemId == request.ItemId);
+                var path = history?.FinalPath ?? item?.FinalFile;
+                if (request.View == "downloads") downloadsView.RevealQueueItem(request.ItemId);
+                var action = NotificationActionPolicy.Resolve(request, item?.Status, path, System.IO.File.Exists, null);
+                if (action == "open-file") Utilities.ShellService.OpenFile(path);
+                else if (action == "open-folder") Utilities.ShellService.OpenFolderForFile(path);
+                else if (action == "retry") services.Queue.Retry(request.ItemId);
+            }
+            else if (request.Group == "live" && NotificationActionPolicy.Resolve(request, null, null, System.IO.File.Exists, services.Live.Find(request.ItemId)?.State) == "stop-save")
+                services.Live.StopAndSave(request.ItemId);
+        }
+        catch (Exception error) { services.Logger.Error("Notification action could not be completed.", error); }
+    }
+
     public async Task HandleExternalUrlAsync(ExternalMediaRequest request)
     {
         if (shutdownStarted || !services.Settings.Current.BrowserIntegrationEnabled ||
@@ -503,7 +531,8 @@ public sealed class MainForm : Form
                 WindowState = FormWindowState.Normal;
             if (OperatingSystem.IsWindows() && PlatformHandle.HandleDescriptor == "HWND")
                 SetForegroundWindow(PlatformHandle.Handle);
-            if (new Uri(sourceUrl).AbsolutePath.StartsWith("/live/", StringComparison.OrdinalIgnoreCase))
+            if (request.Intent is null && new Uri(sourceUrl).Host is "youtube.com" or "www.youtube.com" or "m.youtube.com" &&
+                new Uri(sourceUrl).AbsolutePath.StartsWith("/live/", StringComparison.OrdinalIgnoreCase))
             { ShowView(liveView); await liveView.AcceptUrlAsync(sourceUrl); }
             else
             { ShowView(downloadsView); await downloadsView.AcceptExternalRequestAsync(request with { SourceUrl = sourceUrl }); }
@@ -511,7 +540,7 @@ public sealed class MainForm : Form
         catch (Exception exception)
         {
             if (request.RequestId is { } failedId) externalRequestIds.Remove(failedId);
-            services.Logger.Error("Handling an external YouTube link failed.", exception);
+            services.Logger.Error("Handling an external media link failed.", exception);
             if (DownloadFailureClassifier.Classify(exception).Category == DownloadFailureCategory.Upcoming)
             { ShowView(liveView); liveView.Present(new LiveNavigationRequest(sourceUrl, null, MediaAvailabilityKind.Upcoming)); }
             else downloadsView.ShowExternalRequestError(exception);

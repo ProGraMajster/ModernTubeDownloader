@@ -8,6 +8,7 @@ using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Utilities;
 using ModernTubeDownloader.WebRemote;
 using QRCoder;
+using ModernTubeDownloader.Authentication;
 using SkiaSharp;
 
 namespace ModernTubeDownloader.Views;
@@ -26,6 +27,7 @@ internal sealed class SettingsView : UserControl
     private readonly Panel behaviorCard;
     private readonly Panel resilienceCard;
     private readonly Panel liveCard;
+    private readonly NotificationSettingsPanel notificationCard;
     private readonly NumericUpDown liveConcurrency;
     private readonly CheckBox preserveLive;
     private readonly CheckBox resumeLive;
@@ -34,6 +36,7 @@ internal sealed class SettingsView : UserControl
     private readonly Panel subtitlesCard;
     private readonly Panel sponsorCard;
     private readonly Panel cookiesCard;
+    private readonly CookieSyncSettingsPanel cookieSync;
     private readonly Panel appearanceCard;
     private readonly Panel browserCard;
     private readonly Panel remoteCard;
@@ -48,9 +51,18 @@ internal sealed class SettingsView : UserControl
     private readonly Button remoteRegenerate;
     private readonly Button remoteOpen;
     private readonly Button remoteQrButton;
-    private readonly Button remoteShowToken;
+    private readonly Button remoteCopyAddress;
+    private readonly Label remoteCodeExpiry;
+    private readonly CheckBox remoteHttps;
+    private readonly Button remoteCertificateGenerate;
+    private readonly Button remoteCertificateExport;
+    private readonly Label remoteCertificateInfo;
+    private readonly Label remoteTransportHint;
+    private readonly System.Threading.Timer remoteClock;
+    private bool remoteDisposed;
     private readonly PictureBox remoteQr;
     private SKBitmap? remoteQrImage;
+    private string? remoteQrAddress;
     private readonly Panel advancedCard;
     private readonly Panel actionsCard;
     private readonly TextBox temporaryDirectory;
@@ -250,7 +262,7 @@ internal sealed class SettingsView : UserControl
         sponsorHint.Multiline = true;
         sponsorCard.Controls.Add(sponsorHint);
 
-        cookiesCard = CreateSection(306, "Settings.Cookies", "Settings.CookiesDescription");
+        cookiesCard = CreateSection(884, "Settings.Cookies", "Settings.CookiesDescription");
         cookiesEnabled = CreateCheck(cookiesCard, "Settings.CookiesEnabled");
         cookiesEnabled.AccessibleAutomationId = "CookieFileEnabled";
         AddRowLabel(cookiesCard, "Settings.CookiesFile", 136);
@@ -266,6 +278,13 @@ internal sealed class SettingsView : UserControl
         BindText(cookiesWarning, "Settings.CookiesWarning");
         cookiesWarning.Multiline = true;
         cookiesCard.Controls.AddRange([cookiesFileName, cookiesHelp, cookiesWarning]);
+        cookieSync = new CookieSyncSettingsPanel(services);
+        cookiesCard.Controls.Add(cookieSync);
+        cookieSync.SourceChanged += (_, _) => { if (!applyingValues) cookiesEnabled.Checked = cookieSync.Source == AuthenticationSource.ManualFile; };
+        cookiesEnabled.CheckedChanged += (_, _) => {
+            if (!applyingValues && cookiesEnabled.Checked) cookieSync.Source = AuthenticationSource.ManualFile;
+            else if (!applyingValues && cookieSync.Source == AuthenticationSource.ManualFile) cookieSync.Source = AuthenticationSource.None;
+        };
 
         appearanceCard = CreateSection(210, "Settings.Appearance", "Settings.AppearanceDescription");
         AddRowLabel(appearanceCard, "Settings.Theme", 96);
@@ -307,26 +326,44 @@ internal sealed class SettingsView : UserControl
         remoteAddress.AccessibleAutomationId = "WebRemoteAddress";
         remoteStatus = AppUi.Muted();
         remoteStatus.Multiline = true;
+        remoteStatus.AccessibleAutomationId = "WebRemoteStatus";
         remoteCard.Controls.Add(remoteStatus);
         remoteToken = CreateTextBox(remoteCard);
         remoteToken.ReadOnly = true;
-        remoteToken.PasswordCharacter = '●';
-        remoteToken.AccessibleAutomationId = "WebRemoteToken";
-        remoteCopy = CreateButton(remoteCard, "Settings.RemoteCopyToken", false);
-        remoteCopy.AccessibleAutomationId = "WebRemoteCopyToken";
-        remoteCopy.Click += async (_, _) => await Clipboard.SetTextAsync(services.WebRemote.Token);
-        remoteRegenerate = CreateButton(remoteCard, "Settings.RemoteRegenerate", false);
-        remoteRegenerate.AccessibleAutomationId = "WebRemoteRegenerateToken";
-        remoteRegenerate.Click += (_, _) => { services.WebRemote.RegenerateToken(); remoteToken.Text = services.WebRemote.Token; };
+        remoteToken.AccessibleAutomationId = "WebRemotePairingCode";
+        remoteCopy = CreateButton(remoteCard, "Settings.RemoteCopyCode", false);
+        remoteCopy.AccessibleAutomationId = "WebRemoteCopyCode";
+        remoteCopy.Click += async (_, _) => { if (services.WebRemote.Pairing.Snapshot.Code is { } code) await Clipboard.SetTextAsync(code); };
+        remoteRegenerate = CreateButton(remoteCard, "Settings.RemoteNewCode", false);
+        remoteRegenerate.AccessibleAutomationId = "WebRemoteNewCode";
+        remoteRegenerate.Click += (_, _) => { services.WebRemote.RegeneratePairingCode(); UpdateRemoteStatus(); };
+        remoteCodeExpiry = AppUi.Muted();
+        remoteCodeExpiry.AccessibleAutomationId = "WebRemoteCodeExpiry";
+        remoteCodeExpiry.Multiline = true;
+        remoteCard.Controls.Add(remoteCodeExpiry);
         remoteOpen = CreateButton(remoteCard, "Settings.RemoteOpen", false);
         remoteOpen.AccessibleAutomationId = "WebRemoteOpen";
         remoteOpen.Click += (_, _) => OpenRemote();
         remoteQrButton = CreateButton(remoteCard, "Settings.RemoteQr", false);
         remoteQrButton.AccessibleAutomationId = "WebRemoteQr";
         remoteQrButton.Click += (_, _) => ToggleRemoteQr();
-        remoteShowToken = CreateButton(remoteCard, "Settings.RemoteShowToken", false);
-        remoteShowToken.AccessibleAutomationId = "WebRemoteShowToken";
-        remoteShowToken.Click += (_, _) => remoteToken.PasswordCharacter = remoteToken.PasswordCharacter is null ? '●' : null;
+        remoteCopyAddress = CreateButton(remoteCard, "Settings.RemoteCopyAddress", false);
+        remoteCopyAddress.Click += async (_, _) => { if (services.WebRemote.Address is { } address) await Clipboard.SetTextAsync(address); };
+        remoteHttps = CreateCheck(remoteCard, "Settings.RemoteHttps");
+        remoteHttps.AccessibleAutomationId = "WebRemoteUseHttps";
+        remoteHttps.CheckedChanged += (_, _) => UpdateRemoteAuthPresentation();
+        remoteCertificateGenerate = CreateButton(remoteCard, "Settings.RemoteCertificateGenerate", false);
+        remoteCertificateGenerate.AccessibleAutomationId = "WebRemoteGenerateCertificate";
+        remoteCertificateGenerate.Click += GenerateRemoteCertificate;
+        remoteCertificateExport = CreateButton(remoteCard, "Settings.RemoteCertificateExport", false);
+        remoteCertificateExport.AccessibleAutomationId = "WebRemoteExportCertificate";
+        remoteCertificateExport.Click += ExportRemoteCertificate;
+        remoteCertificateInfo = AppUi.Muted();
+        remoteCertificateInfo.Multiline = true;
+        remoteCard.Controls.Add(remoteCertificateInfo);
+        remoteTransportHint = AppUi.Muted();
+        remoteTransportHint.Multiline = true;
+        remoteCard.Controls.Add(remoteTransportHint);
         remoteQr = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom, Visible = false };
         remoteCard.Controls.Add(remoteQr);
         repairBrowser.Click += RepairBrowserClicked;
@@ -369,7 +406,8 @@ internal sealed class SettingsView : UserControl
         save.Click += SaveClicked;
         logs.Click += (_, _) => ShellService.OpenFolderForFile(services.Paths.LogDirectory);
 
-        scroll.Controls.AddRange([generalCard, toolsCard, behaviorCard, resilienceCard, liveCard, subtitlesCard, sponsorCard,
+        notificationCard = new NotificationSettingsPanel(services);
+        scroll.Controls.AddRange([generalCard, toolsCard, behaviorCard, resilienceCard, liveCard, notificationCard, subtitlesCard, sponsorCard,
             cookiesCard, appearanceCard, browserCard, remoteCard, advancedCard, actionsCard]);
         Controls.AddRange([header, scroll]);
         SizeChanged += ViewSizeChanged;
@@ -380,6 +418,10 @@ internal sealed class SettingsView : UserControl
         ApplyLocalization();
         LoadValues();
         UpdateLayout();
+        remoteClock = new System.Threading.Timer(_ =>
+        {
+            if (!remoteDisposed) Application.RunOnUIThread(() => { if (!remoteDisposed) UpdatePairingCode(); });
+        }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
 
     private Panel CreateSection(int height, string titleKey, string descriptionKey)
@@ -490,16 +532,17 @@ internal sealed class SettingsView : UserControl
         scroll.SetBounds(0, 82, ClientSize.Width, Math.Max(120, ClientSize.Height - 82));
 
         var cardWidth = Math.Max(540, scroll.ClientSize.Width - 60);
+        notificationCard.LayoutForWidth(cardWidth);
         // ScrollableControl physically offsets child bounds while scrolling. Rebuild the
         // explicit card layout from its translated display origin, not from unscrolled Y=0.
         var displayOrigin = scroll.DisplayRectangle.Location;
         var top = displayOrigin.Y;
-        foreach (var card in new[] { generalCard, toolsCard, behaviorCard, resilienceCard, liveCard, subtitlesCard, sponsorCard,
+        foreach (var card in new[] { generalCard, toolsCard, behaviorCard, resilienceCard, liveCard, notificationCard, subtitlesCard, sponsorCard,
                      cookiesCard, appearanceCard, browserCard, remoteCard, advancedCard, actionsCard })
         {
             card.SetBounds(page + displayOrigin.X, top, cardWidth, card.Height);
             top = card.Bottom + 14;
-            if (!ReferenceEquals(card, actionsCard))
+            if (!ReferenceEquals(card, actionsCard) && !ReferenceEquals(card, notificationCard))
                 ResizeSectionHeader(card);
         }
 
@@ -563,6 +606,7 @@ internal sealed class SettingsView : UserControl
         cookiesFileName.SetBounds(fieldLeft, 142, Math.Max(130, cookiesBrowse.Left - fieldLeft - 10), 28);
         cookiesHelp.SetBounds(24, 190, cardWidth - 48, 48);
         cookiesWarning.SetBounds(24, 250, cardWidth - 48, 42);
+        cookieSync.SetBounds(24, 320, cardWidth - 48, 540);
 
         theme.SetBounds(fieldLeft, 96, Math.Min(240, fieldRight - fieldLeft), 36);
         language.SetBounds(fieldLeft, 148, Math.Min(240, fieldRight - fieldLeft), 36);
@@ -577,15 +621,21 @@ internal sealed class SettingsView : UserControl
         remoteAuthWarning.SetBounds(24, 158, cardWidth - 48, 42);
         remotePort.SetBounds(fieldLeft, 208, 108, 36);
         remoteAddress.SetBounds(fieldLeft, 252, Math.Min(270, fieldRight - fieldLeft), 36);
-        remoteStatus.SetBounds(24, 296, cardWidth - 48, 44);
-        remoteToken.SetBounds(24, 348, Math.Max(190, cardWidth - 390), 36);
-        remoteCopy.SetBounds(remoteToken.Right + 8, 348, 96, 36);
-        remoteRegenerate.SetBounds(remoteCopy.Right + 8, 348, 128, 36);
-        var remoteActionsTop = remoteRequireAuth.Checked ? 392 : 348;
+        remoteStatus.SetBounds(24, 296, cardWidth - 48, 68);
+        remoteToken.SetBounds(24, 372, 180, 36);
+        remoteCopy.SetBounds(212, 372, 132, 36);
+        remoteRegenerate.SetBounds(352, 372, Math.Max(140, cardWidth - 376), 36);
+        remoteCodeExpiry.SetBounds(24, 414, cardWidth - 48, 48);
+        var remoteActionsTop = remoteRequireAuth.Checked ? 472 : 372;
         remoteOpen.SetBounds(24, remoteActionsTop, 145, 34);
         remoteQrButton.SetBounds(177, remoteActionsTop, 145, 34);
-        remoteShowToken.SetBounds(330, remoteActionsTop, 145, 34);
-        remoteQr.SetBounds(24, remoteActionsTop + 46, 128, 128);
+        remoteCopyAddress.SetBounds(330, remoteActionsTop, 162, 34);
+        remoteHttps.SetBounds(24, remoteActionsTop + 44, cardWidth - 48, 30);
+        remoteCertificateGenerate.SetBounds(24, remoteActionsTop + 82, 236, 36);
+        remoteCertificateExport.SetBounds(268, remoteActionsTop + 82, 224, 36);
+        remoteCertificateInfo.SetBounds(24, remoteActionsTop + 126, cardWidth - 48, 58);
+        remoteTransportHint.SetBounds(24, remoteActionsTop + (remoteHttps.Checked ? 188 : 82), cardWidth - 48, 64);
+        remoteQr.SetBounds(24, remoteTransportHint.Bottom + 12, 128, 128);
 
         customArguments.SetBounds(fieldLeft, 96, Math.Max(280, fieldRight - fieldLeft), 72);
         customArgumentsHint.SetBounds(fieldLeft, 174, Math.Max(280, fieldRight - fieldLeft), 42);
@@ -678,6 +728,7 @@ internal sealed class SettingsView : UserControl
             PopulateSponsorMode(value.SponsorBlockDefaults.Mode == SponsorBlockMode.Remove ? SponsorBlockMode.Remove : SponsorBlockMode.Mark);
             sponsorCategories.Text = string.Join(", ", value.SponsorBlockDefaults.Categories);
             cookiesEnabled.Checked = value.UseCookieFile;
+            cookieSync.Source = value.CookieSource ?? (value.UseCookieFile ? AuthenticationSource.ManualFile : AuthenticationSource.None);
             selectedCookieFilePath = value.CookieFilePath;
             UpdateCookieFileName();
             browserEnabled.Checked = value.BrowserIntegrationEnabled;
@@ -690,7 +741,7 @@ internal sealed class SettingsView : UserControl
             for (var index = 0; index < remoteAddress.Items.Count; index++)
                 if (string.Equals(remoteAddress.Items[index]?.ToString(), value.WebRemoteBindAddress, StringComparison.Ordinal))
                     remoteAddress.SelectedIndex = index;
-            remoteToken.Text = services.WebRemote.Token;
+            remoteHttps.Checked = value.WebRemoteUseHttps;
             customArguments.Text = value.CustomYtDlpArguments;
             PopulateTheme(value.ThemeMode);
             PopulateLanguage(value.Language);
@@ -989,10 +1040,12 @@ internal sealed class SettingsView : UserControl
             value.SubtitleDefaults = subtitleOptions;
             value.SponsorBlockDefaults = sponsorOptions;
             value.UseCookieFile = cookiesEnabled.Checked;
+            value.CookieSource = cookieSync.Source;
             value.CookieFilePath = selectedCookieFilePath;
             value.BrowserIntegrationEnabled = browserEnabled.Checked;
             value.EnableWebRemote = remoteEnabled.Checked;
             value.WebRemoteRequireAuthentication = remoteRequireAuth.Checked;
+            value.WebRemoteUseHttps = remoteHttps.Checked;
             value.WebRemotePort = (int)remotePort.Value;
             value.WebRemoteBindAddress = remoteAddress.SelectedItem?.ToString() ?? "127.0.0.1";
             value.CustomYtDlpArguments = customArguments.Text.Trim();
@@ -1079,6 +1132,7 @@ internal sealed class SettingsView : UserControl
 
     private void ApplyLocalization()
     {
+        cookieSync.Localize();
         pageTitle.Text = text["Settings.Title"];
         pageSubtitle.Text = text["Settings.Subtitle"];
         foreach (var pair in localizedText)
@@ -1163,12 +1217,75 @@ internal sealed class SettingsView : UserControl
 
     private void UpdateRemoteStatus()
     {
+        if (remoteDisposed) return;
         var host = services.WebRemote;
-        remoteStatus.Text = host.IsRunning ? text.Get("Settings.RemoteRunning", host.Address ?? "") :
+        remoteStatus.Text = host.IsRunning ? text.Get("Settings.RemoteRunning", host.Address ?? "") + "\n" +
+            text[services.Settings.Current.WebRemoteRequireAuthentication ? "Settings.RemotePairingHint" : "Settings.RemoteAuthWarning"] + "\n" +
+            text[services.Settings.Current.WebRemoteBindAddress == "127.0.0.1" ? "Settings.RemoteLoopbackHint" : "Settings.RemoteLanHint"] :
             host.LastError is { Length: > 0 } error ? text.Get("Settings.RemoteFailed", error) :
             text["Settings.RemoteStopped"];
         remoteOpen.Enabled = host.IsRunning;
         remoteQrButton.Enabled = host.IsRunning;
+        if (remoteQr.Visible && remoteQrAddress != host.Address)
+        {
+            remoteQr.Visible = false;
+            remoteQr.Image = null;
+            remoteQrImage?.Dispose();
+            remoteQrImage = null;
+            remoteQrAddress = null;
+        }
+        remoteCopyAddress.Enabled = host.IsRunning;
+        UpdatePairingCode();
+        try { remoteCertificateInfo.Text = text.Get("Settings.RemoteFingerprint", host.Certificates.Fingerprint(System.Net.IPAddress.Parse(services.Settings.Current.WebRemoteBindAddress))); }
+        catch (WebRemoteCertificateException certificateError) { remoteCertificateInfo.Text = text[certificateError.MessageKey]; }
+        UpdateRemoteAuthPresentation();
+    }
+
+    private void UpdatePairingCode()
+    {
+        var snapshot = services.WebRemote.Pairing.Snapshot;
+        remoteToken.Text = snapshot.Code ?? "—";
+        var seconds = Math.Max(0, (int)(snapshot.ExpiresAt - DateTimeOffset.UtcNow).TotalSeconds);
+        remoteCodeExpiry.Text = snapshot.State switch
+        {
+            PairingCodeState.Available => text.Get("Settings.RemoteCodeExpires", $"{seconds / 60:00}:{seconds % 60:00}"),
+            PairingCodeState.Used => text["Settings.RemoteCodeUsed"],
+            PairingCodeState.Expired => text["Settings.RemoteCodeExpired"],
+            PairingCodeState.Blocked => text["Settings.RemoteCodeBlocked"],
+            _ => text["Settings.RemoteCodeInactive"]
+        };
+        remoteRegenerate.Text = text[snapshot.State == PairingCodeState.Used ? "Settings.RemoteNextDevice" : "Settings.RemoteNewCode"];
+        remoteCopy.Enabled = snapshot.Code is not null;
+        remoteRegenerate.Enabled = services.WebRemote.IsRunning && services.Settings.Current.WebRemoteRequireAuthentication;
+    }
+
+    private async void GenerateRemoteCertificate(object? sender, EventArgs e)
+    {
+        remoteCertificateGenerate.Enabled = false;
+        try { await services.WebRemote.GenerateCertificateAsync(); UpdateRemoteStatus(); }
+        catch (Exception error)
+        {
+            services.Logger.Error("Generating Web Remote certificate failed.", error);
+            remoteCertificateInfo.Text = error is WebRemoteCertificateException known ? text[known.MessageKey] : text["Error.Generic"];
+        }
+        finally { if (!remoteDisposed) remoteCertificateGenerate.Enabled = true; }
+    }
+
+    private async void ExportRemoteCertificate(object? sender, EventArgs e)
+    {
+        try
+        {
+            var dialog = new SaveFileDialog { DefaultExtension = "cer", Title = text["Settings.RemoteCertificateExport"] };
+            dialog.AddFilter(text["Settings.RemoteCertificateFile"], "*.cer");
+            if (await dialog.ShowDialog(FindForm()!) != DialogResult.OK || dialog.FileNames.Count == 0) return;
+            var bytes = services.WebRemote.Certificates.ExportPublic(System.Net.IPAddress.Parse(services.Settings.Current.WebRemoteBindAddress));
+            await System.IO.File.WriteAllBytesAsync(dialog.FileNames[0], bytes);
+        }
+        catch (Exception error)
+        {
+            services.Logger.Error("Exporting public Web Remote certificate failed.", error);
+            remoteCertificateInfo.Text = error is WebRemoteCertificateException known ? text[known.MessageKey] : text["Error.Generic"];
+        }
     }
 
     private void UpdateRemoteAuthPresentation()
@@ -1178,8 +1295,12 @@ internal sealed class SettingsView : UserControl
         remoteToken.Visible = required;
         remoteCopy.Visible = required;
         remoteRegenerate.Visible = required;
-        remoteShowToken.Visible = required;
-        remoteCard.Height = (required ? 432 : 388) + (remoteQr.Visible ? 150 : 0);
+        remoteCodeExpiry.Visible = required;
+        remoteCertificateGenerate.Visible = remoteHttps.Checked;
+        remoteCertificateExport.Visible = remoteHttps.Checked;
+        remoteCertificateInfo.Visible = remoteHttps.Checked;
+        remoteTransportHint.Text = text[remoteHttps.Checked ? "Settings.RemoteHttpsHint" : "Settings.RemoteHttpHint"];
+        remoteCard.Height = (required ? 472 : 372) + (remoteHttps.Checked ? 264 : 158) + (remoteQr.Visible ? 150 : 0);
         UpdateLayout();
     }
 
@@ -1200,19 +1321,20 @@ internal sealed class SettingsView : UserControl
             remoteQr.Image = null;
             remoteQrImage?.Dispose();
             remoteQrImage = null;
-            remoteCard.Height = remoteRequireAuth.Checked ? 432 : 388;
+            UpdateRemoteAuthPresentation();
             UiCrashDiagnostics.Record("settings.qr.hide", "remoteCard", remoteCard.Controls.Count);
             UpdateLayout();
             return;
         }
         if (services.WebRemote.Address is not { } address) return;
+        remoteQrAddress = address;
         using var generator = new QRCodeGenerator();
         using var code = generator.CreateQrCode(address, QRCodeGenerator.ECCLevel.Q);
         using var png = new PngByteQRCode(code);
         remoteQrImage = SKBitmap.Decode(png.GetGraphic(5));
         remoteQr.Image = remoteQrImage;
         remoteQr.Visible = true;
-        remoteCard.Height = (remoteRequireAuth.Checked ? 432 : 388) + 150;
+        UpdateRemoteAuthPresentation();
         UiCrashDiagnostics.Record("settings.qr.show", "remoteCard", remoteCard.Controls.Count);
         UpdateLayout();
     }
@@ -1225,6 +1347,8 @@ internal sealed class SettingsView : UserControl
     {
         if (disposing)
         {
+            remoteDisposed = true;
+            remoteClock.Dispose();
             services.Tools.Changed -= ToolsChanged;
             services.WebRemote.Changed -= RemoteChanged;
             remoteQr.Image = null;

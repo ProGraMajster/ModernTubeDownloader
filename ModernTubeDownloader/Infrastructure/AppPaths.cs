@@ -13,6 +13,7 @@ public sealed record AppPaths(
     string ToolStagingDirectory)
 {
     public string LiveSessionsFile => Path.Combine(RootDirectory, "live-sessions.json");
+    public string AuthenticationDirectory => Path.Combine(RootDirectory, "Auth");
 
     public static AppPaths CreateDefault()
     {

@@ -1,19 +1,24 @@
 {
   "manifest_version": 3,
-  "name": "ModernTubeDownloader",
-  "version": "1.0.0",
-  "description": "Send a YouTube video, Short or playlist to ModernTubeDownloader.",
-  "action": { "default_popup": "src/popup.html", "default_icon": "assets/icon32.png" },
+  "name": "__MSG_extensionName__",
+  "version": "1.1.0",
+  "version_name": "1.1.0",
+  "options_ui": { "page": "src/options.html", "open_in_tab": true },
+  "description": "__MSG_extensionDescription__",
+  "default_locale": "en",
+  "action": { "default_title": "__MSG_extensionName__", "default_popup": "src/popup.html", "default_icon": "assets/icon32.png" },
   "icons": { "16": "assets/icon16.png", "32": "assets/icon32.png", "48": "assets/icon48.png", "128": "assets/icon128.png" },
   "permissions": ["activeTab", "contextMenus", "storage"],
+  "optional_permissions": ["cookies", "nativeMessaging", "alarms"],
+  "optional_host_permissions": ["https://*/*"],
   "content_scripts": [{
     "matches": ["https://www.youtube.com/*", "https://youtube.com/*", "https://m.youtube.com/*"],
-    "js": ["src/shared.js", "src/modal.js", "src/content.js"],
+    "js": ["src/context.js", "src/shared.js", "src/i18n.js", "src/cookies-client.js", "src/modal.js", "src/adapters.js", "src/content.js"],
     "css": ["src/styles.css"],
     "run_at": "document_idle"
   }],
   "web_accessible_resources": [{
-    "resources": ["assets/icon48.png"],
+    "resources": ["assets/icon48.png", "_locales/pl/messages.json", "_locales/en/messages.json"],
     "matches": ["https://www.youtube.com/*", "https://youtube.com/*", "https://m.youtube.com/*"]
   }],
   "background": { "service_worker": "src/background.js" }

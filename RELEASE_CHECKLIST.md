@@ -1,4 +1,86 @@
-# ModernTubeDownloader 1.0.0 release checklist
+# ModernTubeDownloader release checklist
+
+## Final 1.1.0 gates
+
+Publication authority: user-approved master push, annotated v1.1.0 tag after exact-head CI success, then the existing release workflow. No Web Store/Edge Add-ons/NuGet publication. Historical v1.0.0 is immutable. The local `FINAL_RELEASE_1_1_0.md` records final completion/run URLs/asset hashes; the [release page](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.1.0) is the published-asset authority.
+
+- [x] Final 1.1.0 metadata; one clean fetched MFN master pin in all build paths.
+- [x] Consent-bound reverse refresh with greater-version ACK proof, new jar, bounded wait and exactly one logical auth retry; no HTTP credential endpoint.
+- [x] Upstream option-catalog ownership validation and table-driven canonical rejection/allow regressions.
+- [x] Thumbnail lock reproduced, child-process handle owner identified; managed-memory decode fix and 500-cycle regression without retry/sleep.
+- [x] Fresh restore, Debug/Release full tests **616/616 each**, NativeHost **5/5**, CookieSecurity **173/173** (subsets), JS **61 extension + 31 Web Remote**, PL/EN parity; zero warnings/errors/skips.
+- [x] Native Automation: cookie Settings PL/Dark and EN/Light, EN/Dark range/Details, PL/Light active LIVE; notifications settings/test action PL/Dark. Provider acceptance is not new human banner/click evidence; prior owner-confirmed notification qualification remains historical.
+- [x] Final-folder Chrome example.com-only synthetic scope: Sync now, automatic onChanged count 1, encrypted snapshot, accepted greater-version desktop reverse refresh, acknowledged revoke/delete and cleanup. Owner confirms removed profiles; screenshot shows an empty list. No account credentials used.
+- [x] Self-contained final ZIP, separate symbols, checksum, licenses, **611-entry** package hygiene and source/history secret scan (no findings).
+- [ ] Reviewed staging, master push, exact-SHA CI success, annotated tag and release workflow success.
+- [ ] Download published asset back, verify digest/entries, extract/start/views/close and native registration path from that extraction.
+
+Accepted POST-1.1 qualification: exhaustive sources/accounts/browsers/DPI/devices/clean-PC/soak/provider matrices, complete PSL and replay-safe profile compaction. SponsorBlock Remove remains Experimental/default OFF and FromStart Experimental/source-dependent. These are documented limits, not new release blockers; crashes/data loss/secrets/broken VOD/LIVE/queue/recovery/auth/host/CI remain blockers.
+
+## Historical candidate.5 checklist (NOT READY at that time)
+
+- [x] Clean detached MFN master `69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3`; shared development/CI/release pin, no framework edits.
+- [x] Selected-domain opt-in only; metadata-only consent UI; no default cookie/account access or hardcoded installed extension ID.
+- [x] Separate bounded NativeHost, DPAPI store, source exclusivity, attempt-owned Netscape leases and canonical yt-dlp integration.
+- [x] Snapshot/revoke ordering, pending transport permission lifetime, corrupt-store recovery and redirected AppData registration guard regressions.
+- [x] Real owner-assisted Chrome example.com-only empty/synthetic/onChanged sync and all three acknowledged deletions; temporary HKCU registration/store cleaned.
+- [x] Real managed yt-dlp Netscape load/save test with synthetic example.com cookie; not an authenticated media download.
+- [x] Final restore, Debug/Release builds, **491/491 tests each**, JavaScript **80/80**, zero final warnings/errors/skips; preserve previous failed TRX.
+- [x] Native cookie Settings PL/Dark and EN/Light; 20-toggle Settings scroll; ordinary EN/Dark range/Details/Settings; published normal startup/ready/clean close with isolated custom QA tools.
+- [x] Self-contained win-x64 GUI + NativeHost; 611-entry package hygiene, exact ZIP hash, separate symbols, notices and no runtime credentials.
+- [x] [COOKIE_SYNC.md](COOKIE_SYNC.md), [full gap audit](YTDLP_FEATURE_GAP_AUDIT.md), [candidate.5 report](CANDIDATE5_COOKIE_SYNC_YTDLP_AUDIT_REPORT.md), README, architecture, changelog, notices and current status updated.
+- [ ] Implement consent-bound desktop auth-failure browser refresh/ACK and one bounded retry (request §36); never fabricate freshness or ACK.
+- [ ] Harden remaining expert-argument credential bypass edges before claiming complete protection.
+- [ ] Diagnose intermittent existing thumbnail-fixture file-lock cleanup failure; a passing rerun is not a root-cause fix.
+- [ ] Qualify or explicitly accept PSL/profile-tombstone/optional-API reload and Chrome/Edge/Brave/Chromium/installed-ID/deployment limits.
+- [ ] Authenticated account/download/playlist/LIVE/subtitle qualification only with explicit consent; no account data was requested for this round.
+- [ ] Review prior native action/cold activation/clean-PC and Experimental SponsorBlock limits.
+- [ ] Explicit owner approval before stable version, commit/push/tag/GitHub Release/store publication.
+
+## Historical candidate.4 checklist
+
+- [x] Latest MFN central pin `69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3`, clean detached source.
+- [x] Cached JPEG/PNG/WebP normalized without HTTP; lifetime, Windows validation and capability fallback regressions.
+- [x] Native completion/progress/LIVE image, privacy/OFF absence: owner-confirmed.
+- [x] Real Chrome /live/ replay → actual metadata → one paused regular VOD job; no LIVE session, no timestamp-derived range.
+- [x] Active/upcoming metadata safety, quality ceiling, PL/EN and invalidated stale Add action covered by tests.
+- [x] Final candidate.4 pipeline: Debug/Release 442/442 each, JavaScript 61/61, zero warnings/errors/skips; publish startup and package hygiene PASS. Exact artifact and scope: [report](CANDIDATE4_THUMBNAIL_LIVE_REPLAY_REPORT.md).
+- [ ] Review outstanding native action/cold-launch/clean-PC qualification limits and approve final promotion.
+- [ ] Explicit owner approval for stable version, commit/push/tag/release/store publication.
+
+## Historical candidate.3 checklist
+
+- [x] Latest fetched MFN master / clean detached checkout; central SHA consumed by development and both workflows.
+- [x] Official providers; consumer projection property before first restore; no eager App Runtime bootstrap; optional feature cannot block startup/download.
+- [x] Notification settings/defaults, privacy, bounded progress, identity, deduplication, independent LIVE and safe IPC action policy.
+- [x] Real Chrome stale-modal reload repro and cleanup; owner confirms no new extension error.
+- [x] Final clean restore, Debug/Release 427/427 each, JavaScript 60/60; zero compiler warnings/errors/skips (see current report).
+- [x] Self-contained publish/start/clean close, including isolated missing-AppSdk-provider startup; exact ZIP notices/hygiene/checksum (see current report).
+- [x] Owner-confirmed visible notification after Explorer launch and warm Open app to Downloads in the same QA instance; direct tool-host Accepted without visibility retained separately.
+- [ ] Native banner/center/action/cold-launch matrix and clean-PC fallback qualification; do not substitute fake or Accepted evidence.
+- [ ] Review [candidate.3 report](CANDIDATE3_NOTIFICATIONS_PIPELINE_REPORT.md) and accept any explicitly listed limits.
+- [ ] Explicit owner approval for stable version, commit/push/tag/release/store publication.
+
+All candidate.2 and v1.0.0 records below are historical.
+
+## Historical candidate.2 checklist
+
+- [x] Latest fetched master pin reviewed, clean framework checkout and active pins agree.
+- [x] Fresh-profile Settings enable/save; unauthenticated status/queue/live 401; paired-cookie, New code and logout Chrome smoke.
+- [x] Remote Follow app runtime changes including unpaired screen; manual override persistence.
+- [x] Extension shared Auto/PL/EN, Options/reset and generic hidden-group regression; owner confirms real Vimeo popup/Options flow.
+- [x] Idle polling preserves unchanged queue/LIVE nodes (recording regression).
+- [x] Final candidate.2 Build-Release: 402/402 Debug and Release, 57/57 JavaScript, zero compiler skips/warnings/errors; publish/package and Debug native smoke recorded in candidate report.
+- [x] Post-recording fix: real Chrome unchanged dashboard and edited URL/focus survive subsequent polling.
+- [ ] Separate candidate.2 self-contained EXE launch; do not reuse historical candidate.1 launch evidence.
+
+- [ ] Review [candidate report](BROWSER_REMOTE_1_1_IMPLEMENTATION.md), exact current-head builds/tests and local ZIP.
+- [ ] Confirm real Chrome updated-extension handoff, YouTube/Short/playlist/LIVE regression, PL/EN and preferences.
+- [ ] Confirm phone pairing and chosen HTTPS certificate trust procedure; retain explicit HTTP warning.
+- [ ] Approve candidate limitations and promote central candidate version to stable 1.1.0.
+- [ ] Explicit owner approval before committing/pushing a release, tagging, GitHub Release or extension-store publication.
+
+All v1.0.0 records below are historical, not claims about this candidate.
 
 ## Final publication gates — 2026-10-06
 

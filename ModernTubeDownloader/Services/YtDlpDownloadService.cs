@@ -49,7 +49,6 @@ public sealed class YtDlpDownloadService(YtDlpProcessRunner runner, SettingsServ
         }
 
         arguments.AddRange(CommandLineArgumentTokenizer.ParseSafeYtDlpArguments(settings.Current.CustomYtDlpArguments));
-        CookieFileService.AppendCookieArguments(arguments, settings.Current.UseCookieFile, settings.Current.CookieFilePath);
         if (requestedRange.Mode == MediaRangeMode.Custom)
         {
             arguments.AddRange(["--download-sections", requestedRange.ToYtDlpSection()]);

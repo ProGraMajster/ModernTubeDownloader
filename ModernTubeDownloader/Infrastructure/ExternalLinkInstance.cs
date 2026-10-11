@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.Text;
+using ModernTubeDownloader.Services;
 
 namespace ModernTubeDownloader.Infrastructure;
 
@@ -23,13 +24,15 @@ public sealed class ExternalLinkInstance : IDisposable
 
     public bool IsPrimary => ownsInstance;
 
-    public void Start(Func<ExternalMediaRequest, Task> onRequest, IAppLogger? logger = null)
+    public void Start(Func<ExternalMediaRequest, Task> onRequest, IAppLogger? logger = null,
+        Func<NotificationNavigation, Task>? onNotification = null)
     {
         if (!ownsInstance || listener is not null) throw new InvalidOperationException("Not an unstarted primary instance.");
-        listener = ListenAsync(onRequest, logger);
+        listener = ListenAsync(onRequest, logger, onNotification);
     }
 
-    private async Task ListenAsync(Func<ExternalMediaRequest, Task> onRequest, IAppLogger? logger)
+    private async Task ListenAsync(Func<ExternalMediaRequest, Task> onRequest, IAppLogger? logger,
+        Func<NotificationNavigation, Task>? onNotification)
     {
         while (!stop.IsCancellationRequested)
         {
@@ -47,8 +50,11 @@ public sealed class ExternalLinkInstance : IDisposable
                 var data = new byte[length];
                 await server.ReadExactlyAsync(data, timeout.Token);
                 var payload = new UTF8Encoding(false, true).GetString(data);
-                if (!ExternalMediaRequest.TryParseProtocol(payload, out var request) || request is null) continue;
-                await onRequest(request);
+                if (NotificationNavigation.TryParse(payload, out var notification) && notification is not null && onNotification is not null)
+                    await onNotification(notification);
+                else if (ExternalMediaRequest.TryParseProtocol(payload, out var request) && request is not null)
+                    await onRequest(request);
+                else continue;
                 await server.WriteAsync(new byte[] { 1 }, timeout.Token);
                 await server.FlushAsync(timeout.Token);
             }
@@ -64,6 +70,15 @@ public sealed class ExternalLinkInstance : IDisposable
     public async Task<bool> ForwardAsync(string protocolUrl, CancellationToken cancellationToken = default)
     {
         if (ownsInstance || !ExternalMediaRequest.TryParseProtocol(protocolUrl, out _)) return false;
+        return await ForwardPayloadAsync(protocolUrl, cancellationToken);
+    }
+
+    public Task<bool> ForwardNotificationAsync(NotificationNavigation navigation, CancellationToken cancellationToken = default)
+        => NotificationNavigation.TryParse(navigation.Encode(), out _) && !ownsInstance
+            ? ForwardPayloadAsync(navigation.Encode(), cancellationToken) : Task.FromResult(false);
+
+    private async Task<bool> ForwardPayloadAsync(string protocolUrl, CancellationToken cancellationToken)
+    {
         var bytes = Encoding.UTF8.GetBytes(protocolUrl);
         if (bytes.Length > ExternalMediaRequest.MaximumProtocolLength) return false;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

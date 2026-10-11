@@ -1,29 +1,50 @@
 <!doctype html>
-<html lang="pl">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="mtd-popup">
-  <header><img src="../assets/icon32.png" alt=""><strong>ModernTubeDownloader</strong></header>
+  <header><img src="../assets/icon32.png" alt=""><strong>ModernTubeDownloader</strong>
+    <div class="language-control"><button id="languageButton" type="button" aria-expanded="false" aria-controls="languageMenu" data-i18n-aria="language">Language</button>
+      <div id="languageMenu" class="language-menu" role="group" data-i18n-aria="language" hidden>
+        <button type="button" id="language-auto" data-i18n="languageAuto">🌐 Browser</button>
+        <button type="button" id="language-pl">🇵🇱 Polski</button>
+        <button type="button" id="language-en">🇬🇧 English</button>
+        <button type="button" id="languageSettings" data-i18n="languageSettings">⚙ Language settings</button>
+      </div>
+    </div>
+  </header>
   <p id="page" class="page"></p>
-  <label class="quality-label" for="quality">Jakość</label>
+  <p id="source" class="option"></p>
+  <p id="genericHint" class="option" data-i18n="genericHint" hidden></p>
+  <label id="qualityLabel" class="quality-label" for="quality" data-i18n="quality">Quality</label>
   <select id="quality">
-    <option value="best">Najlepsza dostępna</option>
+    <option value="best" data-i18n="qualityBest">Best available</option>
     <option value="2160">2160p / 4K</option>
     <option value="1440">1440p</option>
     <option value="1080">1080p</option>
     <option value="720">720p</option>
     <option value="480">480p</option>
     <option value="360">360p</option>
-    <option value="audio">Tylko dźwięk</option>
+    <option value="audio" data-i18n="qualityAudio">Audio only</option>
   </select>
-  <p class="option">Jakość oznacza „do”. Aplikacja wybierze najbliższą dostępną niższą jakość.</p>
-  <a id="open" class="secondary-action" href="#">Otwórz w aplikacji</a>
-  <a id="launch" href="#">Dodaj do kolejki</a>
+  <p id="qualityHint" class="option" data-i18n="qualityHint"></p>
+  <a id="open" class="secondary-action" href="#" data-i18n="openApp">Analyze in app</a>
+  <a id="launch" href="#" data-i18n="queue">Add to queue</a>
   <p id="status" role="status"></p>
+  <details class="extension-settings"><summary data-i18n="extensionSettings">Extension settings</summary>
+    <label class="preference"><input id="showInjectedButtons" type="checkbox"><span data-i18n="showInjectedButtons"></span></label>
+    <label class="preference"><input id="contextMenusEnabled" type="checkbox"><span data-i18n="contextMenusEnabled"></span></label>
+    <label for="defaultAction" data-i18n="defaultAction"></label><select id="defaultAction"><option value="analyze" data-i18n="analyzeAction"></option><option value="queue" data-i18n="quickQueueAction"></option></select>
+    <p class="option" data-i18n="platformNotice"></p>
+  </details>
+  <button type="button" id="settingsLink" class="settings-link" data-i18n="settingsLink">⚙ Settings</button>
+  <script src="context.js"></script>
   <script src="shared.js"></script>
+  <script src="i18n.js"></script>
+  <script src="cookies-client.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

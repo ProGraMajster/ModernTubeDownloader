@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Models;
+using ModernTubeDownloader.Authentication;
 
 namespace ModernTubeDownloader.Services;
 
@@ -26,6 +27,8 @@ public static partial class DownloadFailureClassifier
     public static DownloadFailure Classify(Exception error, DownloadStatus stage = DownloadStatus.Waiting,
         bool isLiveCapture = false)
     {
+        if (error is CookieRefreshException refresh) return new(DownloadFailureCategory.Authentication, null, false,
+            "Error.AuthRefresh." + refresh.Status, "Cookie refresh: " + refresh.Status, null);
         var process = error as ExternalProcessException;
         var exitCode = process?.Result?.ExitCode;
         var raw = process?.Result?.StandardErrorText ?? error.Message;
@@ -36,6 +39,7 @@ public static partial class DownloadFailureClassifier
 
         DownloadFailureCategory category;
         if (error is OperationCanceledException) category = DownloadFailureCategory.Cancelled;
+        else if (error is CookieSecurityException) category = DownloadFailureCategory.CookieUnavailable;
         else if (error is DownloadOptionException) category = DownloadFailureCategory.Unsupported;
         else if (error is MediaAvailabilityException media) category = media.Kind switch
         {

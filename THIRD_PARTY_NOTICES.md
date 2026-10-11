@@ -20,6 +20,7 @@ The self-contained `win-x64` artifact contains the Microsoft .NET runtime requir
 
 - Project: https://github.com/ProGraMajster/ModernFormsNext
 - Source revision for 1.0.0: `f521f9dfcfe601bf9b6199b88132cccb2380d1bf` (origin/master fetched 2026-10-06).
+- Release 1.1.0 revision: `69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3` (origin/master fetched 2026-10-11). Framework license remains MIT; source code is not copied into this repository.
 - License: MIT.
 
 The application currently builds from a pinned source checkout to keep development, CI, and release on the same validated revision. Application output contains the resulting runtime assemblies, not the ModernFormsNext source tree.
@@ -51,6 +52,18 @@ The packages include additional native third-party material. Consult the `LICENS
 
 - System.Drawing.Common 10.0.10 — MIT.
 - Microsoft.Win32.SystemEvents 10.0.10 — part of the .NET libraries; see the .NET runtime license and notices above.
+- System.Security.Cryptography.ProtectedData 10.0.0 — MIT; candidate.5 Windows CurrentUser DPAPI. The exact package `.nuspec` preserves MIT attribution/copyright and repository commit `b0f34d51fccc69fd334253924abd8d6853fad7aa`; its `THIRD-PARTY-NOTICES.TXT` and the full required .NET runtime MIT license are copied into `licenses/`. This package does not contain a standalone LICENSE file.
+
+Release 1.1.0 ships a separate self-contained .NET runtime with the standalone NativeHost under `native-host/`, intentionally duplicating runtime files. The same exact runtime license/notices cover redistribution; no user-specific manifests, registry data or cookie store is bundled.
+
+### Windows notification dependencies (1.1.0)
+
+- Official MFN AppSdk/WinRT runtime assemblies: MIT, as part of ModernFormsNext.
+- Microsoft.WindowsAppSDK.Base 2.0.4, Foundation 2.3.12, InteractiveExperiences 2.1.9 and Runtime 2.5.1: **Microsoft Windows App SDK software license terms**, not the application's MIT license. Exact restored package `license.txt` and `NOTICE.txt` are copied into the ZIP's `licenses/`; no App Runtime installer is bundled or auto-installed.
+- Microsoft.Windows.SDK.NET.Ref 10.0.28000.87: Windows SDK .NET projection/targeting pack. The exact `.nuspec` with Microsoft's [Windows SDK license link](https://aka.ms/WinSDKLicenseURL) is retained in `licenses/`. SDK tooling/build tools are not the end-user application.
+- WinRT.Runtime (C#/WinRT support) uses the [CsWinRT MIT license](https://github.com/microsoft/CsWinRT/blob/master/LICENSE), included as `licenses/CsWinRT-MIT.txt`.
+
+Windows native components/runtime installations have their own Microsoft terms. A self-contained .NET application is not a self-contained Windows App Runtime deployment. See [Windows deployment](SYSTEM_NOTIFICATIONS.md#windows-deployment).
 
 ### QRCoder 1.8.0
 

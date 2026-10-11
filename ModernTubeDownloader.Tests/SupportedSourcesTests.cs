@@ -70,12 +70,13 @@ public sealed class SupportedSourcesTests
         Assert.Equal("Error.Download.Authentication", failure.UserMessageKey);
     }
     [Fact]
-    public void DesktopSourceValidationDoesNotBroadenExternalProtocolAllowlist()
+    public void UniversalHandoffDoesNotBroadenLegacyYouTubeProtocolAllowlist()
     {
         foreach (var url in new[] { "https://www.twitch.tv/videos/123", "https://vimeo.com/1084537", "https://archive.org/details/sample" })
         {
             Assert.True(YtDlpMetadataService.TryValidateSourceUrl(url, out _, out _));
-            Assert.False(ExternalMediaRequest.TryValidateSource(url, out _));
+            Assert.True(ExternalMediaRequest.TryValidateSource(url, out _));
+            Assert.False(ExternalMediaRequest.TryValidateYouTubeSource(url, out _));
         }
         Assert.False(YtDlpMetadataService.TryValidateSourceUrl("file:///C:/private", out _, out _));
     }

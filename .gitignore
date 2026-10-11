@@ -72,6 +72,8 @@ yt-dlp*.zip
 .env.*
 cookies.txt
 *.cookies.txt
+Auth/
+*.dpapi
 
 # OS-generated files
 Thumbs.db

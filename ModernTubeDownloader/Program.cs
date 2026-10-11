@@ -1,6 +1,9 @@
 using ModernFormsNext;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Services;
+using ModernFormsNext.Notifications;
+using ModernFormsNext.WindowKit.Backend.Windows.Notifications;
+using ModernTubeDownloader.Theming;
 
 namespace ModernTubeDownloader;
 
@@ -14,6 +17,7 @@ internal static class Program
         AppServices? services = null;
         IAppLogger? logger = null;
         ExternalLinkInstance? instance = null;
+        ISystemNotificationService? notificationService = null;
 
         UnhandledExceptionEventHandler domainHandler = (_, eventArgs) =>
         {
@@ -23,6 +27,7 @@ internal static class Program
         EventHandler<UnobservedTaskExceptionEventArgs> taskHandler = (_, eventArgs) =>
         {
             FatalErrorReporter.Log(paths, logger, "An unobserved task exception occurred.", eventArgs.Exception);
+            services?.Notifications?.ReportCriticalError();
             eventArgs.SetObserved();
         };
 
@@ -37,11 +42,15 @@ internal static class Program
                 return 0;
             }
             var enableAutomation = args.Length == 1 && args[0] == "--automation";
+            // Windows App SDK COM startup markers carry no application command/payload.
+            // Register lets the official provider decode the copied native activation instead.
+            var notificationLaunch = args.Length is 1 or 2 && args[0] == "----AppNotificationActivated:" &&
+                (args.Length == 1 || args[1].Equals("-Embedding", StringComparison.OrdinalIgnoreCase));
             ExternalMediaRequest? initialRequest = null;
-            if (args.Length == 1 && !enableAutomation &&
+            if (args.Length == 1 && !enableAutomation && !notificationLaunch &&
                 !ExternalMediaRequest.TryParseProtocol(args[0], out initialRequest))
                 return 2;
-            if (args.Length > 1) return 2;
+            if (args.Length > 1 && !notificationLaunch) return 2;
 #if !DEBUG
             if (enableAutomation)
                 throw new InvalidOperationException("UI automation is available only in Debug builds.");
@@ -49,10 +58,27 @@ internal static class Program
             instance = new ExternalLinkInstance();
             if (!instance.IsPrimary)
             {
+                if (notificationLaunch)
+                {
+                    notificationService = RegisterNotifications(paths);
+                    if (notificationService is null) return 1;
+                    using var relayLog = new FileAppLogger(paths.LogDirectory);
+                    var relay = new NotificationActivationRelay(notificationService, instance, relayLog);
+                    Application.Run(relay); // No Form, AppServices, tool setup, scheduler or worker in this process.
+                    return relay.Forwarded ? 0 : 1;
+                }
                 if (initialRequest is null) return 0;
                 return instance.ForwardAsync(args[0]).GetAwaiter().GetResult() ? 0 : 1;
             }
-            services = AppServices.Create(paths);
+            if (initialRequest is not null)
+            {
+                using var preflightLog = new FileAppLogger(paths.LogDirectory);
+                var preflightSettings = new SettingsService(paths, preflightLog);
+                preflightSettings.LoadAsync().GetAwaiter().GetResult();
+                if (!preflightSettings.Current.BrowserIntegrationEnabled) return 3;
+            }
+            notificationService = RegisterNotifications(paths);
+            services = AppServices.Create(paths, notifications: notificationService);
             logger = services.Logger;
             var diagnosticServices = services;
             UiCrashDiagnostics.RegisterStateProvider(_ =>
@@ -87,11 +113,17 @@ internal static class Program
                 }
             }
             var form = new MainForm(services, enableAutomation, initialRequest);
+            if (services.Notifications is { } notifications)
+                notifications.Navigate += (_, request) => Application.RunOnUIThread(() => form.HandleNotification(request));
             instance.Start(request =>
             {
                 Application.RunOnUIThread(() => _ = form.HandleExternalUrlAsync(request));
                 return Task.CompletedTask;
-            }, logger);
+            }, logger, request =>
+            {
+                Application.RunOnUIThread(() => form.HandleNotification(request));
+                return Task.CompletedTask;
+            });
             Application.Run(form);
             return 0;
         }
@@ -110,6 +142,28 @@ internal static class Program
             TaskScheduler.UnobservedTaskException -= taskHandler;
             instance?.Dispose();
             services?.Dispose();
+        }
+    }
+
+    private static ISystemNotificationService? RegisterNotifications(AppPaths paths)
+    {
+        try
+        {
+            paths.EnsureCreated();
+            return WindowsSystemNotificationService.Register(new()
+            {
+                Backend = WindowsNotificationBackendKind.Automatic,
+                AppUserModelId = "ProGraMajster.ModernTubeDownloader",
+                DisplayName = "ModernTubeDownloader",
+                DisplayIcon = new Uri(AppBranding.ExportNotificationIcon(paths.RootDirectory))
+            });
+        }
+        catch (Exception error)
+        {
+            // Last-resort optional feature boundary, including an inaccessible icon
+            // location. Automatic provider fallback handles known SDK load failures.
+            FatalErrorReporter.Log(paths, null, "Optional notification registration failed; application startup will continue.", error);
+            return null;
         }
     }
 }

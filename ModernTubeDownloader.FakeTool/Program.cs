@@ -62,6 +62,29 @@ if (arguments.Contains("-version"))
 
 if (arguments.Contains("--dump-single-json"))
 {
+    if ((arguments.LastOrDefault() ?? "").Contains("/auth-refresh", StringComparison.Ordinal))
+    {
+        var index = arguments.IndexOf("--cookies");
+        var fresh = index >= 0 && File.ReadLines(arguments[index + 1]).Any(line => line.Split('\t') is { Length: 7 } columns && columns[5] == "mtd_refresh_fresh");
+        if (!fresh || arguments.Last().Contains("second-failure", StringComparison.Ordinal))
+        { Console.Error.WriteLine("ERROR: Sign in; authentication required"); return 1; }
+        Console.WriteLine(new JsonObject { ["id"] = "auth-refresh", ["title"] = "Synthetic refreshed auth probe", ["formats"] = new JsonArray(),
+            ["auth_argument_count"] = arguments.Count(a => a == "--cookies"), ["jar_exists"] = true }.ToJsonString());
+        return 0;
+    }
+    // Only synthetic auth integration tests use this route. Never real browser credentials.
+    if ((arguments.LastOrDefault() ?? "").Contains("/auth-probe",StringComparison.Ordinal))
+    {
+        var cookieIndex=arguments.IndexOf("--cookies");
+        var jar=cookieIndex>=0?arguments[cookieIndex+1]:null;
+        var value=jar is null?"":File.ReadLines(jar).Where(l=>!l.StartsWith('#')||l.StartsWith("#HttpOnly_",StringComparison.Ordinal))
+            .Select(l=>l.Split('\t')).FirstOrDefault(c=>c.Length==7)?[6]??"";
+        Console.Error.WriteLine("Synthetic diagnostic "+value);
+        Console.WriteLine(new JsonObject { ["id"]="auth-probe",["title"]="Synthetic auth probe",["formats"]=new JsonArray(),
+            ["auth_argument_count"]=arguments.Count(a=>a=="--cookies"),["jar_exists"]=jar is not null&&File.Exists(jar),
+            ["http_headers"]=new JsonObject{["Cookie"]=value} }.ToJsonString());
+        return arguments.Last().Contains("auth-probe-error",StringComparison.Ordinal)?1:0;
+    }
     var checkUrl = arguments.LastOrDefault() ?? string.Empty;
     if (checkUrl.Contains("/source/unsupported", StringComparison.OrdinalIgnoreCase) ||
         checkUrl.Contains("/source/auth", StringComparison.OrdinalIgnoreCase))

@@ -38,6 +38,22 @@ $frameworkChanges = & git -C $ModernFormsNextRoot status --porcelain
 if ($LASTEXITCODE -ne 0 -or $frameworkChanges) { throw 'ModernFormsNext source checkout must be clean.' }
 $licensePath = Join-Path $repositoryRoot 'LICENSE'
 if (-not (Test-Path -LiteralPath $licensePath -PathType Leaf)) { throw 'The application LICENSE is required.' }
+# Do not race another release build/package operation in this checkout, or rebuild
+# assemblies held by a running testhost/app. Never kill unrelated user processes.
+$mutexKey = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($repositoryRoot))).Substring(0, 24)
+$buildMutex = [Threading.Mutex]::new($false, "Local\MTD-Release-$mutexKey")
+$ownsMutex = $false
+try {
+    $ownsMutex = $buildMutex.WaitOne(0)
+    if (-not $ownsMutex) { throw 'Another release operation is running in this checkout.' }
+    $running = @(Get-Process -Name ModernTubeDownloader,ModernTubeDownloader.NativeHost,testhost -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -and $_.Path.StartsWith($repositoryRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($running) { throw 'Close the app/testhost or disconnect the extension native bridge using this checkout before rebuilding. No processes were killed.' }
+    $testHosts = @(Get-CimInstance Win32_Process -Filter "Name='dotnet.exe' OR Name='testhost.exe'" | Where-Object {
+        $_.CommandLine -match 'testhost' -and $_.CommandLine -match [regex]::Escape($repositoryRoot)
+    })
+    if ($testHosts) { throw 'An active testhost is using this checkout. Wait for it to finish before rebuilding.' }
 $artifactsRoot = Join-Path $repositoryRoot 'artifacts'
 $publishRoot = Join-Path $artifactsRoot 'publish\win-x64'
 $releaseRoot = Join-Path $artifactsRoot 'release\win-x64'
@@ -77,39 +93,48 @@ function Invoke-DotNet {
 }
 
 $modernFormsProperty = "-p:ModernFormsNextRoot=$ModernFormsNextRoot"
-$serialBuildProperties = @('-m:1', '/p:UseSharedCompilation=false', $modernFormsProperty)
+$serialBuildProperties = @('-m:1', '/p:UseSharedCompilation=false', '-p:GeneratePackageOnBuild=false', $modernFormsProperty)
 
 Invoke-DotNet -Arguments @('restore', $buildTarget, $modernFormsProperty)
 $validationRun = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
 foreach ($configuration in @('Debug', 'Release')) {
     Invoke-DotNet -Arguments (@('build', $buildTarget, '-c', $configuration, '--no-restore', '-warnaserror') + $serialBuildProperties)
     $resultsRoot = Join-Path $artifactsRoot "validation\$validationRun\$configuration"
-    Invoke-DotNet -Arguments (@('test', $testProject, '-c', $configuration, '--no-build', '--logger', 'console;verbosity=normal', '--logger', 'trx;LogFileName=release-validation.trx', '--results-directory', $resultsRoot, '--blame-hang-timeout', '3m', '--blame-hang-dump-type', 'none') + $serialBuildProperties)
-    [xml] $testResults = Get-Content -LiteralPath (Join-Path $resultsRoot 'release-validation.trx') -Raw
-    $counters = $testResults.TestRun.ResultSummary.Counters
-    if ([int]$counters.total -eq 0 -or [int]$counters.total -ne [int]$counters.passed) {
-        throw "$configuration must have passing tests with no skipped tests."
-    }
+    Invoke-DotNet -Arguments (@('test', $testProject, '-c', $configuration, '--no-build', '--no-restore', '--logger', 'console;verbosity=minimal', '--logger', 'trx;LogFileName=release-validation.trx', '--results-directory', $resultsRoot, '--blame-hang-timeout', '3m', '--blame-hang-dump-type', 'none') + $serialBuildProperties)
+    & (Join-Path $PSScriptRoot 'Assert-TestResults.ps1') -ResultsDirectory $resultsRoot
 }
 Push-Location $repositoryRoot
 try {
-    & node --test browser-extension/tests/*.test.cjs ModernTubeDownloader.Tests/WebRemoteTimeInput.test.cjs
+    & node --test browser-extension/tests/*.test.cjs ModernTubeDownloader.Tests/WebRemote*.test.cjs
     if ($LASTEXITCODE -ne 0) { throw 'Browser extension / Web Remote JavaScript tests failed.' }
 }
 finally { Pop-Location }
+# RID/self-contained assets differ from the generic test graph. Restore that
+# graph explicitly once, then publish without another implicit restore.
+Invoke-DotNet -Arguments (@('restore', $applicationProject, '-r', 'win-x64', '-p:SelfContained=true', '-p:PublishProfile=win-x64-self-contained') + $serialBuildProperties)
 Invoke-DotNet -Arguments @(
     'publish',
     $applicationProject,
     '-c', 'Release',
     '-r', 'win-x64',
     '--self-contained', 'true',
+    '--no-restore',
     '-p:PublishProfile=win-x64-self-contained',
     $modernFormsProperty,
     '-m:1',
     '/p:UseSharedCompilation=false',
+    '-p:GeneratePackageOnBuild=false',
     '-warnaserror',
     '-o', $publishRoot
 )
+
+# Native Messaging is a dedicated process with its own runtime; never bootstrap the GUI.
+$nativeProject = Join-Path $repositoryRoot 'ModernTubeDownloader.NativeHost\ModernTubeDownloader.NativeHost.csproj'
+$nativePublish = Join-Path $publishRoot 'native-host'
+Invoke-DotNet -Arguments (@('restore', $nativeProject, '-r', 'win-x64', '-p:SelfContained=true') + $serialBuildProperties)
+Invoke-DotNet -Arguments (@('publish', $nativeProject, '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '--no-restore',
+    '-p:PublishTrimmed=false', '-p:PublishSingleFile=false', '-warnaserror', '-o', $nativePublish) + $serialBuildProperties)
+Get-ChildItem -LiteralPath $nativePublish -File | Where-Object Extension -in @('.pdb','.xml') | Remove-Item -Force
 
 Get-ChildItem -LiteralPath $publishRoot | ForEach-Object {
     if ($_.Extension -notin @('.pdb', '.xml') -and
@@ -121,6 +146,8 @@ Get-ChildItem -LiteralPath $publishRoot | ForEach-Object {
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'README.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'SUPPORTED_SOURCES.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'SYSTEM_NOTIFICATIONS.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'COOKIE_SYNC.md') -Destination $releaseRoot
 Copy-Item -LiteralPath $licensePath -Destination $releaseRoot
 
 # Keep redistribution notices from the exact restored packages, not a moving web page.
@@ -138,19 +165,42 @@ function Copy-PackageNotices([string]$package, [string]$packageVersion, [bool]$r
         if (Test-Path -LiteralPath $candidate -PathType Container) { $packageDirectory = $candidate; break }
     }
     if (-not $packageDirectory) { throw "Missing restored package notices: $package/$packageVersion" }
-    $notices = @(Get-ChildItem -LiteralPath $packageDirectory -File | Where-Object { $_.Name -match '^(LICENSE|THIRD.PARTY.NOTICES)\.' })
+    $notices = @(Get-ChildItem -LiteralPath $packageDirectory -File | Where-Object { $_.Name -match '^(LICENSE|NOTICE|THIRD.PARTY.NOTICES)\.' })
     if ($requireLicense -and -not @($notices | Where-Object Name -match '^LICENSE\.').Count) {
-        throw "Missing redistribution license: $package/$packageVersion"
+        # This .NET platform package supplies an SPDX expression and notices, not
+        # a standalone LICENSE file. Preserve its exact attribution; the required
+        # self-contained runtime MIT text is copied below (failure remains fatal).
+        if ($package -ne 'System.Security.Cryptography.ProtectedData') {
+            throw "Missing redistribution license: $package/$packageVersion"
+        }
+        $metadata = Join-Path $packageDirectory "$($package.ToLowerInvariant()).nuspec"
+        [xml]$packageXml = Get-Content -LiteralPath $metadata -Raw
+        $license = $packageXml.SelectSingleNode('/*[local-name()="package"]/*[local-name()="metadata"]/*[local-name()="license"]')
+        if ($null -eq $license -or $license.type -ne 'expression' -or $license.InnerText -ne 'MIT') {
+            throw "Expected exact MIT package metadata: $package/$packageVersion"
+        }
+        Copy-Item -LiteralPath $metadata -Destination (Join-Path $licensesRoot "$package-$packageVersion.nuspec")
     }
     foreach ($notice in $notices) {
         Copy-Item -LiteralPath $notice.FullName -Destination (Join-Path $licensesRoot "$package-$packageVersion-$($notice.Name)")
     }
 }
-foreach ($package in @('SkiaSharp', 'SkiaSharp.HarfBuzz', 'SkiaSharp.NativeAssets.Win32', 'HarfBuzzSharp', 'HarfBuzzSharp.NativeAssets.Win32', 'System.Drawing.Common', 'QRCoder', 'Microsoft.Win32.SystemEvents')) {
+foreach ($package in @('System.Security.Cryptography.ProtectedData', 'SkiaSharp', 'SkiaSharp.HarfBuzz', 'SkiaSharp.NativeAssets.Win32', 'HarfBuzzSharp', 'HarfBuzzSharp.NativeAssets.Win32', 'System.Drawing.Common', 'QRCoder', 'Microsoft.Win32.SystemEvents', 'Microsoft.WindowsAppSDK.Base', 'Microsoft.WindowsAppSDK.Foundation', 'Microsoft.WindowsAppSDK.InteractiveExperiences', 'Microsoft.WindowsAppSDK.Runtime')) {
     $library = @($assets.libraries.Keys | Where-Object { $_.Split('/')[0] -eq $package })
     if ($library.Count -ne 1) { throw "Expected one restored version of $package." }
     Copy-PackageNotices $package $library[0].Split('/')[1] ($package -ne 'Microsoft.Win32.SystemEvents')
 }
+# The Windows projection is an SDK downloadDependency, not an ordinary library.
+# Preserve its exact package metadata/license link, plus CsWinRT's runtime license.
+$projectionVersion = $properties.SelectSingleNode('/Project/PropertyGroup/WindowsSdkPackageVersion').InnerText.Trim()
+foreach ($folder in $assets.packageFolders.Keys) {
+    $metadataPath = Join-Path $folder "microsoft.windows.sdk.net.ref\$projectionVersion\microsoft.windows.sdk.net.ref.nuspec"
+    if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
+        Copy-Item -LiteralPath $metadataPath -Destination (Join-Path $licensesRoot "Microsoft.Windows.SDK.NET.Ref-$projectionVersion.nuspec")
+        break
+    }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $licensesRoot "Microsoft.Windows.SDK.NET.Ref-$projectionVersion.nuspec"))) { throw 'Windows SDK projection metadata is missing.' }
 $runtimeConfig = Get-Content -LiteralPath (Join-Path $publishRoot 'ModernTubeDownloader.runtimeconfig.json') -Raw | ConvertFrom-Json
 $runtime = @($runtimeConfig.runtimeOptions.includedFrameworks | Where-Object name -eq 'Microsoft.NETCore.App')
 if ($runtime.Count -ne 1) { throw 'Cannot identify the self-contained .NET runtime version.' }
@@ -160,7 +210,7 @@ if ($aspNetRuntime.Count -ne 1) { throw 'Cannot identify the self-contained ASP.
 Copy-PackageNotices 'Microsoft.AspNetCore.App.Runtime.win-x64' $aspNetRuntime[0].version
 
 $forbiddenFiles = Get-ChildItem -LiteralPath $releaseRoot -Recurse -File | Where-Object {
-    $_.Extension -in @('.pdb', '.log', '.trx', '.mp4', '.webm', '.mkv', '.user', '.suo') -or
+    $_.Extension -in @('.pdb', '.log', '.trx', '.mp4', '.webm', '.mkv', '.user', '.suo', '.pfx', '.p12', '.pem', '.key', '.sqlite', '.db', '.dpapi') -or
     $_.Name -like '*FakeTool*' -or
     $_.Name -like 'ModernTubeDownloader.Tests*' -or
     $_.Name -like 'ModernFormsNext.Automation*' -or
@@ -180,6 +230,7 @@ foreach ($symbol in $publishedSymbols) {
 }
 
 Compress-Archive -Path (Join-Path $releaseRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
+& (Join-Path $PSScriptRoot 'Test-ReleasePackage.ps1') -ZipPath $zipPath
 if ($publishedSymbols.Count -gt 0) {
     Compress-Archive -Path (Join-Path $symbolsRoot '*') -DestinationPath $symbolsZipPath -CompressionLevel Optimal
 }
@@ -196,4 +247,9 @@ Set-Content -LiteralPath $checksumPath -Value "$hash  $(Split-Path -Leaf $zipPat
     ZipBytes = (Get-Item -LiteralPath $zipPath).Length
     SymbolsZip = if (Test-Path -LiteralPath $symbolsZipPath) { $symbolsZipPath } else { $null }
     Sha256 = $hash
+}
+}
+finally {
+    if ($ownsMutex) { $buildMutex.ReleaseMutex() }
+    $buildMutex.Dispose()
 }

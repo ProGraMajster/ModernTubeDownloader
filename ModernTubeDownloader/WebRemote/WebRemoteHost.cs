@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 using ModernTubeDownloader.Models;
+using ModernTubeDownloader.Localization;
 using ModernTubeDownloader.Services;
 using SkiaSharp;
 
@@ -26,18 +28,27 @@ public sealed class WebRemoteHost : IDisposable
     private string token = NewToken();
     private string? runningAddress;
     private int runningPort;
+    private bool runningHttps;
+    private bool runningAuthentication;
+    private X509Certificate2? serverCertificate;
+    private readonly LocalizationService polish = new("pl");
+    private readonly LocalizationService english = new("en");
+    public const string SessionCookie = "mtd-remote-session";
     private bool disposed;
     private bool stopping;
 
     public WebRemoteHost(AppServices services)
     {
         this.services = services;
+        Certificates = new WebRemoteCertificateStore(services.Paths);
         services.Settings.Changed += SettingsChanged;
     }
 
     public event EventHandler? Changed;
     public bool IsRunning => application is not null;
-    public string? Address => runningAddress is null ? null : $"http://{runningAddress}:{runningPort}/";
+    public string? Address => runningAddress is null ? null : $"{(runningHttps ? "https" : "http")}://{runningAddress}:{runningPort}/";
+    public WebRemotePairing Pairing { get; } = new();
+    public WebRemoteCertificateStore Certificates { get; }
     public string Token => token;
     public string? LastError { get; private set; }
 
@@ -63,8 +74,29 @@ public sealed class WebRemoteHost : IDisposable
     public void RegenerateToken()
     {
         token = NewToken();
+        Pairing.Stop();
+        if (IsRunning && services.Settings.Current.WebRemoteRequireAuthentication) Pairing.Start();
         services.Logger.Info("Web remote token regenerated; existing browser sessions invalidated.");
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void RegeneratePairingCode()
+    {
+        Pairing.Regenerate();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task GenerateCertificateAsync()
+    {
+        await lifecycle.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var address = IPAddress.Parse(services.Settings.Current.WebRemoteBindAddress);
+            await Task.Run(() => Certificates.Generate(address)).ConfigureAwait(false);
+            if (runningHttps) await StopCoreAsync().ConfigureAwait(false);
+        }
+        finally { lifecycle.Release(); }
+        await ReconcileAsync().ConfigureAwait(false);
     }
 
     public async Task ReconcileAsync()
@@ -80,24 +112,42 @@ public sealed class WebRemoteHost : IDisposable
                 LastError = null;
                 return;
             }
-            if (application is not null && runningAddress == config.WebRemoteBindAddress && runningPort == config.WebRemotePort)
+            if (application is not null && runningAddress == config.WebRemoteBindAddress && runningPort == config.WebRemotePort &&
+                runningHttps == config.WebRemoteUseHttps)
+            {
+                if (runningAuthentication != config.WebRemoteRequireAuthentication)
+                {
+                    token = NewToken();
+                    Pairing.Stop();
+                    runningAuthentication = config.WebRemoteRequireAuthentication;
+                    if (runningAuthentication) Pairing.Start();
+                }
+                if (runningAuthentication) Pairing.EnsureCode();
                 return;
+            }
             await StopCoreAsync().ConfigureAwait(false);
             if (!IPAddress.TryParse(config.WebRemoteBindAddress, out var bindIp) ||
                 !AvailableAddresses().Contains(bindIp.ToString(), StringComparer.Ordinal))
-                throw new InvalidOperationException("Select an active local IPv4 address before enabling Web Remote.");
-            var app = Build(bindIp, config.WebRemotePort);
+                throw new WebRemoteCertificateException("Settings.RemoteInvalidBind");
+            var certificate = config.WebRemoteUseHttps ? Certificates.Load(bindIp) : null;
+            WebApplication app;
+            try { app = Build(bindIp, config.WebRemotePort, certificate); }
+            catch { certificate?.Dispose(); throw; }
             try { await app.StartAsync().ConfigureAwait(false); }
-            catch { await app.DisposeAsync().ConfigureAwait(false); throw; }
+            catch { await app.DisposeAsync().ConfigureAwait(false); certificate?.Dispose(); throw; }
             application = app;
+            serverCertificate = certificate;
             runningAddress = bindIp.ToString();
             runningPort = config.WebRemotePort;
+            runningHttps = config.WebRemoteUseHttps;
+            runningAuthentication = config.WebRemoteRequireAuthentication;
+            if (runningAuthentication) Pairing.Start();
             LastError = null;
             services.Logger.Info($"Web remote started on {runningAddress}:{runningPort}; LAN binding only.");
         }
         catch (Exception ex)
         {
-            LastError = ex.Message;
+            LastError = ex is WebRemoteCertificateException known ? services.Localization[known.MessageKey] : services.Localization["Settings.RemoteStartFailed"];
             services.Logger.Error("Web remote could not start.", ex);
         }
         finally
@@ -118,6 +168,8 @@ public sealed class WebRemoteHost : IDisposable
 
     private async Task StopCoreAsync()
     {
+        Pairing.Stop();
+        token = NewToken();
         if (application is null) return;
         var app = application;
         application = null;
@@ -125,11 +177,16 @@ public sealed class WebRemoteHost : IDisposable
         runningPort = 0;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         try { await app.StopAsync(timeout.Token).ConfigureAwait(false); }
-        finally { await app.DisposeAsync().ConfigureAwait(false); }
+        finally
+        {
+            await app.DisposeAsync().ConfigureAwait(false);
+            serverCertificate?.Dispose();
+            serverCertificate = null;
+        }
         services.Logger.Info("Web remote stopped.");
     }
 
-    private WebApplication Build(IPAddress bindIp, int port)
+    private WebApplication Build(IPAddress bindIp, int port, X509Certificate2? certificate)
     {
         // Never inherit a developer exception page from the desktop process environment.
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [], EnvironmentName = Environments.Production });
@@ -138,7 +195,7 @@ public sealed class WebRemoteHost : IDisposable
         {
             kestrel.AddServerHeader = false;
             kestrel.Limits.MaxRequestBodySize = 8192;
-            kestrel.Listen(bindIp, port);
+            kestrel.Listen(bindIp, port, endpoint => { if (certificate is not null) endpoint.UseHttps(certificate); });
         });
         builder.Services.AddRateLimiter(options =>
         {
@@ -181,7 +238,7 @@ public sealed class WebRemoteHost : IDisposable
             context.Response.Headers["Referrer-Policy"] = "no-referrer";
             context.Response.Headers["Cache-Control"] = "no-store";
             context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
-            var expectedOrigin = $"http://{bindIp}:{port}";
+            var expectedOrigin = $"{(certificate is null ? "http" : "https")}://{bindIp}:{port}";
             if (!string.Equals(context.Request.Host.Host, bindIp.ToString(), StringComparison.Ordinal) ||
                 context.Request.Host.Port != port ||
                 (context.Request.Headers.Origin.Count > 0 &&
@@ -190,13 +247,25 @@ public sealed class WebRemoteHost : IDisposable
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 return;
             }
+            var hasBearer = Authenticate(context.Request.Headers.Authorization.ToString());
+            var hasSession = Pairing.Authenticate(context.Request.Cookies[SessionCookie]);
             if (context.Request.Path.StartsWithSegments("/api") &&
                 !string.Equals(context.Request.Path.Value, "/api/auth-mode", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(context.Request.Path.Value, "/api/pair", StringComparison.OrdinalIgnoreCase) &&
                 services.Settings.Current.WebRemoteRequireAuthentication &&
-                !Authenticate(context.Request.Headers.Authorization.ToString()))
+                !hasBearer && !hasSession)
             {
                 services.Logger.Warning($"Web remote auth failure ClientIp={context.Connection.RemoteIpAddress}");
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
+            // Cookie-authorized mutations and pairing require an explicit same-origin browser request.
+            // Diagnostic bearer clients retain the existing API; no bearer is exposed in the browser UI.
+            if (context.Request.Path.StartsWithSegments("/api") && !HttpMethods.IsGet(context.Request.Method) &&
+                !hasBearer && (!string.Equals(context.Request.Headers.Origin.ToString(), expectedOrigin, StringComparison.OrdinalIgnoreCase) ||
+                context.Request.Headers["X-MTD-Request"] != "1"))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 return;
             }
             await next(context);
@@ -207,9 +276,26 @@ public sealed class WebRemoteHost : IDisposable
         app.MapGet("/time-input.css", () => Asset("time-input.css", "text/css; charset=utf-8"));
         app.MapGet("/time-input.js", () => Asset("time-input.js", "text/javascript; charset=utf-8"));
         app.MapGet("/app.js", () => Asset("app.js", "text/javascript; charset=utf-8"));
+        app.MapGet("/i18n.js", () => Asset("i18n.js", "text/javascript; charset=utf-8"));
+        app.MapPost("/api/pair", (PairRequest request, HttpContext context) =>
+        {
+            if (!services.Settings.Current.WebRemoteRequireAuthentication) return Results.Conflict(new { error = "pairing-disabled" });
+            if (request.Code is not { Length: > 0 and <= 16 }) return Results.BadRequest(new { error = "pairing-invalid" });
+            var result = Pairing.Pair(request.Code, context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+            if (result.Session is null) return Results.Json(new { error = result.Error }, statusCode: result.Error == "pairing-rate-limit" ? 429 : 400);
+            context.Response.Cookies.Append(SessionCookie, result.Session, CookieOptions(context.Request.IsHttps));
+            return Results.Ok();
+        });
+        app.MapPost("/api/logout", (HttpContext context) =>
+        {
+            Pairing.Logout(context.Request.Cookies[SessionCookie]);
+            context.Response.Cookies.Delete(SessionCookie, CookieOptions(context.Request.IsHttps));
+            return Results.Ok();
+        });
         app.MapGet("/api/auth-mode", () => Results.Json(new
         {
-            authenticationRequired = services.Settings.Current.WebRemoteRequireAuthentication
+            authenticationRequired = services.Settings.Current.WebRemoteRequireAuthentication,
+            desktopLanguage = services.Localization.Language == "pl" ? "pl" : "en"
         }));
         app.MapGet("/api/status", () => Results.Json(new
         {
@@ -219,17 +305,17 @@ public sealed class WebRemoteHost : IDisposable
             authenticationRequired = services.Settings.Current.WebRemoteRequireAuthentication,
             remainingAdmissionSeconds = services.Processor.RemainingAdmissionDelay?.TotalSeconds
         }));
-        app.MapGet("/api/queue", () => Results.Json(services.Queue.Snapshot().Select((item, index) => new
+        app.MapGet("/api/queue", (HttpContext context) => Results.Json(services.Queue.Snapshot().Select((item, index) => new
         {
             id = item.Id, position = index + 1, title = item.Title, status = item.Status.ToString(),
-            statusText = services.Localization[$"Status.{item.Status}"],
+            statusText = Locale(context)[$"Status.{item.Status}"],
             progress = item.ProgressPercent, speed = item.SpeedBytesPerSecond,
             etaSeconds = item.Eta?.TotalSeconds,
-            quality = services.Localization[$"Quality.{QualityPreset.Find(item.QualityPresetId).Id}"],
-            container = services.Localization[$"Container.{item.PreferredVideoContainer}"],
+            quality = Locale(context)[$"Quality.{QualityPreset.Find(item.QualityPresetId).Id}"],
+            container = Locale(context)[$"Container.{item.PreferredVideoContainer}"],
             range = item.RequestedRange?.DisplayText,
             retryAttempt = item.AttemptCount, maximumAttempts = item.MaximumAttempts,
-            error = item.FailureMessageKey is { } key ? services.Localization[key] : null,
+            error = item.FailureMessageKey is { } key ? Locale(context)[key] : null,
             hasThumbnail = !string.IsNullOrWhiteSpace(item.ThumbnailUrl)
         }).ToArray()));
         app.MapGet("/api/queue/{id:guid}/thumbnail", async (Guid id, CancellationToken cancellationToken) =>
@@ -255,17 +341,17 @@ public sealed class WebRemoteHost : IDisposable
             services.Queue.MoveBy(id, 1), context)).RequireRateLimiting("mutation");
         app.MapPost("/api/queue/pause", (HttpContext context) => PauseResult(true, context)).RequireRateLimiting("mutation");
         app.MapPost("/api/queue/resume", (HttpContext context) => PauseResult(false, context)).RequireRateLimiting("mutation");
-        app.MapGet("/api/live", () => Results.Json(services.Live.Snapshot().Select(session => new
+        app.MapGet("/api/live", (HttpContext context) => Results.Json(services.Live.Snapshot().Select(session => new
         {
             id = session.Id, title = session.Title, state = session.State.ToString(),
-            stateText = services.Localization[$"Live.State.{session.State}"],
+            stateText = Locale(context)[$"Live.State.{session.State}"],
             recordedSeconds = session.RecordedDuration.TotalSeconds, bytes = session.BytesWritten,
             speed = session.CurrentSpeed, nextCheckAt = session.NextCheckAt, retryAt = session.RetryAt,
             scheduledStartAt = session.ScheduledStartAt, partsCount = session.Parts.Count,
             startPolicy = session.StartPolicy.ToString(), canResume = session.CanResume,
             isActive = session.IsActive, retryCount = session.ResumeCount,
-            quality = services.Localization[$"Quality.{session.QualityPresetId}"], container = "MKV",
-            error = session.FailureMessageKey is { } key ? services.Localization[key] : null
+            quality = Locale(context)[$"Quality.{session.QualityPresetId}"], container = "MKV",
+            error = session.FailureMessageKey is { } key ? Locale(context)[key] : null
         }).ToArray()));
         app.MapPost("/api/live/{id:guid}/stop", (Guid id, HttpContext context) => ActionResult("live-stop", id,
             services.Live.StopAndSave(id), context)).RequireRateLimiting("mutation");
@@ -302,6 +388,17 @@ public sealed class WebRemoteHost : IDisposable
         services.Logger.Info($"Web remote action={(paused ? "pause" : "resume")} ClientIp={context.Connection.RemoteIpAddress} Result=ok");
         return Results.Ok();
     }
+
+    private LocalizationService Locale(HttpContext context) => context.Request.Headers["X-MTD-Language"].ToString() switch
+    {
+        "pl" => polish, "en" => english, _ => services.Localization
+    };
+
+    private static CookieOptions CookieOptions(bool secure) => new()
+    {
+        HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = secure, IsEssential = true,
+        Path = "/", MaxAge = WebRemotePairing.SessionLifetime
+    };
 
     private IResult ActionResult(string action, Guid id, bool success, HttpContext context)
     {
@@ -451,4 +548,5 @@ public sealed class WebRemoteHost : IDisposable
     public sealed record AddRequest(string? Url, string? Quality, string? Container, string? RangeMode, string? From, string? To,
         bool? UseSubtitleDefaults = null, bool? UseSponsorBlockDefaults = null);
     public sealed record LiveAnalyzeRequest(string? Url);
+    public sealed record PairRequest(string? Code);
 }

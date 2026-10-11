@@ -1,9 +1,9 @@
 /* One confirmation flow for watch videos, Shorts and explicit playlists. */
 globalThis.MTDModal = (() => {
   const qualityOptions = [
-    ['best', 'Najlepsza dostępna'], ['2160', '2160p / 4K'], ['1440', '1440p'],
+    ['best', 'qualityBest'], ['2160', '2160p / 4K'], ['1440', '1440p'],
     ['1080', '1080p'], ['720', '720p'], ['480', '480p'], ['360', '360p'],
-    ['audio', 'Tylko dźwięk']
+    ['audio', 'qualityAudio']
   ];
 
   function firstText(doc, selectors) {
@@ -47,6 +47,8 @@ globalThis.MTDModal = (() => {
     let backdrop = null;
     let previousFocus = null;
     let keyHandler = null;
+    let updateLanguage = () => {};
+    let closeTimer = null;
 
     function element(tag, className, text) {
       const node = doc.createElement(tag);
@@ -56,6 +58,8 @@ globalThis.MTDModal = (() => {
     }
 
     function close() {
+      if (closeTimer !== null) win.clearTimeout?.(closeTimer);
+      closeTimer = null;
       if (!backdrop) return;
       doc.removeEventListener?.('keydown', keyHandler, true);
       backdrop.remove();
@@ -63,10 +67,11 @@ globalThis.MTDModal = (() => {
       if (previousFocus?.isConnected !== false) previousFocus?.focus?.();
       previousFocus = null;
       keyHandler = null;
+      updateLanguage = () => {};
     }
 
     function open(media, opener) {
-      if (!media || !doc.body) return false;
+      if (!MTDContext.check() || !media || !doc.body) return false;
       close();
       previousFocus = opener || doc.activeElement;
       const details = presentationFor(doc, media);
@@ -80,59 +85,74 @@ globalThis.MTDModal = (() => {
       dialog.setAttribute('aria-describedby', 'mtd-modal-description');
 
       const header = element('div', 'mtd-modal-header');
-      const heading = element('h2', 'mtd-modal-heading', isPlaylist ? 'Dodaj playlistę' : 'Dodaj materiał');
+      const heading = element('h2', 'mtd-modal-heading', isPlaylist ? MTDI18n.t('addPlaylist') : MTDI18n.t('addMedia'));
       heading.id = 'mtd-modal-heading';
       const closeButton = element('button', 'mtd-modal-close', '×');
       closeButton.type = 'button';
-      closeButton.setAttribute('aria-label', 'Zamknij');
+      closeButton.setAttribute('aria-label', MTDI18n.t('close'));
       closeButton.addEventListener('click', close);
       header.append(heading, closeButton);
 
-      const kind = element('p', 'mtd-modal-kind', isPlaylist ? 'PLAYLISTA' : media.kind === 'short' ? 'SHORTS' : media.kind === 'live' ? 'LIVE / REPLAY' : 'FILM');
+      const kind = element('p', 'mtd-modal-kind', isPlaylist ? MTDI18n.t('playlist') : media.kind === 'short' ? MTDI18n.t('short') : media.kind === 'live' ? MTDI18n.t('live') : MTDI18n.t('video'));
       const title = element('p', 'mtd-modal-media-title', details.title);
       title.title = details.title;
       const description = element('p', 'mtd-modal-description', isPlaylist
-        ? 'Dodaj całą playlistę od razu albo otwórz ją w ModernTubeDownloader, aby przejrzeć pozycje.'
-        : 'Dodaj materiał od razu albo otwórz go w ModernTubeDownloader, aby wybrać format pliku.');
+        ? MTDI18n.t('playlistDescription')
+        : MTDI18n.t('mediaDescription'));
       description.id = 'mtd-modal-description';
       const count = details.count ? element('p', 'mtd-modal-count', details.count) : null;
       const liveHint = media.kind === 'live' ? element('p', 'mtd-modal-description',
-        'To może być trwająca transmisja, planowany LIVE albo zapis. Otwórz w aplikacji, aby sprawdzić stan i świadomie wybrać nagrywanie lub pobranie zapisu.') : null;
+        MTDI18n.t('liveHint')) : null;
 
-      const qualityLabel = element('label', 'mtd-modal-quality-label', isPlaylist ? 'Domyślna jakość pozycji' : 'Jakość');
+      const qualityLabel = element('label', 'mtd-modal-quality-label', isPlaylist ? MTDI18n.t('defaultQuality') : MTDI18n.t('quality'));
       qualityLabel.setAttribute('for', 'mtd-modal-quality');
       const quality = element('select', 'mtd-modal-quality');
       quality.id = 'mtd-modal-quality';
       for (const [value, label] of qualityOptions) {
-        const option = element('option', '', label);
+        const option = element('option', '', value === 'best' || value === 'audio' ? MTDI18n.t(label) : label);
         option.value = value;
         quality.append(option);
       }
       const savedQuality = preferences.getQuality?.();
       quality.value = MTDUrls.qualities.has(savedQuality) ? savedQuality : 'best';
       const qualityHint = element('p', 'mtd-modal-quality-hint',
-        'Jakość oznacza „do”. Jeśli wybrana jakość nie jest dostępna, aplikacja wybierze najbliższą niższą.');
+        MTDI18n.t('qualityHint'));
 
       const actions = element('div', 'mtd-modal-actions');
-      const cancel = element('button', 'mtd-modal-cancel', 'Anuluj');
+      const cancel = element('button', 'mtd-modal-cancel', MTDI18n.t('cancel'));
       cancel.type = 'button';
       cancel.addEventListener('click', close);
-      const openInApp = element('a', 'mtd-modal-open', 'Otwórz w aplikacji');
+      const openInApp = element('a', 'mtd-modal-open', MTDI18n.t('openApp'));
       openInApp.setAttribute('role', 'button');
-      const confirm = element('a', 'mtd-modal-confirm', isPlaylist ? 'Dodaj playlistę do kolejki' : 'Dodaj do kolejki');
+      const confirm = element('a', 'mtd-modal-confirm', isPlaylist ? MTDI18n.t('queuePlaylist') : MTDI18n.t('queue'));
+      updateLanguage = () => {
+        heading.textContent = MTDI18n.t(isPlaylist ? 'addPlaylist' : 'addMedia');
+        closeButton.setAttribute('aria-label', MTDI18n.t('close'));
+        kind.textContent = MTDI18n.t(isPlaylist ? 'playlist' : media.kind === 'short' ? 'short' : media.kind === 'live' ? 'live' : 'video');
+        description.textContent = MTDI18n.t(isPlaylist ? 'playlistDescription' : 'mediaDescription');
+        if (liveHint) liveHint.textContent = MTDI18n.t('liveHint');
+        qualityLabel.textContent = MTDI18n.t(isPlaylist ? 'defaultQuality' : 'quality');
+        quality.children[0].textContent = MTDI18n.t('qualityBest');
+        quality.children[7].textContent = MTDI18n.t('qualityAudio');
+        qualityHint.textContent = MTDI18n.t('qualityHint');
+        cancel.textContent = MTDI18n.t('cancel'); openInApp.textContent = MTDI18n.t('openApp');
+        confirm.textContent = MTDI18n.t(isPlaylist ? 'queuePlaylist' : 'queue');
+      };
       confirm.setAttribute('role', 'button');
       const updateTargets = () => {
         confirm.href = MTDUrls.protocolUrl(media.url, { quality: quality.value, container: 'auto', mode: 'queue' }) || '#';
-        openInApp.href = MTDUrls.protocolUrl(media.url, { quality: quality.value, container: 'auto', mode: 'open' }) || '#';
+        openInApp.href = MTDUrls.protocolUrl(media.url, { quality: quality.value, container: 'auto', mode: 'analyze' }) || '#';
       };
       updateTargets();
       quality.addEventListener('change', () => {
+        if (!MTDContext.check()) return;
         const value = MTDUrls.qualities.has(quality.value) ? quality.value : 'best';
         quality.value = value;
         preferences.setQuality?.(value);
         updateTargets();
       });
       const launch = event => {
+        if (!MTDContext.check()) { event.preventDefault(); close(); return; }
         // A SPA navigation must not turn an old modal into a request for another film.
         if (MTDUrls.detect(win.location.href)?.url !== media.url) {
           event.preventDefault();
@@ -141,13 +161,14 @@ globalThis.MTDModal = (() => {
         }
         preferences.setQuality?.(quality.value);
         updateTargets();
+        if(globalThis.MTDCookieClient?.prepareClick(event,win,event.currentTarget.href,media.url,close,
+          () => backdrop === root && MTDUrls.detect(win.location.href)?.url === media.url)) return;
         // Keep the trusted anchor click intact; the custom protocol has no acknowledgement.
-        win.setTimeout(close, 0);
+        closeTimer = win.setTimeout(close, 0);
       };
       openInApp.addEventListener('click', launch);
       confirm.addEventListener('click', launch);
-      actions.append(cancel, openInApp);
-      if (media.kind !== 'live') actions.append(confirm);
+      actions.append(cancel, openInApp, confirm);
       dialog.append(header, kind, title, description);
       if (count) dialog.append(count);
       if (liveHint) dialog.append(liveHint);
@@ -155,9 +176,7 @@ globalThis.MTDModal = (() => {
       root.append(dialog);
       root.addEventListener('click', event => { if (event.target === root) close(); });
 
-      const focusable = media.kind === 'live'
-        ? [closeButton, quality, cancel, openInApp]
-        : [closeButton, quality, cancel, openInApp, confirm];
+      const focusable = [closeButton, quality, cancel, openInApp, confirm];
       keyHandler = event => {
         if (event.key === 'Escape') {
           event.preventDefault();
@@ -169,7 +188,7 @@ globalThis.MTDModal = (() => {
           const current = focusable.indexOf(doc.activeElement);
           if (event.shiftKey && current <= 0) {
             event.preventDefault();
-            confirm.focus();
+            focusable.at(-1).focus();
           } else if (!event.shiftKey && (current === focusable.length - 1 || current < 0)) {
             event.preventDefault();
             closeButton.focus();
@@ -183,7 +202,8 @@ globalThis.MTDModal = (() => {
       return true;
     }
 
-    return { open, close, isOpen: () => backdrop !== null };
+    MTDContext.own(close);
+    return { open, close, updateLanguage: () => { if(MTDContext.check())updateLanguage(); }, isOpen: () => backdrop !== null };
   }
 
   return { createController, presentationFor };

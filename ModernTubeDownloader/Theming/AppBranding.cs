@@ -12,6 +12,20 @@ internal static class AppBranding
 
     public static SKBitmap Icon => NativeIcon.Value;
 
+    public static string ExportNotificationIcon(string dataDirectory)
+    {
+        var directory = System.IO.Path.Combine(dataDirectory, "branding");
+        System.IO.Directory.CreateDirectory(directory);
+        var path = System.IO.Path.Combine(directory, "AppIcon.png");
+        if (!System.IO.File.Exists(path))
+        {
+            using var stream = typeof(AppBranding).Assembly.GetManifestResourceStream(IconResourceName)!;
+            using var file = System.IO.File.Create(path);
+            stream.CopyTo(file);
+        }
+        return path;
+    }
+
     public static void Apply(Form form)
     {
         ArgumentNullException.ThrowIfNull(form);

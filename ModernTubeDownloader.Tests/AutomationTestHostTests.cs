@@ -250,7 +250,12 @@ public sealed class AutomationTestHostTests
                 Assert.False(Find<Label>(view, "WebRemoteAuthWarning").Visible);
                 Assert.Equal(18765, Find<NumericUpDown>(view, "WebRemotePort").Value);
                 Assert.Equal("127.0.0.1", Find<ComboBox>(view, "WebRemoteAddress").SelectedItem?.ToString());
-                Assert.False(string.IsNullOrWhiteSpace(Find<TextBox>(view, "WebRemoteToken").Text));
+                var pairingCode = Find<TextBox>(view, "WebRemotePairingCode");
+                Assert.True(pairingCode.ReadOnly);
+                Assert.Equal("—", pairingCode.Text); // No credential before the listener is enabled.
+                Assert.False(Find<Button>(view, "WebRemoteCopyCode").Enabled);
+                Assert.False(Find<Button>(view, "WebRemoteNewCode").Enabled);
+                Assert.False(Find<CheckBox>(view, "WebRemoteUseHttps").Checked);
                 var scroll = Assert.Single(view.Controls.OfType<AppScrollPanel>());
                 scroll.VerticalScrollProperties.Value = 600;
                 host.ProcessPendingWork();
@@ -260,11 +265,13 @@ public sealed class AutomationTestHostTests
                 authToggle.Checked = false;
                 host.ProcessPendingWork();
                 Assert.True(Find<Label>(view, "WebRemoteAuthWarning").Visible);
-                Assert.False(Find<TextBox>(view, "WebRemoteToken").Visible);
+                Assert.False(pairingCode.Visible);
+                Assert.False(Find<Label>(view, "WebRemoteCodeExpiry").Visible);
                 Assert.Equal(offsetBeforeAuthChange, scroll.VerticalScrollProperties.Value);
                 Assert.Equal(scroll.DisplayRectangle.Top, scroll.Controls[0].Top);
                 Assert.Equal(scroll.DisplayRectangle.Left + 24, scroll.Controls[0].Left);
-                Assert.Equal(maxBeforeAuthChange - 44, scroll.VerticalScrollProperties.Maximum);
+                // Pairing includes the code/actions row and a new multiline state row (100 px).
+                Assert.Equal(maxBeforeAuthChange - 100, scroll.VerticalScrollProperties.Maximum);
             }
             await services.ShutdownAsync();
         }

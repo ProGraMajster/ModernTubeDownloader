@@ -11,7 +11,8 @@ public sealed record ExternalMediaRequest(
     Guid? RequestId = null,
     bool AutoQueuePlaylist = false,
     PreferredVideoContainer RequestedContainer = PreferredVideoContainer.Auto,
-    bool OpenInApp = false)
+    bool OpenInApp = false,
+    ExternalMediaIntent? Intent = null)
 {
     public const string Scheme = "moderntubedownloader";
     public const int MaximumProtocolLength = 8192;
@@ -43,18 +44,40 @@ public sealed record ExternalMediaRequest(
             }
             catch (UriFormatException) { return false; }
 
-            if (!values.TryAdd(key, value) || key is not ("v" or "url" or "analyze" or "queue" or "playlist" or "quality" or "container" or "open" or "source" or "id"))
+            if (!values.TryAdd(key, value) || key is not ("v" or "url" or "action" or "analyze" or "queue" or "playlist" or "quality" or "container" or "open" or "source" or "id"))
                 return false;
         }
 
-        if (values.TryGetValue("v", out var version) && version != "1") return false;
+        var version = values.GetValueOrDefault("v") ?? "1";
+        if (version is not ("1" or "2")) return false;
         if (!values.TryGetValue("url", out var url) || !TryValidateSource(url, out var normalized)) return false;
+        if (version == "1" && !TryValidateYouTubeSource(url, out _)) return false;
+        ExternalMediaIntent? intent = null;
+        if (version == "2")
+        {
+            if (values.Keys.Any(key => key is "analyze" or "queue" or "open")) return false;
+            intent = values.GetValueOrDefault("action") switch
+            {
+                "analyze" => ExternalMediaIntent.Analyze,
+                "quick-queue" => ExternalMediaIntent.QuickQueue,
+                "open" => ExternalMediaIntent.Open,
+                _ => null
+            };
+            if (intent is null) return false;
+        }
+        else if (values.ContainsKey("action")) return false;
         if (!TryFlag(values, "analyze", true, out var analyze) ||
             !TryFlag(values, "queue", false, out var queue) ||
             !TryFlag(values, "playlist", false, out var playlist) ||
             !TryFlag(values, "open", !queue, out var openInApp)) return false;
+        if (intent is not null)
+        {
+            analyze = intent != ExternalMediaIntent.Open;
+            queue = intent == ExternalMediaIntent.QuickQueue;
+            openInApp = !queue;
+        }
         var isPlaylistUrl = Services.YtDlpMetadataService.IsPlaylistUrl(normalized);
-        if ((queue && !analyze) || (playlist && !isPlaylistUrl) || (queue && isPlaylistUrl && !playlist))
+        if ((queue && !analyze) || (playlist && !isPlaylistUrl) || (version == "1" && queue && isPlaylistUrl && !playlist))
             return false;
         if (queue == openInApp) return false;
         var quality = values.GetValueOrDefault("quality") ?? "best";
@@ -70,7 +93,7 @@ public sealed record ExternalMediaRequest(
             id = parsed;
         }
 
-        request = new ExternalMediaRequest(normalized, analyze, queue, quality, source, id, playlist, container, openInApp);
+        request = new ExternalMediaRequest(normalized, analyze, queue, quality, source, id, playlist, container, openInApp, intent);
         return true;
     }
 
@@ -87,16 +110,28 @@ public sealed record ExternalMediaRequest(
     {
         normalized = string.Empty;
         if (string.IsNullOrWhiteSpace(input) || input.Length > MaximumSourceLength || input.Any(char.IsControl) ||
+            HasMalformedEscape(input) || !Uri.TryCreate(input, UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("http" or "https") || uri.UserInfo.Length != 0 || uri.Host.Length == 0) return false;
+        normalized = uri.AbsoluteUri;
+        if (normalized.Length <= MaximumSourceLength) return true;
+        normalized = string.Empty;
+        return false;
+    }
+
+    public static bool TryValidateYouTubeSource(string? input, out string normalized)
+    {
+        normalized = string.Empty;
+        if (string.IsNullOrWhiteSpace(input) || input.Length > MaximumSourceLength || input.Any(char.IsControl) ||
             HasMalformedEscape(input) ||
             !Uri.TryCreate(input, UriKind.Absolute, out var uri) ||
-            uri.Scheme is not ("http" or "https") || uri.UserInfo.Length != 0 ||
-            !uri.IsDefaultPort || uri.Fragment.Length != 0)
+            uri.Scheme is not ("http" or "https") || uri.UserInfo.Length != 0 || uri.Host.Length == 0)
             return false;
 
         var host = uri.IdnHost.ToLowerInvariant();
         var youtube = host is "youtube.com" or "www.youtube.com" or "m.youtube.com";
         var shortLink = host == "youtu.be";
         if (!youtube && !shortLink) return false;
+        if (!uri.IsDefaultPort || uri.Fragment.Length != 0) return false;
 
         var path = uri.AbsolutePath;
         if (shortLink)
@@ -157,3 +192,5 @@ public sealed record ExternalMediaRequest(
         return false;
     }
 }
+
+public enum ExternalMediaIntent { Analyze, QuickQueue, Open }

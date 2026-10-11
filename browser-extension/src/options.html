@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ModernTubeDownloader</title><link rel="stylesheet" href="options.css"></head>
+<body>
+<main>
+  <header><img src="../assets/icon48.png" alt=""><div><h1>ModernTubeDownloader</h1><p data-i18n="extensionSettings"></p></div></header>
+  <section><h2 data-i18n="language"></h2><p data-i18n="languageDescription"></p>
+    <label for="extensionLanguage" data-i18n="language"></label><select id="extensionLanguage">
+      <option value="auto" data-i18n="languageAuto"></option><option value="pl">🇵🇱 Polski</option><option value="en">🇬🇧 English</option>
+    </select>
+  </section>
+  <section><h2 data-i18n="pageIntegration"></h2>
+    <label class="check"><input id="showInjectedButtons" type="checkbox"><span data-i18n="showInjectedButtons"></span></label>
+    <label class="check"><input id="contextMenusEnabled" type="checkbox"><span data-i18n="contextMenusEnabled"></span></label>
+  </section>
+  <section><h2 data-i18n="behavior"></h2>
+    <label for="defaultAction" data-i18n="defaultAction"></label><select id="defaultAction">
+      <option value="analyze" data-i18n="analyzeAction"></option><option value="queue" data-i18n="quickQueueAction"></option>
+    </select>
+    <label for="quality" data-i18n="savedQuality"></label><select id="quality">
+      <option value="best" data-i18n="qualityBest"></option><option value="2160">2160p / 4K</option><option value="1440">1440p</option>
+      <option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option><option value="360">360p</option>
+      <option value="audio" data-i18n="qualityAudio"></option>
+    </select><p data-i18n="qualityHint"></p>
+  </section>
+  <section id="cookieSettings"><h2 data-i18n="cookieTitle"></h2><p data-i18n="cookiePrivacy"></p>
+    <p data-i18n="cookieRegistration"></p><code id="cookieExtensionId"></code>
+    <label for="cookieBrowser" data-i18n="cookieBrowser"></label><select id="cookieBrowser"><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="brave">Brave (experimental)</option><option value="chromium">Chromium (experimental)</option></select>
+    <label for="cookieMode" data-i18n="cookieScope"></label><select id="cookieMode"><option value="current" data-i18n="cookieCurrent"></option><option value="services" data-i18n="cookieServices"></option><option value="domains" data-i18n="cookieDomains"></option><option value="custom" data-i18n="cookieCustom"></option></select>
+    <div id="cookiePresets"><label class="check"><input id="cookieYouTube" type="checkbox">YouTube — youtube.com</label><label class="check"><input id="cookieVimeo" type="checkbox">Vimeo — vimeo.com</label><label class="check"><input id="cookieTwitch" type="checkbox">Twitch — twitch.tv</label></div>
+    <label for="cookieDomains" data-i18n="cookieDomainInput"></label><input id="cookieDomains" type="text" placeholder="example.com" autocomplete="off" maxlength="4096">
+    <p data-i18n="cookieDomainHint"></p>
+    <label class="check"><input id="cookieBefore" type="checkbox" checked><span data-i18n="cookieBefore"></span></label>
+    <label class="check"><input id="cookieChanged" type="checkbox" checked><span data-i18n="cookieChanged"></span></label>
+    <label class="check"><input id="cookieStartup" type="checkbox" checked><span data-i18n="cookieStartup"></span></label>
+    <label for="cookiePeriod" data-i18n="cookiePeriod"></label><input id="cookiePeriod" type="number" min="0" max="1440" value="0">
+    <p data-i18n="cookieConsent"></p><label class="check"><input id="cookieConsent" type="checkbox"><span data-i18n="cookieConsentCheck"></span></label>
+    <div class="actions"><button id="cookieConnect" type="button" data-i18n="cookieConnect"></button><button id="cookieInspect" type="button" data-i18n="cookieInspect"></button></div>
+    <div id="cookieSelection"></div><div id="cookieProfiles"></div><p id="cookieStatus" role="status" aria-live="polite"></p>
+  </section>
+  <section><h2 data-i18n="about"></h2><p data-i18n="platformNotice"></p><p data-i18n="aboutTransport"></p><p id="version"></p>
+    <button type="button" id="reset" data-i18n="restoreDefaults"></button>
+  </section>
+  <p id="status" role="status" aria-live="polite"></p>
+  <dialog id="resetDialog" aria-labelledby="resetTitle"><h2 id="resetTitle" data-i18n="restoreDefaults"></h2><p data-i18n="resetConfirmation"></p>
+    <div class="actions"><button type="button" id="resetCancel" data-i18n="cancel"></button><button type="button" id="resetConfirm" data-i18n="restoreDefaults"></button></div>
+  </dialog>
+</main>
+<script src="context.js"></script><script src="shared.js"></script><script src="i18n.js"></script><script src="cookies.js"></script><script src="cookies-options.js"></script><script src="options.js"></script>
+</body></html>

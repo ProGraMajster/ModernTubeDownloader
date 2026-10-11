@@ -50,7 +50,7 @@ public sealed class ExternalLinkTests
     [InlineData("https://www.youtube.com/live/abc/extra")]
     [InlineData("https://user:pass@www.youtube.com/watch?v=abc")]
     public void SourceValidationRejectsUnsafeOrUnsupportedUrls(string url) =>
-        Assert.False(ExternalMediaRequest.TryValidateSource(url, out _));
+        Assert.False(ExternalMediaRequest.TryValidateYouTubeSource(url, out _));
 
     [Theory]
     [InlineData("moderntubedownloader://open")]
@@ -226,6 +226,30 @@ public sealed class ExternalLinkUiTests
 #pragma warning restore xUnit1031
                 host.ProcessPendingWork();
                 Assert.Equal(11, services.Queue.Snapshot().Count(item => item.PlaylistId == "synthetic-playlist"));
+
+#pragma warning disable xUnit1031 // Native-independent TestHost operations must remain on the creating thread.
+                var generic = new ExternalMediaRequest("https://vimeo.com/watch?id=generic-v2", true, true, "2160",
+                    RequestedContainer: PreferredVideoContainer.Mkv, Intent: ExternalMediaIntent.QuickQueue);
+                view.AcceptExternalRequestAsync(generic).GetAwaiter().GetResult();
+                host.ProcessPendingWork();
+                var genericItem = Assert.Single(services.Queue.Snapshot(), item => item.VideoId == "generic-v2");
+                Assert.Equal("best", genericItem.QualityPresetId);
+                Assert.Equal(PreferredVideoContainer.Auto, genericItem.PreferredVideoContainer);
+                var queueCount = services.Queue.Snapshot().Count;
+                view.AcceptExternalRequestAsync(generic with { SourceUrl = "https://example.test/playlist/generic-list" }).GetAwaiter().GetResult();
+                host.ProcessPendingWork();
+                Assert.Equal(queueCount, services.Queue.Snapshot().Count);
+                Assert.Equal("Integration playlist", Find<Label>(view, "PlaylistTitle").Text);
+                LiveNavigationRequest? liveRequest = null;
+                view.LiveRequested += (_, args) => liveRequest = args;
+                view.AcceptExternalRequestAsync(generic with { SourceUrl = "https://example.test/live/active" }).GetAwaiter().GetResult();
+                Assert.NotNull(liveRequest);
+                Assert.Equal(MediaAvailabilityKind.ActiveLive, liveRequest.Kind);
+                Assert.Empty(services.Live.Snapshot()); // Metadata opens confirmation; it never starts a session.
+                Assert.Equal(queueCount, services.Queue.Snapshot().Count);
+                view.AcceptExternalRequestAsync(generic with { SourceUrl = "https://example.test/source/private" }).GetAwaiter().GetResult();
+                Assert.Equal(queueCount, services.Queue.Snapshot().Count);
+#pragma warning restore xUnit1031
             }
             await services.ShutdownAsync();
         }

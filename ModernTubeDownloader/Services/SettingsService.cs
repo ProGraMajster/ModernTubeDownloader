@@ -1,5 +1,6 @@
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Settings;
+using ModernTubeDownloader.Authentication;
 
 namespace ModernTubeDownloader.Services;
 
@@ -45,7 +46,12 @@ public sealed class SettingsService(AppPaths paths, IAppLogger logger)
 
     private static void Normalize(AppSettings settings)
     {
+        settings.Notifications ??= new();
+        if (!Enum.IsDefined(settings.Notifications.Sound)) settings.Notifications.Sound = NotificationSound.Default;
+        if (!Enum.IsDefined(settings.Notifications.Presentation)) settings.Notifications.Presentation = NotificationPresentation.Normal;
         var defaults = new AppSettings();
+        if (settings.CookieSource is { } source && !Enum.IsDefined(source)) settings.CookieSource = AuthenticationSource.None;
+        if (settings.CookieSource is not null) settings.UseCookieFile = settings.CookieSource == AuthenticationSource.ManualFile;
         if (!Enum.IsDefined(settings.ThemeMode))
             settings.ThemeMode = AppThemeMode.System;
         if (!Enum.IsDefined(settings.ConflictBehavior))

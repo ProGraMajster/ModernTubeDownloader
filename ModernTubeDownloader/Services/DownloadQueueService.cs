@@ -27,6 +27,11 @@ public sealed class DownloadQueueService(
             return items.ToArray();
     }
 
+    public IReadOnlyList<DownloadNotificationState> NotificationSnapshot()
+    {
+        lock (sync) return items.Select(DownloadNotificationState.From).ToArray();
+    }
+
     public DownloadQueueItem? Find(Guid id)
     {
         lock (sync)

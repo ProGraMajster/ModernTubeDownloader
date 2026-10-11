@@ -1,4 +1,6 @@
 param(
+    [string]$ApplicationPath,
+    [switch]$PublishStartupSmoke,
     [string]$SampleUrl = 'https://example.test/watch/sample123',
     [switch]$PlaylistSmoke,
     [switch]$PreviewOnly,
@@ -10,6 +12,11 @@ param(
     [switch]$RangeSmoke,
     [switch]$QueueScrollRepro,
     [switch]$SettingsScrollRepro,
+    [switch]$CookieSettingsSmoke,
+    [switch]$NotificationsSmoke,
+    [ValidateRange(0, 300)][int]$NotificationManualHoldSeconds = 0,
+    [switch]$WebRemotePairingSmoke,
+    [ValidateRange(0, 900)][int]$RemoteManualHoldSeconds = 0,
     [switch]$ExternalProtocolSmoke,
     [switch]$CrashStress,
     [switch]$LiveSmoke,
@@ -35,6 +42,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if (Get-Process -Name ModernTubeDownloader -ErrorAction SilentlyContinue) {
+    throw 'Close the existing MTD instance (including other QA sessions) before starting an isolated smoke. No process was stopped.'
+}
 if ($RealLiveSmoke) {
     $LiveSmoke = $true
     foreach ($requiredTool in @($YtDlpPath, $FfmpegPath, $FfprobePath, $DenoPath)) {
@@ -56,7 +66,10 @@ if ($PlaylistSmoke -and $SampleUrl -eq 'https://example.test/watch/sample123') {
     $SampleUrl = 'https://example.test/playlist/synthetic'
 }
 $repo = Split-Path -Parent $PSScriptRoot
-$app = Join-Path $repo 'ModernTubeDownloader/bin/Debug/net10.0-windows/ModernTubeDownloader.exe'
+[xml] $buildProperties = Get-Content -LiteralPath (Join-Path $repo 'Directory.Build.props') -Raw
+$appFramework = $buildProperties.SelectSingleNode('/Project/PropertyGroup/ModernTubeDownloaderTargetFramework').InnerText.Trim()
+$app = Join-Path $repo "ModernTubeDownloader/bin/Debug/$appFramework/ModernTubeDownloader.exe"
+if ($ApplicationPath) { $app = [IO.Path]::GetFullPath($ApplicationPath) }
 $cli = Join-Path $ModernFormsNextRoot 'ModernFormsNext.Automation.Cli/bin/Debug/net10.0-windows/ModernFormsNext.Automation.Cli.dll'
 if (-not [System.IO.Path]::IsPathRooted($cli)) { $cli = Join-Path $repo $cli }
 $fake = Join-Path $repo 'ModernTubeDownloader.FakeTool/bin/Debug/net10.0'
@@ -323,6 +336,16 @@ $settings = @{
     UseCustomFfmpeg = $true; CustomFfmpegPath = (Join-Path $toolRoot 'ffmpeg.exe')
     UseCustomDeno = $true; CustomDenoPath = (Join-Path $toolRoot 'deno.exe')
 }
+if ($WebRemotePairingSmoke) {
+    $portProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $portProbe.Start()
+    $remotePort = $portProbe.LocalEndpoint.Port
+    $portProbe.Stop()
+    $settings.EnableWebRemote = $false
+    $settings.WebRemoteRequireAuthentication = $true
+    $settings.WebRemoteBindAddress = '127.0.0.1'
+    $settings.WebRemotePort = $remotePort
+}
 if ($RealLiveSmoke -or $RealSourcesSmoke) {
     $settings.CustomYtDlpPath = $YtDlpPath
     $settings.CustomFfmpegPath = $FfmpegPath
@@ -368,6 +391,18 @@ try {
     if (-not $normalProcess.WaitForInputIdle(30000) -or $normalProcess.HasExited) { throw 'Normal startup did not reach the UI loop.' }
     Wait-MainWindow $normalProcess
     Wait-Bridge $normalProcess.Id $false
+    if ($PublishStartupSmoke) {
+        $readyWatch = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            $startupLog = (Get-ChildItem -LiteralPath (Join-Path $dataRoot 'logs') -File | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
+            $validatedTools = @(@('yt-dlp', 'ffmpeg', 'ffprobe', 'deno') | Where-Object { $startupLog -match "Process ended: $([regex]::Escape($_)).exe, exit=0" })
+            $normalProcess.Refresh()
+            if ($normalProcess.HasExited) { throw 'Published application exited during startup.' }
+            if ($validatedTools.Count -eq 4) { break }
+            Start-Sleep -Milliseconds 100
+        } while ($readyWatch.Elapsed.TotalSeconds -lt 30)
+        if ($validatedTools.Count -ne 4) { throw 'Published app did not validate custom QA tools.' }
+    }
     if ($CrashStress) {
         Start-Sleep -Milliseconds 1200
         $normalProcess.Refresh()
@@ -375,6 +410,7 @@ try {
     }
     if (-not $normalProcess.CloseMainWindow() -or -not $normalProcess.WaitForExit(30000)) { throw 'Normal startup did not close cleanly.' }
     Write-Output 'Normal startup: no Automation bridge; clean shutdown.'
+    if ($PublishStartupSmoke) { Write-Output "Published startup smoke PASS (isolated profile=$dataRoot; custom QA tools, not real provisioning/download)."; return }
 
     $script:automationProcess = Start-Process -FilePath $app -ArgumentList '--automation' -PassThru -WindowStyle Hidden
     Wait-Bridge $script:automationProcess.Id $true
@@ -602,6 +638,91 @@ try {
         Write-Output "Recording sequence diagnostic complete (profile: $dataRoot)"
         return
     }
+    if ($WebRemotePairingSmoke) {
+        Invoke-NodeAction (Find-Node 'NavSettings' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        Invoke-NodeAction (Find-Node 'WebRemoteEnable' $mainRoot) $mainRoot 'Toggle' | Out-Null
+        Invoke-NodeAction (Find-Node 'SettingsSaveButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        $remoteAddress = "http://127.0.0.1:$remotePort/"
+        $remoteReady = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            try { $bootstrap = Invoke-RestMethod -Uri ($remoteAddress + 'api/auth-mode') -TimeoutSec 2 }
+            catch { $bootstrap = $null; Start-Sleep -Milliseconds 100 }
+        } while (-not $bootstrap -and $remoteReady.Elapsed.TotalSeconds -lt 30)
+        if (-not $bootstrap.authenticationRequired -or $bootstrap.desktopLanguage -ne $Language) { throw 'Saved Settings did not enable authenticated remote with the desktop language.' }
+        foreach ($endpoint in @('api/status','api/queue','api/live')) {
+            $response = Invoke-WebRequest -Uri ($remoteAddress + $endpoint) -SkipHttpErrorCheck
+            if ($response.StatusCode -ne 401) { throw "Unauthenticated endpoint did not return 401: $endpoint" }
+        }
+        $pairingNode = Find-Node 'WebRemotePairingCode' $mainRoot
+        $pairingState = Invoke-AutomationCli -CliArguments @('inspect','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,
+            '--session',$pairingNode.handle.sessionId,'--node',$pairingNode.handle.runtimeId)
+        if ($pairingState.value.value -notmatch '^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$') { throw 'Fresh Settings code is unavailable.' }
+        Invoke-NodeAction $pairingNode $mainRoot 'ScrollIntoView' | Out-Null
+        Write-Output "Remote Settings enable/save: PASS; anonymous status/queue/live=401; code available (not logged). PID=$($script:automationProcess.Id) root=$mainRoot address=$remoteAddress profile=$dataRoot"
+        if ($RemoteManualHoldSeconds -gt 0) {
+            $manualHold = [Diagnostics.Stopwatch]::StartNew()
+            while ($manualHold.Elapsed.TotalSeconds -lt $RemoteManualHoldSeconds -and -not $script:automationProcess.HasExited) {
+                Start-Sleep -Milliseconds 250
+            }
+        }
+        if (-not $script:automationProcess.CloseMainWindow() -or -not $script:automationProcess.WaitForExit(30000)) { throw 'Pairing QA did not close cleanly.' }
+        return
+    }
+    if ($NotificationsSmoke) {
+        Invoke-NodeAction (Find-Node 'NavSettings' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        $section = Find-Node 'NotificationsSection' $mainRoot
+        Invoke-NodeAction $section $mainRoot 'ScrollIntoView' | Out-Null
+        $test = Find-Node 'NotificationsTest' $mainRoot
+        Invoke-NodeAction $test $mainRoot 'Invoke' | Out-Null
+        Invoke-NodeAction (Find-Node 'NotificationDiagnostics' $mainRoot) $mainRoot 'Toggle' | Out-Null
+        $tree = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot, '--depth', '9')
+        $tree | ConvertTo-Json -Depth 25 | Set-Content -LiteralPath (Join-Path $dataRoot 'notifications-tree.json') -Encoding utf8
+        if ($CaptureVisual) {
+            Add-Type -AssemblyName System.Drawing
+            $bounds = ($tree.nodes | Where-Object { $_.node.automationId -eq 'MainWindow' }).node.bounds
+            $picture = [Drawing.Bitmap]::new([int]$bounds.width, [int]$bounds.height)
+            $drawing = [Drawing.Graphics]::FromImage($picture)
+            try {
+                Capture-OwnedBitmap $drawing
+                $picture.Save((Join-Path $dataRoot 'notifications-settings.png'))
+            } finally { $drawing.Dispose(); $picture.Dispose() }
+        }
+        Write-Output "Notifications native UI smoke: test invoked ($Language/$Theme), profile=$dataRoot PID=$($script:automationProcess.Id). OS visibility/click require separate human verification."
+        if ($NotificationManualHoldSeconds -gt 0) { Start-Sleep -Seconds $NotificationManualHoldSeconds }
+        if (-not $script:automationProcess.CloseMainWindow() -or -not $script:automationProcess.WaitForExit(30000)) { throw 'Notification QA did not close cleanly.' }
+        return
+    }
+    if ($CookieSettingsSmoke) {
+        Invoke-NodeAction (Find-Node 'NavSettings' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        $source=Find-Node 'AuthenticationSource' $mainRoot
+        Invoke-NodeAction $source $mainRoot 'ScrollIntoView' | Out-Null
+        $detail=Invoke-AutomationCli -CliArguments @('inspect','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,
+            '--session',$source.handle.sessionId,'--node',$source.handle.runtimeId)
+        $choices=@($detail.value.childRuntimeIds | ForEach-Object {
+            (Invoke-AutomationCli -CliArguments @('inspect','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,
+                '--session',$source.handle.sessionId,'--node',$_)).value
+        })
+        if($choices.Count -ne 3){throw 'Expected exactly three exclusive authentication sources.'}
+        Invoke-NodeAction $choices[1] $mainRoot 'Select' | Out-Null
+        Invoke-NodeAction (Find-Node 'CookieSyncRefresh' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        foreach($id in @('CookieProfilesStatus','CookieBridgeBrowser','CookieBridgeExtensionId','CookieBridgeConsent')){[void](Find-Node $id $mainRoot)}
+        if($CaptureVisual){
+            Invoke-NodeAction (Find-Node 'CookieSyncSection' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
+            Add-Type -AssemblyName System.Drawing
+            $bounds=@($tree.nodes | Where-Object {$_.node.automationId -eq 'MainWindow'})[0].node.bounds
+            if(-not $bounds){$bounds=$tree.nodes[0].node.bounds}
+            $picture=[Drawing.Bitmap]::new([int]$bounds.width,[int]$bounds.height);$drawing=[Drawing.Graphics]::FromImage($picture)
+            try{Capture-OwnedBitmap $drawing;$path=Join-Path $dataRoot 'cookie-settings.png';$picture.Save($path);Write-Output "Cookie settings capture: $path"}
+            finally{$drawing.Dispose();$picture.Dispose()}
+        }
+        Invoke-NodeAction $choices[0] $mainRoot 'Select' | Out-Null
+        Invoke-NodeAction (Find-Node 'SettingsSaveButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        if(-not $script:automationProcess.CloseMainWindow() -or -not $script:automationProcess.WaitForExit(30000)){throw 'Cookie settings smoke did not close cleanly.'}
+        $saved=Get-Content -LiteralPath (Join-Path $dataRoot 'settings.json') -Raw | ConvertFrom-Json
+        if($saved.cookieSource -ne 0 -or $saved.useCookieFile){throw 'Authentication source exclusivity did not persist.'}
+        Write-Output "Cookie settings native smoke PASS ($Language/$Theme): three sources, status, controls, save; no registration or real cookies."
+        return
+    }
     if ($SettingsScrollRepro) {
         Invoke-NodeAction (Find-Node 'NavSettings' $mainRoot) $mainRoot 'Invoke' | Out-Null
         $settingsNode = Find-Node 'SettingsScroll' $mainRoot
@@ -616,7 +737,7 @@ try {
                 $axis = $panel.value.scrollInfo.vertical
                 $firstY = if ($cards.Count) { $cards[0].bounds.y } else { 'none' }
                 $lastY = if ($cards.Count) { $cards[-1].bounds.y } else { 'none' }
-                $aligned = $cards.Count -eq 13 -and [Math]::Abs($firstY - ($panel.value.bounds.y - $axis.offset)) -le 1
+                $aligned = $cards.Count -eq 14 -and [Math]::Abs($firstY - ($panel.value.bounds.y - $axis.offset)) -le 1
                 if ($aligned) { break }
                 Start-Sleep -Milliseconds 60
             }
@@ -656,7 +777,8 @@ try {
             $after = Get-SettingsScrollState "pass-$pass-after-toggle"
             if ($pass -eq 1) { Save-SettingsVisual 'after' $after }
             if (-not $after.aligned -or $after.visible -eq 0 -or
-                [Math]::Abs($after.panel.scrollInfo.vertical.maximum - $before.panel.scrollInfo.vertical.maximum) -ne 44 -or
+                # The pairing block now contains code plus multiline state row (100px), rather than the old 44px token row.
+                [Math]::Abs($after.panel.scrollInfo.vertical.maximum - $before.panel.scrollInfo.vertical.maximum) -ne 100 -or
                 $after.panel.scrollInfo.vertical.maximum -gt $initial.panel.scrollInfo.vertical.maximum + 150) {
                 Write-Output "SETTINGS LAYOUT FAILURE pass=$pass profile=$dataRoot"
                 $failure = $true

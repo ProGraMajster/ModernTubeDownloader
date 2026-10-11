@@ -26,6 +26,8 @@ const syntheticFixtures = new Map([
   ['ModernTubeDownloader.Tests/DownloadEnhancementTests.cs:personal-path', ['C:\\Users\\Someone\\']],
   ['ModernTubeDownloader.Tests/ExternalLinkTests.cs:credential-url', ['https://user:pass@']],
   ['ModernTubeDownloader.Tests/SupportedSourcesTests.cs:credential-url', ['https://user:password@']],
+  ['ModernTubeDownloader.Tests/ExternalMediaPolicyTests.cs:credential-url', ['https://user:password@']],
+  ['browser-extension/tests/extension.test.cjs:credential-url', ['https://user:secret@']],
   ['ModernTubeDownloader.Tests/WebRemoteIntegrationTests.cs:private-lan-url', ['http://192.168.1.50']]
 ]);
 let reviewedFixtureCount = 0;

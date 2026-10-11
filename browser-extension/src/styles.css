@@ -202,6 +202,16 @@ html[dark] #mtd-modal-backdrop .mtd-modal-quality option {
 #mtd-modal-backdrop .mtd-modal-cancel:hover { background: var(--yt-spec-20-percent-layer, rgba(0, 0, 0, .17)); }
 #mtd-modal-backdrop :is(button, select, a):focus-visible { outline: 2px solid var(--yt-spec-call-to-action, #3ea6ff); outline-offset: 3px; }
 .mtd-popup { color-scheme: dark; width: 300px; margin: 0; padding: 16px; color: #eaf2ff; background: #101a2d; font: 14px Arial, sans-serif; }
+.mtd-popup [hidden] { display: none !important; }
+.mtd-popup header strong { font-size: 12px; flex: 1; }
+.mtd-popup .language-control { position: relative; flex: 0 0 auto; }
+.mtd-popup .language-control button, .mtd-popup .settings-link { color: inherit; background: transparent; border: 1px solid #5275a9; border-radius: 7px; padding: 6px; cursor: pointer; font: inherit; font-size: 12px; }
+.mtd-popup .language-menu { position: absolute; z-index: 2; right: 0; top: 34px; width: 216px; padding: 6px; background: #17243a; border: 1px solid #5275a9; border-radius: 9px; box-shadow: 0 8px 24px #0006; }
+.mtd-popup .language-menu button { display: block; width: 100%; text-align: left; margin: 2px 0; border-color: transparent; }
+.mtd-popup .language-menu button[aria-pressed="true"] { background: #265083; }
+.mtd-popup .settings-link { margin-top: 14px; }
+.mtd-popup button:hover { background: #265083; }
+.mtd-popup :is(button,select,summary):focus-visible { outline: 2px solid #7ab8ff; outline-offset: 2px; }
 .mtd-popup header { display: flex; align-items: center; gap: 10px; }
 .mtd-popup header img { width: 32px; height: 32px; object-fit: contain; }
 .mtd-popup .page { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b7c7df; }
@@ -215,3 +225,4 @@ html[dark] #mtd-modal-backdrop .mtd-modal-quality option {
 .mtd-popup :is(#quality, #launch, #open):focus-visible { outline: 2px solid #7ab8ff; outline-offset: 2px; }
 .mtd-popup .option { display: flex; gap: 7px; align-items: center; margin-top: 13px; font-size: 12px; }
 .mtd-popup #status { margin-bottom: 0; min-height: 16px; font-size: 12px; color: #9dc4ff; }
+.mtd-popup .preference{display:flex;align-items:center;gap:8px;margin:12px 0}.mtd-popup .preference input{width:18px;height:18px;flex:0 0 18px}.mtd-popup .extension-settings{margin-top:12px}.mtd-popup .extension-settings summary{cursor:pointer}.mtd-popup #defaultAction{width:100%;max-width:100%}

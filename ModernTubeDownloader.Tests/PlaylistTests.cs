@@ -39,8 +39,8 @@ public sealed class PlaylistTests
         Assert.DoesNotContain("--no-playlist", arguments);
         Assert.Equal("--", arguments[^2]);
         Assert.Equal(PlaylistUrl, arguments[^1]);
-        Assert.Throws<ArgumentException>(() => CommandLineArgumentTokenizer.ParseSafeYtDlpArguments("--no-playlist"));
-        Assert.Throws<ArgumentException>(() => CommandLineArgumentTokenizer.ParseSafeYtDlpArguments("--flat-playlist"));
+        Assert.Throws<CustomArgumentException>(() => CommandLineArgumentTokenizer.ParseSafeYtDlpArguments("--no-playlist"));
+        Assert.Throws<CustomArgumentException>(() => CommandLineArgumentTokenizer.ParseSafeYtDlpArguments("--flat-playlist"));
     }
 
     [Fact]
