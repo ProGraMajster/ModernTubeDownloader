@@ -34,6 +34,7 @@
   </ItemGroup>
   <ItemGroup>
     <AssemblyMetadata Include="ModernFormsNextCommit" Value="$(ModernFormsNextCommit)" />
+    <AssemblyMetadata Include="ModernFormsNextLocalPatchSha256" Value="$(ModernFormsNextLocalPatchSha256)" Condition="'$(ModernFormsNextLocalPatchSha256)' != ''" />
     <PackageReference Include="QRCoder" Version="1.8.0" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <EmbeddedResource Include="Assets\AppIcon.png" LogicalName="ModernTubeDownloader.Assets.AppIcon.png" />

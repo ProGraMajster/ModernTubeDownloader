@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.1-candidate.1 — local, unreleased
+
+- Pause VOD admission and new media phases after confirmed disk exhaustion; retain partials
+  even when ordinary failed-download cleanup is enabled.
+- Latch failed queue persistence, retain unsaved runtime state, and require a writable probe
+  and current checkpoint before explicit Resume. Known-size preflight includes a reserve.
+- Integrate the pinned MFN notification fix (PR #271): cached native-provider failure/fallback and bounded,
+  callback-safe Shell identity leases. Log backend/reasons and coalesce repeated warnings.
+- Accept bounded streaming JSON arrays, single `url` objects and `urls`/`items` envelopes;
+  retain parser limits and show localized errors plus supported-format examples.
+- Correlate job attempt/process-role diagnostics. Classify unavailable playlists and exhausted
+  incomplete reads without adding retries or changing consent-bound authentication refresh.
+- Minimum Windows metadata, LIVE scheduling, updater/security policies and public 1.2.0 stay unchanged.
+
 ## 1.2.0 — 2026-10-11
 
 ### Added

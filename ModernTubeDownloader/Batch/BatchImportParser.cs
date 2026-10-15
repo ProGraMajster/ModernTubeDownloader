@@ -62,7 +62,7 @@ public static class BatchImportParser
     }
     private static async IAsyncEnumerable<BatchRawEntry> Json(Stream stream, [EnumeratorCancellation] CancellationToken token)
     {
-        await foreach (var value in JsonSerializer.DeserializeAsyncEnumerable<JsonElement>(stream, new JsonSerializerOptions { MaxDepth = 8 }, token))
+        await foreach (var value in BatchJsonReader.ReadAsync(stream, token))
         {
             if (value.ValueKind == JsonValueKind.String) { yield return new(value.GetString()!); continue; }
             if (value.ValueKind != JsonValueKind.Object) { yield return new("", ErrorKey: "Batch.Error.Schema"); continue; }
@@ -140,7 +140,7 @@ public static class BatchImportParser
 /// <summary>Bounds individual textual records / JSON tokens before serializers can grow an unbounded buffer.</summary>
 internal sealed class BatchInputStream(Stream inner, bool json, bool csv = false) : Stream
 {
-    private long bytes; private int line, stringBytes, objectBytes, depth; private bool quoted, escaped;
+    private long bytes; private int line, stringBytes, objectBytes; private bool quoted, escaped;
     private void Check(ReadOnlySpan<byte> data)
     {
         bytes += data.Length;
@@ -152,7 +152,8 @@ internal sealed class BatchInputStream(Stream inner, bool json, bool csv = false
                 if (csv) { if (value == 34) quoted = !quoted; objectBytes = value == 10 && !quoted ? 0 : objectBytes + 1; if (objectBytes > 65536) throw new InvalidDataException("Batch.Error.RecordSize"); }
                 continue;
             }
-            if (depth > 0 && ++objectBytes > 65536) throw new InvalidDataException("Batch.Error.RecordSize");
+            // JSON row/object size is enforced by BatchJsonReader's fixed buffer.
+            // A root urls/items envelope may contain many rows and is not one row.
             if (quoted)
             {
                 if (++stringBytes > 16384) throw new InvalidDataException("Batch.Error.RecordSize");
@@ -160,8 +161,6 @@ internal sealed class BatchInputStream(Stream inner, bool json, bool csv = false
                 if (value == 92) escaped = true; else if (value == 34) quoted = false;
             }
             else if (value == 34) { quoted = true; stringBytes = 0; }
-            else if (value == 123) { if (depth++ == 0) objectBytes = 1; }
-            else if (value == 125) depth--;
         }
     }
     public override int Read(byte[] buffer, int offset, int count) { var read = inner.Read(buffer, offset, count); Check(buffer.AsSpan(offset, read)); return read; }

@@ -5,20 +5,47 @@ namespace ModernTubeDownloader.Services;
 
 public sealed record QueueBatchAddResult(int Added, int DuplicatesSkipped);
 
-public sealed class DownloadQueueService(
-    QueuePersistenceService persistence,
-    IAppLogger logger,
-    SettingsService? settings = null)
+public sealed class DownloadQueueService
 {
+    private readonly IQueuePersistence persistence;
+    private readonly IAppLogger logger;
+    private readonly SettingsService? settings;
     private readonly object sync = new();
     private readonly List<DownloadQueueItem> items = [];
-    private bool isPaused = settings?.Current.QueuePaused ?? false;
+    private bool isPaused;
+    private readonly SemaphoreSlim checkpointGate = new(1, 1);
+    private readonly SemaphoreSlim recoveryGate = new(1, 1);
+    private long revision, savedRevision;
+    public QueueStorageSafety Storage { get; }
+    public bool HasUnsavedChanges { get { lock (sync) return revision != savedRevision; } }
+
+    public DownloadQueueService(IQueuePersistence persistence, IAppLogger logger, SettingsService? settings = null,
+        QueueStorageSafety? storage = null)
+    {
+        this.persistence = persistence; this.logger = logger; this.settings = settings;
+        isPaused = settings?.Current.QueuePaused ?? false;
+        Storage = storage ?? new();
+        Storage.Changed += (_, _) =>
+        {
+            bool savePause = false;
+            lock (sync)
+            {
+                if (Storage.State.IsBlocked && !isPaused) { isPaused = true; savePause = settings is not null; }
+            }
+            if (savePause)
+            {
+                settings!.Current.QueuePaused = true;
+                _ = SavePauseSafelyAsync();
+            }
+            Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Pause));
+        };
+    }
 
     public event EventHandler<QueueChangedEventArgs>? Changed;
 
     public bool IsPaused
     {
-        get { lock (sync) return isPaused; }
+        get { lock (sync) return isPaused || Storage.State.IsBlocked; }
     }
 
     public IReadOnlyList<DownloadQueueItem> Snapshot()
@@ -97,8 +124,7 @@ public sealed class DownloadQueueService(
         EnsureVod(item);
         DownloadOptionCompatibilityValidator.EnsureSupported(item.RequestedRange, item.SubtitleOptions,
             item.SponsorBlockOptions, item.PreferredVideoContainer);
-        lock (sync)
-            items.Add(item);
+        lock (sync) { items.Add(item); revision++; }
         logger.Info($"Queue item added: {item.Id}, media={item.VideoId}.");
         Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Collection, item.Id));
         _ = SaveSafelyAsync();
@@ -130,6 +156,7 @@ public sealed class DownloadQueueService(
                     Range: item.RequestedRange ?? MediaTimeRange.Full, Enhancements: EnhancementKey(item.SubtitleOptions, item.SponsorBlockOptions));
                 if (!activeKeys.Add(key)) { duplicates++; continue; }
                 items.Add(item);
+                revision++;
                 added++;
                 lastAdded = item.Id;
             }
@@ -151,6 +178,7 @@ public sealed class DownloadQueueService(
             var item = items.FirstOrDefault(candidate => candidate.Id == id);
             removed = item is not null &&
                 !IsActive(item.Status) && items.Remove(item);
+            if (removed) revision++;
         }
         if (removed)
         {
@@ -163,8 +191,7 @@ public sealed class DownloadQueueService(
     public int RemoveAllPending()
     {
         int count;
-        lock (sync)
-            count = items.RemoveAll(item => item.Status is DownloadStatus.Queued or DownloadStatus.Waiting);
+        lock (sync) { count = items.RemoveAll(item => item.Status is DownloadStatus.Queued or DownloadStatus.Waiting); if (count > 0) revision++; }
         if (count > 0)
         {
             Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Collection));
@@ -186,6 +213,7 @@ public sealed class DownloadQueueService(
             var item = items[index];
             items.RemoveAt(index);
             items.Insert(targetIndex, item);
+            revision++;
         }
 
         Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Order, id));
@@ -229,6 +257,7 @@ public sealed class DownloadQueueService(
             item.StartedAt = null;
             item.CompletedAt = null;
             item.HasPostProcessingWarnings = false;
+            revision++;
         }
 
         Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Item, id));
@@ -239,6 +268,7 @@ public sealed class DownloadQueueService(
 
     public void SetPaused(bool paused)
     {
+        if (!paused && Storage.State.IsBlocked) { _ = ResumeAsync(); return; }
         lock (sync)
         {
             if (isPaused == paused)
@@ -259,7 +289,7 @@ public sealed class DownloadQueueService(
         DownloadQueueItem? item;
         lock (sync)
         {
-            if (isPaused)
+            if (isPaused || Storage.State.IsBlocked)
                 return null;
             item = items.FirstOrDefault(candidate => candidate.Status == DownloadStatus.Queued);
             if (item is not null)
@@ -268,6 +298,7 @@ public sealed class DownloadQueueService(
                 item.StatusMessage = "Preparing download";
                 item.StatusMessageKey = "Queue.Detail.Preparing";
                 item.StartedAt = DateTimeOffset.Now;
+                revision++;
             }
         }
         if (item is not null)
@@ -282,24 +313,123 @@ public sealed class DownloadQueueService(
             var item = items.FirstOrDefault(candidate => candidate.Id == id)
                 ?? throw new InvalidOperationException("The queue item no longer exists.");
             update(item);
+            if (persist) revision++;
         }
         Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Item, id));
         if (persist)
             _ = SaveSafelyAsync();
     }
 
-    public Task SaveAsync(CancellationToken cancellationToken = default) => persistence.SaveAsync(Snapshot(), cancellationToken);
+    public Task SaveAsync(CancellationToken cancellationToken = default) => SaveCheckpointAsync(true, cancellationToken);
 
-    private async Task SaveSafelyAsync()
+    private async Task SaveCheckpointAsync(bool retryDegraded, CancellationToken cancellationToken = default)
     {
-        try { await SaveAsync().ConfigureAwait(false); }
-        catch (Exception ex) { logger.Error("Could not save the download queue.", ex); }
+        await checkpointGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!retryDegraded && Storage.State.PersistenceDegraded) return;
+            try
+            {
+                DownloadQueueItem[] snapshot; long writingRevision;
+                lock (sync) { snapshot = items.Select(item => item.PersistenceCopy()).ToArray(); writingRevision = revision; }
+                await persistence.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
+                lock (sync) savedRevision = writingRevision;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception error) { ReportPersistenceFailure(error); throw; }
+        }
+        finally { checkpointGate.Release(); }
+    }
+
+    /// <summary>Explicit recovery only: probe, durable runtime checkpoint, then reopen admission.</summary>
+    public async Task<bool> ResumeAsync(CancellationToken token = default)
+    {
+        await recoveryGate.WaitAsync(token).ConfigureAwait(false);
+        var resumed = false;
+        try
+        {
+            var failureVersion = Storage.State.FailureVersion;
+            try
+            {
+                await Storage.CheckWritableAsync(token).ConfigureAwait(false);
+                // Active phase transitions may mutate the queue during a save. Never
+                // clear degraded state on a stale checkpoint; bound reconciliation.
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    await SaveAsync(token).ConfigureAwait(false);
+                    if (!HasUnsavedChanges) break;
+                }
+                if (HasUnsavedChanges) return false;
+                if (settings is not null)
+                {
+                    settings.Current.QueuePaused = false;
+                    await settings.SaveAsync(token).ConfigureAwait(false);
+                }
+                lock (sync)
+                {
+                    if (revision != savedRevision || Storage.State.FailureVersion != failureVersion) return false;
+                    if (!Storage.Recover(failureVersion)) return false;
+                    isPaused = false;
+                }
+                resumed = true;
+                logger.Info("Queue storage recovery checkpoint succeeded; admission resumed.");
+                Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Pause));
+                return true;
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return false; }
+            catch (Exception error) { ReportPersistenceFailure(error); return false; }
+        }
+        finally
+        {
+            // A new failure/transition during the checkpoint must not leave a
+            // persisted unpause which could reopen admission after restart.
+            if (!resumed && settings is not null && !settings.Current.QueuePaused)
+            {
+                settings.Current.QueuePaused = true;
+                await SavePauseSafelyAsync().ConfigureAwait(false);
+            }
+            recoveryGate.Release();
+        }
+    }
+
+    internal async Task CheckpointBeforeStartAsync(CancellationToken token)
+    {
+        Storage.ThrowIfBlocked();
+        await SaveCheckpointAsync(false, token).ConfigureAwait(false);
+        Storage.ThrowIfBlocked();
+    }
+
+    public void ReportStorageFailure(Exception error, string? directory = null)
+    {
+        if (Storage.Report(error, directory: directory))
+        {
+            logger.Warning($"Queue admission stopped: storage={Storage.State.Kind}; active processes and recovery data are retained.");
+            Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Pause));
+        }
+    }
+
+    private void ReportPersistenceFailure(Exception error)
+    {
+        if (Storage.Report(error, persistence: true))
+        {
+            logger.Error("Queue persistence degraded; new jobs are blocked until a successful explicit recovery checkpoint.", error);
+            Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Pause));
+        }
+    }
+
+    internal async Task SaveSafelyAsync()
+    {
+        // No per-progress/per-job retry storm on a known failing disk. Resume is
+        // the bounded explicit retry boundary; dirty runtime state remains owned.
+        if (Storage.State.PersistenceDegraded) return;
+        try { await SaveCheckpointAsync(false).ConfigureAwait(false); }
+        catch (Exception) { /* SaveAsync recorded and latched the actual failure. */ }
     }
 
     private async Task SavePauseSafelyAsync()
     {
         try { await settings!.SaveAsync().ConfigureAwait(false); }
-        catch (Exception ex) { logger.Error("Could not save the queue pause state.", ex); }
+        catch (Exception ex) { ReportPersistenceFailure(ex); }
     }
 
     private static bool IsActive(DownloadStatus status) => status is

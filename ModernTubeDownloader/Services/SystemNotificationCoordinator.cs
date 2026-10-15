@@ -63,6 +63,8 @@ public sealed class SystemNotificationCoordinator : IAsyncDisposable
     private readonly HashSet<Guid> reconnectingLive = [];
     private Task tail = Task.CompletedTask;
     private bool closing;
+    private readonly Dictionary<string, long> warningCounts = [];
+    private string? backendDiagnostic;
     private DownloadQueueService? queueSource;
     private LiveSessionService? liveSource;
 
@@ -73,12 +75,18 @@ public sealed class SystemNotificationCoordinator : IAsyncDisposable
         this.cachedImage = cachedImage ?? (_ => null); this.clock = clock ?? TimeProvider.System;
         service.Activated += Activated;
         text.LanguageChanged += LanguageChanged;
+        LogBackend();
     }
 
     public event EventHandler<NotificationNavigation>? Navigate;
     public SystemNotificationCapabilities Capabilities => service.Capabilities;
     public bool CenterOnlySupported => Capabilities.GetPlatform<WindowsSystemNotificationCapabilities>()?.Supports(WindowsSystemNotificationFeatures.SuppressPopup) == true;
-    public Task<SystemNotificationAccess> GetStatusAsync() => service.GetStatusAsync();
+    public async Task<SystemNotificationAccess> GetStatusAsync()
+    {
+        var status = await service.GetStatusAsync().ConfigureAwait(false);
+        LogBackend();
+        return status;
+    }
     public Task DrainAsync() { lock (sync) return tail; }
     public void UpdateReady(string version)
     { lock (sync) { if (preferences().UpdateReady) Enqueue(() => ShowAsync("update-ready", "application", Guid.Empty, "downloads", "UpdateReady", () => version)); } }
@@ -247,7 +255,7 @@ public sealed class SystemNotificationCoordinator : IAsyncDisposable
     {
         var p = preferences();
         if (!p.Enabled || !Capabilities.IsSupported) return;
-        var access = await service.GetStatusAsync().ConfigureAwait(false);
+        var access = await GetStatusAsync().ConfigureAwait(false);
         if (!preferences().Enabled || access.Availability is not (SystemNotificationAvailability.Ready or SystemNotificationAvailability.Unknown)) return;
         p = preferences();
         var intent = new NotificationNavigation(group, itemId, view);
@@ -261,9 +269,14 @@ public sealed class SystemNotificationCoordinator : IAsyncDisposable
         var images = !p.PrivacyMode && p.ShowThumbnails && !string.IsNullOrWhiteSpace(thumbnail) && supportsImage
             && cachedImage(thumbnail) is { } image ? new[] { new SystemNotificationImage(image, SystemNotificationImageRole.Thumbnail)
             { PlatformOptions = windows is null ? new() : new(new WindowsSystemNotificationImageOptions { Placement = placement }) } } : [];
-        logger.Info($"System notification image selection: group={group}, id={id}, thumbnailUrlPresent={!string.IsNullOrWhiteSpace(thumbnail)}, privacy={p.PrivacyMode}, showThumbnails={p.ShowThumbnails}, provider={Capabilities.Backend}, features={Capabilities.Features}, windows={windows?.Features}, images={images.Length}, placement={placement}.");
-        foreach (var selected in images)
-            logger.Info($"System notification image before Show: role={selected.Role}, placement={placement}, path={selected.Source}, exists={File.Exists(selected.Source)}.");
+        bool submissionDiagnostics;
+        lock (sync) submissionDiagnostics = !warningCounts.ContainsKey("ShellCapacity");
+        if (submissionDiagnostics)
+        {
+            logger.Info($"System notification image selection: group={group}, id={id}, thumbnailUrlPresent={!string.IsNullOrWhiteSpace(thumbnail)}, privacy={p.PrivacyMode}, showThumbnails={p.ShowThumbnails}, provider={Capabilities.Backend}, features={Capabilities.Features}, windows={windows?.Features}, images={images.Length}, placement={placement}.");
+            foreach (var selected in images)
+                logger.Info($"System notification image before Show: role={selected.Role}, placement={placement}, path={selected.Source}, exists={File.Exists(selected.Source)}.");
+        }
         var notification = new SystemNotification
         {
             Id = id, Group = group, Title = text["Notification." + eventKey],
@@ -285,9 +298,12 @@ public sealed class SystemNotificationCoordinator : IAsyncDisposable
             })
         };
         var result = await service.ShowAsync(notification).ConfigureAwait(false); Record(result);
-        foreach (var selected in images)
-            logger.Info($"System notification image after Show: path={selected.Source}, exists={File.Exists(selected.Source)}; cache retained for Windows.");
-        logger.Info($"System notification submitted: group={group}, id={id}, backend={Capabilities.Backend}, status={result.Status}. Acceptance does not prove a visible banner.");
+        if (submissionDiagnostics || result.IsAccepted || !(result.Warnings ?? []).Any(warning => warning.Code == "ShellCapacity"))
+        {
+            foreach (var selected in images)
+                logger.Info($"System notification image after Show: path={selected.Source}, exists={File.Exists(selected.Source)}; cache retained for Windows.");
+            logger.Info($"System notification submitted: group={group}, id={id}, backend={Capabilities.Backend}, status={result.Status}. Acceptance does not prove a visible banner.");
+        }
         if (result.IsAccepted && progress is not null && result.Key is not null)
             lock (sync)
             {
@@ -298,9 +314,32 @@ public sealed class SystemNotificationCoordinator : IAsyncDisposable
     }
     private void Record(SystemNotificationResult result)
     {
-        if (!result.IsAccepted) logger.Warning($"System notification status={result.Status} code={result.ErrorCode}; download state is unchanged.");
+        LogBackend();
+        if (!result.IsAccepted && !(result.Warnings ?? []).Any(warning => warning.Code == "ShellCapacity"))
+            RecordWarning($"status:{result.Status}:{result.ErrorCode}", $"System notification status={result.Status} code={result.ErrorCode}; download state is unchanged.");
         foreach (var warning in result.Warnings ?? [])
-            logger.Warning($"System notification degraded feature: code={warning.Code}, message={warning.Message}; status={result.Status}.");
+            RecordWarning(warning.Code, $"System notification degraded feature: code={warning.Code}, message={warning.Message}; status={result.Status}. Repetitions are counted, not logged per job.");
+    }
+    private void LogBackend()
+    {
+        var capabilities = service.Capabilities;
+        var diagnostic = $"Notification backend selected={capabilities.Backend}; fallback reason={capabilities.Reason ?? "none"}; capabilities={capabilities.Features}.";
+        lock (sync)
+        {
+            if (backendDiagnostic == diagnostic) return;
+            backendDiagnostic = diagnostic;
+            logger.Info(diagnostic);
+        }
+    }
+    private void RecordWarning(string key, string message)
+    {
+        lock (sync)
+        {
+            if (warningCounts.TryGetValue(key, out var count)) { warningCounts[key] = count + 1; return; }
+            if (warningCounts.Count >= 31) key = "other";
+            warningCounts[key] = warningCounts.GetValueOrDefault(key) + 1;
+            if (warningCounts[key] == 1) logger.Warning(message);
+        }
     }
     private void Enqueue(Func<Task> operation)
     {
@@ -356,6 +395,8 @@ public sealed class SystemNotificationCoordinator : IAsyncDisposable
         if (liveSource is not null) liveSource.Changed -= LiveChanged;
         text.LanguageChanged -= LanguageChanged; service.Activated -= Activated;
         await pending.ConfigureAwait(false);
+        foreach (var (key, count) in warningCounts)
+            if (count > 1) logger.Warning($"Notification warning summary: code={key}; total={count}; suppressed={count - 1}.");
         try { await service.DisposeAsync().ConfigureAwait(false); }
         catch (Exception error) { logger.Error("Optional system notification shutdown failed.", error); }
     }

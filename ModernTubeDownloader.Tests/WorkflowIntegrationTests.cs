@@ -9,6 +9,96 @@ public sealed class WorkflowIntegrationTests(ITestOutputHelper output) : IAsyncL
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "ModernTubeDownloader.Tests", Guid.NewGuid().ToString("N"));
 
+    [Fact]
+    public async Task LiveDiskFullPreservesRawFragmentsAndStopsVodAdmissionEvenWithPreservationOff()
+    {
+        var paths = AppPaths.Create(Path.Combine(root, "live-diskfull"));
+        await SaveCustomToolSettingsAsync(paths);
+        using var services = AppServices.Create(paths);
+        services.Settings.Current.TemporaryDirectory = Path.Combine(paths.RootDirectory, "temp");
+        services.Settings.Current.FinalOutputDirectory = Path.Combine(paths.RootDirectory, "output");
+        services.Settings.Current.PreservePartialLiveOnFailure = false;
+        services.Settings.Current.ResumeLiveOnFailure = false;
+        services.Settings.Current.RetryFailedDownloads = false;
+        await services.Settings.SaveAsync();
+        try
+        {
+            var metadata = await services.Metadata.AnalyzeAsync("https://example.test/live/active?behavior=diskfull");
+            var live = services.Live.Add(metadata.WebpageUrl, metadata, "720", LiveStartPolicy.FromNow);
+            var terminal = await WaitForLiveTerminalAsync(services.Live, live.Id, TimeSpan.FromSeconds(20));
+            Assert.True(terminal.State is LiveSessionState.Partial or LiveSessionState.Failed);
+            Assert.Equal("Live.RawDataPreserved", terminal.RecoveryWarningKey);
+            Assert.True(services.Queue.IsPaused);
+            Assert.Equal(StorageFailureKind.DiskFull, services.Queue.Storage.State.Kind);
+            Assert.NotEmpty(Directory.EnumerateFiles(services.Settings.Current.TemporaryDirectory, "*.part", SearchOption.AllDirectories));
+            Assert.Empty(services.History.Snapshot());
+            var pending = new DownloadQueueItem { SourceUrl = "https://example.test/watch/pending" };
+            services.Queue.Add(pending);
+            await services.Queue.SaveAsync();
+            Assert.Equal(DownloadStatus.Queued, pending.Status);
+            Assert.Empty(services.Processor.ActiveItemIds);
+        }
+        finally { await services.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task MergeDiskFullPreservesRealSourceAndPartialFilesEvenWhenOrdinaryFailureCleanupIsEnabled()
+    {
+        var paths = AppPaths.Create(Path.Combine(root, "simulate-merge-diskfull"));
+        await SaveCustomToolSettingsAsync(paths);
+        using var services = AppServices.Create(paths);
+        services.Settings.Current.TemporaryDirectory = Path.Combine(paths.RootDirectory, "temp");
+        services.Settings.Current.FinalOutputDirectory = Path.Combine(paths.RootDirectory, "output");
+        services.Settings.Current.PreservePartialDownloadsOnFailure = false;
+        services.Settings.Current.MaxSimultaneousDownloads = 1;
+        await services.Settings.SaveAsync();
+        try
+        {
+            var metadata = await services.Metadata.AnalyzeAsync("https://example.test/watch/sample123");
+            var preset = QualityPreset.Find("1080");
+            var first = DownloadQueueItem.FromMetadata(metadata, preset, FormatSelector.Select(metadata, preset));
+            var next = new DownloadQueueItem { SourceUrl = "https://example.test/watch/next", VideoId = "pending" };
+            services.Queue.Add(first); services.Queue.Add(next);
+            await WaitUntilAsync(() => first.Status == DownloadStatus.Failed && services.Processor.ActiveItemIds.Count == 0, TimeSpan.FromSeconds(25));
+            Assert.True(services.Queue.IsPaused); Assert.Equal(StorageFailureKind.DiskFull, services.Queue.Storage.State.Kind);
+            Assert.Equal(DownloadStatus.Queued, next.Status);
+            var files = Directory.EnumerateFiles(services.Settings.Current.TemporaryDirectory, "*", SearchOption.AllDirectories).ToArray();
+            Assert.Contains(files, file => file.EndsWith(".m4a", StringComparison.Ordinal));
+            Assert.Contains(files, file => file.EndsWith("final.partial.mp4", StringComparison.Ordinal));
+            Assert.True(files.Count(file => file.EndsWith(".mp4", StringComparison.Ordinal)) >= 2);
+            Assert.Empty(services.History.Snapshot());
+        }
+        finally { await services.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task StorageFailureDuringMergingStatePublicationPreventsStartingTheMergeProcess()
+    {
+        var paths = AppPaths.Create(Path.Combine(root, "phase-admission"));
+        await SaveCustomToolSettingsAsync(paths);
+        using var services = AppServices.Create(paths);
+        services.Settings.Current.TemporaryDirectory = Path.Combine(paths.RootDirectory, "temp");
+        services.Settings.Current.FinalOutputDirectory = Path.Combine(paths.RootDirectory, "output");
+        await services.Settings.SaveAsync();
+        var metadata = await services.Metadata.AnalyzeAsync("https://example.test/watch/sample123");
+        var quality = QualityPreset.Find("1080");
+        var item = DownloadQueueItem.FromMetadata(metadata, quality, FormatSelector.Select(metadata, quality));
+        services.Queue.Changed += (_, args) =>
+        {
+            if (args.ItemId == item.Id && item.Status == DownloadStatus.Merging && !services.Queue.Storage.State.IsBlocked)
+                services.Queue.ReportStorageFailure(new IOException("synthetic", unchecked((int)0x80070070)));
+        };
+        try
+        {
+            services.Queue.Add(item);
+            await WaitUntilAsync(() => item.Status == DownloadStatus.Interrupted && services.Processor.ActiveItemIds.Count == 0, TimeSpan.FromSeconds(20));
+            Assert.Empty(Directory.EnumerateFiles(services.Settings.Current.TemporaryDirectory, "final.partial.*", SearchOption.AllDirectories));
+            Assert.NotEmpty(Directory.EnumerateFiles(services.Settings.Current.TemporaryDirectory, "*.m4a", SearchOption.AllDirectories));
+            Assert.Empty(services.History.Snapshot());
+        }
+        finally { await services.ShutdownAsync(); }
+    }
+
     [Theory]
     [InlineData("opaque-valid", true, PreferredVideoContainer.Auto)]
     [InlineData("opaque-valid", true, PreferredVideoContainer.Mkv)]

@@ -1,5 +1,20 @@
 # ModernTubeDownloader release checklist
 
+## Local 1.2.1-candidate.1 — owner approval required
+
+- [x] Current full Debug/Release, JS, native smoke, package and scan evidence in hotfix report.
+- [ ] Owner manual test on Windows 11 23H2: startup, VOD, Batch valid/invalid JSON,
+  optional notifications/fallback, explicit storage recovery, close/restart.
+- [x] Commit/push the reviewed MFN patch separately and pin its durable revision; see framework PR #271. Merge/release is not implied.
+- [ ] Review known MFN #204/#205, source/network/auth and experimental-media limitations.
+- [x] Owner authorized source commit/push on 2026-10-15, explicitly without a new release.
+- [ ] Separate owner approval before any tag/public release; no publication in this follow-up.
+
+Source builds now use a clean committed MFN pin with the normal `scripts/Build-Release.ps1` gate.
+The earlier local candidate was qualified with `-AllowUncommittedFrameworkForCandidate`;
+its original provenance/hash remains in the hotfix report. This candidate-only opt-in
+fingerprints reviewed source paths; default clean-pin and stable-release gates remain enforced.
+
 ## Final 1.2.0 — READY WITH KNOWN LIMITATIONS
 
 Publication authorized by the owner on 2026-10-11: master push, exact-head green CI,

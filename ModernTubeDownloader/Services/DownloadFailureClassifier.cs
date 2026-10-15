@@ -39,6 +39,7 @@ public static partial class DownloadFailureClassifier
 
         DownloadFailureCategory category;
         if (error is OperationCanceledException) category = DownloadFailureCategory.Cancelled;
+        else if (StorageFailureClassifier.Classify(error) != StorageFailureKind.None || error is StoragePausedException) category = DownloadFailureCategory.Disk;
         else if (error is CookieSecurityException) category = DownloadFailureCategory.CookieUnavailable;
         else if (error is DownloadOptionException) category = DownloadFailureCategory.Unsupported;
         else if (error is MediaAvailabilityException media) category = media.Kind switch
@@ -67,13 +68,13 @@ public static partial class DownloadFailureClassifier
         else if (Contains(raw, "unsupported url")) category = DownloadFailureCategory.Unsupported;
         else if (Contains(raw, "this live event will begin")) category = DownloadFailureCategory.Upcoming;
         else if (Contains(raw, "no downloadable", "no stream-copy-compatible", "no audio stream", "requested format is not available", "no video formats")) category = DownloadFailureCategory.Format;
-        else if (Contains(raw, "video unavailable", "video is unavailable", "not available", "has been removed", "deleted video")) category = DownloadFailureCategory.Unavailable;
+        else if (Contains(raw, "video unavailable", "video is unavailable", "playlist does not exist", "playlist is unavailable", "not available", "has been removed", "deleted video")) category = DownloadFailureCategory.Unavailable;
         else if (status == 403) category = DownloadFailureCategory.HttpForbidden;
         else if (status == 404) category = DownloadFailureCategory.HttpNotFound;
         else if (status == 429) category = DownloadFailureCategory.RateLimited;
         else if (status is >= 500 and <= 599) category = DownloadFailureCategory.ServerError;
         else if (error is TimeoutException || Contains(raw, "timed out", "timeout")) category = DownloadFailureCategory.Timeout;
-        else if (Contains(raw, "connection reset", "connection aborted", "network is unreachable", "temporary failure", "network error", "network failure")) category = DownloadFailureCategory.Network;
+        else if (Contains(raw, "connection reset", "connection aborted", "network is unreachable", "temporary failure", "network error", "network failure", "more expected. giving up after")) category = DownloadFailureCategory.Network;
         else if (Contains(raw, "no space left", "disk full", "access to the path", "permission denied") || error is IOException) category = DownloadFailureCategory.Disk;
         else if (stage == DownloadStatus.Merging) category = DownloadFailureCategory.Ffmpeg;
         else if (isLiveCapture && process is not null && exitCode is { } liveExit && liveExit != 0)

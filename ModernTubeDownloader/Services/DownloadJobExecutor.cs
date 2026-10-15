@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Utilities;
@@ -22,7 +23,8 @@ public sealed class DownloadJobExecutor(
     YtDlpMetadataService metadataService,
     FfmpegService ffmpeg,
     HistoryService history,
-    IAppLogger logger) : IDownloadJobExecutor
+    IAppLogger logger,
+    QueueStorageSafety? storage = null) : IDownloadJobExecutor
 {
     private readonly YtDlpDownloadService downloader = new(ytDlpRunner, settings, logger);
     private readonly SubtitleDownloadService subtitles = new(ytDlpRunner, settings, logger);
@@ -32,6 +34,7 @@ public sealed class DownloadJobExecutor(
         Action<Action<DownloadQueueItem>, bool> update,
         CancellationToken cancellationToken)
     {
+        storage?.ThrowIfBlocked();
         using var authenticationSession = ytDlpRunner.BeginAuthenticationSession(item.SourceUrl);
         if (item.LiveSession is not null)
             throw new InvalidOperationException("LIVE sessions must use the independent LIVE subsystem.");
@@ -46,9 +49,11 @@ public sealed class DownloadJobExecutor(
             item.SponsorBlockOptions, item.PreferredVideoContainer);
         // A transient stream URL may have expired. Resolve formats again on every retry.
         var selection = item.AttemptCount > 1 ? null : item.SelectedFormats;
+        VideoMetadata? preflightMetadata = null;
         if (selection is null)
         {
             var metadata = await metadataService.AnalyzeAsync(item.SourceUrl, cancellationToken).ConfigureAwait(false);
+            preflightMetadata = metadata;
             if (requestedRange.Validate(metadata.DurationSeconds, metadata.IsLive == true ||
                     string.Equals(metadata.LiveStatus, "is_live", StringComparison.OrdinalIgnoreCase)) is { } rangeError)
                 throw new ArgumentException(rangeError, nameof(item));
@@ -63,6 +68,23 @@ public sealed class DownloadJobExecutor(
                 queueItem.ThumbnailUrl = metadata.ThumbnailUrl;
                 queueItem.RawMetadataJson = metadata.RawJson;
             }, true);
+        }
+        else if (!string.IsNullOrWhiteSpace(item.RawMetadataJson))
+        {
+            // Reuse already analyzed metadata; never start another metadata process just for a size hint.
+            try { preflightMetadata = JsonSerializer.Deserialize<VideoMetadata>(item.RawMetadataJson, JsonDefaults.Options); }
+            catch (JsonException) { /* Unknown size is advisory, not a reason to reject a valid queued item. */ }
+        }
+        if (preflightMetadata is not null)
+        {
+            var sizes = selection.FormatIds.Select(id => preflightMetadata.Formats.FirstOrDefault(format => format.Id == id))
+                .Select(format => format?.FileSize ?? format?.ApproximateFileSize).ToArray();
+            if (sizes.Length > 0 && sizes.All(size => size is > 0) && sizes.Sum(size => (decimal)size!.Value) < long.MaxValue / 2)
+            {
+                var expected = (long)sizes.Sum(size => (decimal)size!.Value);
+                storage?.Preflight(settings.Current.TemporaryDirectory, expected * 2);
+                storage?.Preflight(settings.Current.FinalOutputDirectory, expected);
+            }
         }
         FileSystemUtilities.EnsureWritableDirectory(settings.Current.TemporaryDirectory);
         FileSystemUtilities.EnsureWritableDirectory(settings.Current.FinalOutputDirectory);
@@ -93,6 +115,7 @@ public sealed class DownloadJobExecutor(
         var completionWarnings = new List<string>();
         try
         {
+            storage?.ThrowIfBlocked();
             if (combinedDownload)
             {
                 update(queueItem =>
@@ -102,6 +125,7 @@ public sealed class DownloadJobExecutor(
                 }, true);
                 var format = selection.AudioOnly ? selection.AudioFormatId! : selection.RequiresMerge
                     ? $"{selection.VideoFormatId}+{selection.AudioFormatId}" : selection.VideoFormatId!;
+                storage?.ThrowIfBlocked();
                 videoFile = await downloader.DownloadFormatAsync(item.SourceUrl, format,
                     Path.Combine(attemptDirectory, "combined"),
                     CreateDownloadProgress(update, DownloadStatus.DownloadingVideo, "Downloading video"),
@@ -117,6 +141,7 @@ public sealed class DownloadJobExecutor(
                     queueItem.StatusMessage = "Downloading video";
                     queueItem.StatusMessageKey = "Queue.Detail.DownloadingVideo";
                 }, true);
+                storage?.ThrowIfBlocked();
                 videoFile = await downloader.DownloadFormatAsync(
                     item.SourceUrl,
                     selection.VideoFormatId!,
@@ -128,6 +153,7 @@ public sealed class DownloadJobExecutor(
 
             if (!combinedDownload && (selection.AudioOnly || selection.RequiresMerge))
             {
+                storage?.ThrowIfBlocked();
                 update(queueItem =>
                 {
                     queueItem.Status = DownloadStatus.DownloadingAudio;
@@ -135,6 +161,7 @@ public sealed class DownloadJobExecutor(
                     queueItem.StatusMessageKey = "Queue.Detail.DownloadingAudio";
                     queueItem.ProgressPercent = 0;
                 }, true);
+                storage?.ThrowIfBlocked();
                 audioFile = await downloader.DownloadFormatAsync(
                     item.SourceUrl,
                     selection.AudioFormatId!,
@@ -158,6 +185,9 @@ public sealed class DownloadJobExecutor(
             string preparedFile;
             if (!combinedDownload && selection.RequiresMerge || FfmpegService.RequiresRemux(selection, item.PreferredVideoContainer))
             {
+                storage?.ThrowIfBlocked();
+                var allocation = new[] { videoFile, audioFile }.Where(file => file is not null).Sum(file => new FileInfo(file!).Length);
+                storage?.Preflight(settings.Current.TemporaryDirectory, allocation);
                 update(queueItem =>
                 {
                     queueItem.Status = DownloadStatus.Merging;
@@ -169,6 +199,7 @@ public sealed class DownloadJobExecutor(
                 }, true);
                 var partialFile = Path.Combine(attemptDirectory, $"final.partial.{container}");
                 var mergeProgress = new Progress<double>(percent => update(queueItem => queueItem.ProgressPercent = percent, false));
+                storage?.ThrowIfBlocked();
                 if (selection.RequiresMerge)
                     await ffmpeg.MergeAsync(videoFile!, audioFile!, partialFile, RequestedDuration(item.DurationSeconds, requestedRange), mergeProgress, cancellationToken).ConfigureAwait(false);
                 else
@@ -194,6 +225,7 @@ public sealed class DownloadJobExecutor(
             {
                 try
                 {
+                    storage?.ThrowIfBlocked();
                     var subtitleMetadata = await metadataService.AnalyzeAsync(item.SourceUrl, cancellationToken).ConfigureAwait(false);
                     subtitleFiles = await subtitles.DownloadAsync(subtitleMetadata, item.SubtitleOptions,
                         Path.Combine(attemptDirectory, "subtitles"), container, cancellationToken).ConfigureAwait(false);
@@ -202,6 +234,7 @@ public sealed class DownloadJobExecutor(
                     else if (item.SubtitleOptions.Embed && !selection.AudioOnly)
                     {
                         var embeddedFile = Path.Combine(attemptDirectory, $"with-subtitles.partial.{container}");
+                        storage?.ThrowIfBlocked();
                         await ffmpeg.EmbedSubtitlesAsync(preparedFile, subtitleFiles, embeddedFile, cancellationToken).ConfigureAwait(false);
                         preparedFile = embeddedFile;
                         subtitlesEmbedded = true;
@@ -210,6 +243,8 @@ public sealed class DownloadJobExecutor(
                         completionWarnings.Add("subtitles cannot be embedded in audio-only output");
                 }
                 catch (OperationCanceledException) { throw; }
+                catch (StoragePausedException) { throw; }
+                catch (Exception error) when (StorageFailureClassifier.Classify(error) != StorageFailureKind.None) { throw; }
                 catch (Exception ex)
                 {
                     completionWarnings.Add("subtitles could not be processed");
@@ -237,6 +272,8 @@ public sealed class DownloadJobExecutor(
                 settings.Current.ConflictBehavior,
                 settings.Current.OverwriteExistingFiles,
                 sidecarSuffixes);
+            storage?.ThrowIfBlocked();
+            storage?.Preflight(settings.Current.FinalOutputDirectory, new FileInfo(preparedFile).Length);
             File.Move(preparedFile, finalPath, settings.Current.OverwriteExistingFiles || settings.Current.ConflictBehavior == Settings.FileConflictBehavior.Overwrite);
             if (!File.Exists(finalPath) || new FileInfo(finalPath).Length == 0)
                 throw new IOException("The final output file is missing or empty.");
@@ -254,6 +291,7 @@ public sealed class DownloadJobExecutor(
                     }
                     catch (Exception ex)
                     {
+                        storage?.Report(ex);
                         completionWarnings.Add("a subtitle sidecar could not be saved");
                         logger.Error($"Subtitle sidecar could not be saved QueueItemId={item.Id}.", ex);
                     }
@@ -276,12 +314,14 @@ public sealed class DownloadJobExecutor(
                 }
                 catch (Exception ex)
                 {
+                    storage?.Report(ex);
                     completionWarnings.Add("internal metadata could not be saved");
                     logger.Error($"Could not save internal metadata for queue item {item.Id}.", ex);
                 }
             }
 
-            var postProcessing = await DownloadPostProcessor.ProcessAsync(finalPath, item, settings.Current, logger).ConfigureAwait(false);
+            var postProcessing = await DownloadPostProcessor.ProcessAsync(finalPath, item, settings.Current, logger,
+                error => storage?.Report(error)).ConfigureAwait(false);
             completionWarnings.AddRange(postProcessing.Warnings);
 
             var completedAt = DateTimeOffset.Now;
@@ -306,6 +346,7 @@ public sealed class DownloadJobExecutor(
             }
             catch (Exception ex)
             {
+                storage?.Report(ex);
                 logger.Error($"The download completed but history could not be saved for queue item {item.Id}.", ex);
                 completionWarnings.Add("history could not be saved");
             }
@@ -325,13 +366,16 @@ public sealed class DownloadJobExecutor(
                 queueItem.ErrorMessage = null;
             }, true);
 
-            if (!settings.Current.KeepTemporaryFilesAfterSuccessfulMerge)
+            if (!settings.Current.KeepTemporaryFilesAfterSuccessfulMerge && storage?.State.IsBlocked != true)
                 TryDeleteAttemptDirectory(attemptDirectory);
         }
         catch (OperationCanceledException) { throw; }
-        catch
+        catch (Exception error)
         {
-            if (!settings.Current.PreservePartialDownloadsOnFailure &&
+            // Storage exhaustion must never destroy the very media/recovery files
+            // needed after space is restored, even with ordinary failure cleanup off.
+            if (error is not StoragePausedException && StorageFailureClassifier.Classify(error) == StorageFailureKind.None &&
+                !settings.Current.PreservePartialDownloadsOnFailure &&
                 item.AttemptCount >= item.MaximumAttempts)
                 TryDeleteAttemptDirectory(attemptDirectory);
             throw;

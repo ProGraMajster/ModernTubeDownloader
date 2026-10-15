@@ -20,6 +20,17 @@ public enum DownloadStatus
 
 public sealed class DownloadQueueItem
 {
+    internal DownloadQueueItem PersistenceCopy()
+    {
+        var copy = (DownloadQueueItem)MemberwiseClone();
+        copy.TemporaryFiles = [.. TemporaryFiles];
+        copy.SubtitleOptions = SubtitleOptions.Copy();
+        copy.SponsorBlockOptions = SponsorBlockOptions.Copy();
+        // VOD owns immutable strings/value records; legacy LIVE is migrated before
+        // loading this store. Freeze mutable collections while holding queue.sync.
+        return copy;
+    }
+
     public Guid Id { get; set; } = Guid.NewGuid();
     public string SourceUrl { get; set; } = string.Empty;
     public string VideoId { get; set; } = string.Empty;

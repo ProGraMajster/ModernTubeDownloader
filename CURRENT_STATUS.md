@@ -1,5 +1,24 @@
 # Current status
 
+## Local 1.2.1-candidate.1 hotfix — 2026-10-15
+
+Qualification: **READY FOR OWNER MANUAL TEST**, not public/stable promotion.
+Source commit/push authorized on 2026-10-15; no tag/release publication. Authoritative current
+results and limitations: [hotfix report](HOTFIX_1_2_1_CANDIDATE_1_REPORT.md).
+MFN pin is committed notification hotfix `8d8a7679779608b4edbee7dc687c13e3b1a611d9`, based on
+master `18f47b085a59e65eb611e3fd1d38e8dffa3fb19c`. Framework [PR #271](https://github.com/ProGraMajster/ModernFormsNext/pull/271)
+is separate from the app update; no protected-master merge or framework release is implied.
+Storage latch/checkpoint, notification resilience and Batch JSON UX are the only hotfix scope.
+Real Windows 11 23H2, physical-device/playback and broad soak are not claimed.
+Final local builds/tests: Debug/Release 749/749 each; JS 92/92; MFN notification tests
+100/100 and scroll/layout 34/34 per configuration; zero build warnings/errors/test skips.
+Isolated native PL/Dark and EN/Light storage/JSON/error/failed-checkpoint flows pass.
+Tray/hidden startup, updater check, LIVE fixture, cookie Settings, loopback Web Remote,
+range/Details, appearance/text scale and extracted-candidate production UIA pass.
+Forced optional-provider absence selects Shell and accepts one native test notification;
+no banner visibility claim. Local win-x64 ZIP has 811 entries and no runtime/user data.
+The 1.2.0 evidence below is historical, not qualification of this candidate.
+
 ## Release 1.2.0 — 2026-10-11
 
 Qualification: **READY WITH KNOWN LIMITATIONS**. Published status is recorded by the

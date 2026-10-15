@@ -62,7 +62,7 @@ Body routes to Downloads/History/LIVE. Downloads tries to select/reveal its curr
 
 ## Windows deployment
 
-- MFN pin: `69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3`, freshly fetched master 2026-10-10.
+- Source MFN pin: `8d8a7679779608b4edbee7dc687c13e3b1a611d9` ([notification hotfix PR #271](https://github.com/ProGraMajster/ModernFormsNext/pull/271)), based on master `18f47b085a59e65eb611e3fd1d38e8dffa3fb19c`. No uncommitted patch is needed. The earlier local candidate ZIP retains its original pre-commit `framework-provenance.json`; no merged-master or published-framework claim.
 - Consumer TFM: `net10.0-windows10.0.26100.0`; minimum declared platform 17763. Supported operating systems must also satisfy actual .NET 10 requirements; old Windows versions are not certified by the TFM.
 - `WindowsSdkPackageVersion=10.0.28000.87` is explicit in central props **before first restore**, avoiding first-restore projection mismatch/NETSDK1112.
 - Both providers are solution projects, including Visual Studio restore graph. Code-first MFN disables App SDK's default Content item glob to avoid making embedded AppIcon.png an unintended output Content item.

@@ -67,6 +67,69 @@ public sealed class BatchImportTests(ITestOutputHelper output)
         Assert.Equal(4, session.ImportedCount); Assert.Equal(2, service.Page(session, BatchFilter.Errors, "", 0).Total);
     }
     [Theory]
+    [InlineData("[\"https://example.test/a\"]")]
+    [InlineData("[{\"url\":\"https://example.test/a\"}]")]
+    [InlineData("{\"url\":\"https://example.test/a\"}")]
+    [InlineData("{\"urls\":[\"https://example.test/a\"]}")]
+    [InlineData("{\"items\":[{\"url\":\"https://example.test/a\"}]}")]
+    public async Task JsonRootShapesUseTheSameBoundedPreparationRows(string json)
+    {
+        using var f = new Fixture(); using var service = f.Service();
+        var session = await service.ImportAsync(await f.File(".json", json));
+        Assert.Equal(1, session.ImportedCount);
+        Assert.Equal(0, service.Page(session, BatchFilter.Errors, "", 0).Total);
+        Assert.Empty(f.Queue.Snapshot());
+    }
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"title\":\"not an import\"}")]
+    [InlineData("{\"url\":123}")]
+    [InlineData("{\"urls\":\"wrong\"}")]
+    [InlineData("{\"items\":[],\"urls\":[]}")]
+    [InlineData("{\"urls\":[],\"$type\":\"Injected\"}")]
+    [InlineData("\"https://example.test/not-array\"")]
+    [InlineData("[{\"url\":")]
+    [InlineData("[] true")]
+    public async Task UnsupportedOrMalformedJsonHasLocalizedSafeMessageAndTechnicalInnerException(string json)
+    {
+        using var f = new Fixture(); using var service = f.Service();
+        var error = await Assert.ThrowsAsync<BatchJsonFormatException>(() => service.ImportAsync(f.File(".json", json).Result));
+        Assert.Equal("Batch.Error.JsonFormat", error.Message);
+        Assert.IsAssignableFrom<JsonException>(error.InnerException);
+        foreach (var language in new[] { "en", "pl" })
+        {
+            var text = new ModernTubeDownloader.Localization.LocalizationService(language)[error.Message];
+            Assert.DoesNotContain("List`1", text); Assert.DoesNotContain("not-array", text);
+            Assert.DoesNotContain("[Batch.", text);
+        }
+    }
+    [Fact]
+    public async Task EnvelopeStreamsFiftyThousandRowsAndMixedRowErrorsWithoutRelaxingBounds()
+    {
+        using var f = new Fixture(); using var service = f.Service();
+        var json = "{\"urls\":" + JsonSerializer.Serialize(Enumerable.Range(0, 50000).Select(i => "https://example.test/" + i)) + "}";
+        var session = await service.ImportAsync(await f.File(".json", json));
+        Assert.Equal(50000, session.ImportedCount);
+        var mixed = await service.ImportAsync(await f.File(".json", """{"items":[{"url":"https://example.test/ok"},{"title":"missing"},123,{"url":true}]}"""));
+        Assert.Equal(4, mixed.ImportedCount); Assert.Equal(3, service.Page(mixed, BatchFilter.Errors, "", 0).Total);
+    }
+    [Fact]
+    public async Task ExamplesAreExecutableSchemasAndUtf8BomRemainsSupported()
+    {
+        using var f = new Fixture(); using var service = f.Service();
+        foreach (var example in BatchJsonExamples.Documents)
+            Assert.True((await service.ImportAsync(await f.File(".json", example))).ImportedCount > 0);
+        // The fixture's Encoding.UTF8 already writes the BOM; do not add a second one.
+        var bom = await f.File(".json", "{\"url\":\"https://example.test/bom\"}");
+        Assert.Equal(1, (await service.ImportAsync(bom)).ImportedCount);
+    }
+    [Fact]
+    public async Task DeepJsonEnvelopeIsRejectedWithoutDynamicDeserialization()
+    {
+        using var f = new Fixture(); using var service = f.Service();
+        await Assert.ThrowsAsync<BatchJsonFormatException>(() => service.ImportAsync(f.File(".json", "{\"items\":[" + new string('[', 10) + "0" + new string(']', 10) + "]}").Result));
+    }
+    [Theory]
     [InlineData(10000)] [InlineData(50000)]
     public async Task LargeJsonDoesNotCreateUiOrAnalysisTasks(int count)
     {

@@ -83,6 +83,7 @@ internal static class Program
             notificationService = RegisterNotifications(paths);
             services = AppServices.Create(paths, notifications: notificationService);
             logger = services.Logger;
+            logger.Info($"Application version={typeof(Program).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion}; Windows={Environment.OSVersion.Version}; runtime={System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}; process64={Environment.Is64BitProcess}.");
             var diagnosticServices = services;
             UiCrashDiagnostics.RegisterStateProvider(_ =>
             {

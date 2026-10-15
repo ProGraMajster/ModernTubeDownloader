@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string] $ModernFormsNextRoot = ""
+    [string] $ModernFormsNextRoot = "",
+    [switch] $AllowUncommittedFrameworkForCandidate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,7 +37,25 @@ if ($LASTEXITCODE -ne 0 -or $actualFrameworkCommit -ne $frameworkCommit) {
     throw 'ModernFormsNext checkout must match the central release pin.'
 }
 $frameworkChanges = & git -C $ModernFormsNextRoot status --porcelain
-if ($LASTEXITCODE -ne 0 -or $frameworkChanges) { throw 'ModernFormsNext source checkout must be clean.' }
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect ModernFormsNext source checkout.' }
+$frameworkProof = [ordered]@{ BaseCommit = $frameworkCommit; Uncommitted = [bool]$frameworkChanges; PatchSha256 = $null; Files = @() }
+if ($AllowUncommittedFrameworkForCandidate -and $version -notmatch '^\d+\.\d+\.\d+-candidate\.\d+$') {
+    throw 'Uncommitted framework qualification is allowed only for an explicit local candidate, never a stable release.'
+}
+if ($frameworkChanges) {
+    if (-not $AllowUncommittedFrameworkForCandidate) { throw 'ModernFormsNext source checkout must be clean.' }
+    $changedFiles = @(@(& git -c core.safecrlf=false -C $ModernFormsNextRoot diff --name-only HEAD) + @(& git -C $ModernFormsNextRoot ls-files --others --exclude-standard) | Sort-Object -Unique)
+    $frameworkProof.Files = @(foreach ($relative in $changedFiles) {
+        if ($relative -notmatch '^(ModernFormsNext\.WindowKit\.Backend\.Windows/Notifications/|ModernFormsNext\.WindowKit\.Backend\.Windows\.Tests/|ModernFormsNext\.SystemNotifications\.WinRT/|docs/)') {
+            throw "Candidate framework changes outside the reviewed notification scope: $relative"
+        }
+        $source = Join-Path $ModernFormsNextRoot $relative
+        [ordered]@{ Path = $relative; Sha256 = if (Test-Path -LiteralPath $source -PathType Leaf) { (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'deleted' } }
+    })
+    $canonical = ($frameworkProof.Files | ForEach-Object { $_.Path + ':' + $_.Sha256 }) -join "`n"
+    $frameworkProof.PatchSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($canonical))).ToLowerInvariant()
+    Write-Output "LOCAL CANDIDATE ONLY: framework $frameworkCommit plus uncommitted notification patch $($frameworkProof.PatchSha256). No publication or Git action is performed."
+}
 $licensePath = Join-Path $repositoryRoot 'LICENSE'
 if (-not (Test-Path -LiteralPath $licensePath -PathType Leaf)) { throw 'The application LICENSE is required.' }
 # Do not race another release build/package operation in this checkout, or rebuild
@@ -95,6 +114,7 @@ function Invoke-DotNet {
 
 $modernFormsProperty = "-p:ModernFormsNextRoot=$ModernFormsNextRoot"
 $serialBuildProperties = @('-m:1', '/p:UseSharedCompilation=false', '-p:GeneratePackageOnBuild=false', $modernFormsProperty)
+if ($frameworkProof.PatchSha256) { $serialBuildProperties += "-p:ModernFormsNextLocalPatchSha256=$($frameworkProof.PatchSha256)" }
 
 Invoke-DotNet -Arguments @('restore', $buildTarget, $modernFormsProperty)
 $validationRun = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
@@ -121,6 +141,7 @@ Invoke-DotNet -Arguments @(
     '--self-contained', 'true',
     '--no-restore',
     '-p:PublishProfile=win-x64-self-contained',
+    "-p:ModernFormsNextLocalPatchSha256=$($frameworkProof.PatchSha256)",
     $modernFormsProperty,
     '-m:1',
     '/p:UseSharedCompilation=false',
@@ -242,6 +263,18 @@ foreach ($symbol in $publishedSymbols) {
     Copy-Item -LiteralPath $symbol.FullName -Destination $destination
 }
 
+$finalFrameworkFiles = @(@(& git -c core.safecrlf=false -C $ModernFormsNextRoot diff --name-only HEAD) + @(& git -C $ModernFormsNextRoot ls-files --others --exclude-standard) | Sort-Object -Unique)
+if (($finalFrameworkFiles -join "`n") -ne (($frameworkProof.Files | ForEach-Object Path) -join "`n")) {
+    throw 'Framework change set changed during qualification.'
+}
+foreach ($entry in $frameworkProof.Files) {
+    $source = Join-Path $ModernFormsNextRoot $entry.Path
+    $actual = if (Test-Path -LiteralPath $source -PathType Leaf) { (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'deleted' }
+    if ($actual -ne $entry.Sha256) { throw "Framework source changed during qualification: $($entry.Path)" }
+}
+if ($frameworkProof.Uncommitted) {
+    $frameworkProof | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $releaseRoot 'framework-provenance.json') -Encoding utf8NoBOM
+}
 Compress-Archive -Path (Join-Path $releaseRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
 & (Join-Path $PSScriptRoot 'Test-ReleasePackage.ps1') -ZipPath $zipPath
 if ($publishedSymbols.Count -gt 0) {

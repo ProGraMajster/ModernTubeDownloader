@@ -269,6 +269,11 @@ if (arguments.Contains("-f"))
         await File.WriteAllBytesAsync(partial, Encoding.UTF8.GetBytes("synthetic-live-audio-video-fragments"));
         await File.WriteAllTextAsync(Path.Combine(outputDirectory, ".test-started.json"), Environment.ProcessId.ToString());
         Console.WriteLine("MTD_PROGRESS|downloading|0|32|0|4|0|LIVE");
+        if (mode == "diskfull")
+        {
+            Console.Error.WriteLine("ERROR: unable to write data: [Errno 28] No space left on device");
+            return 1;
+        }
         if (mode == "split-fail")
         {
             File.Delete(partial);
@@ -349,6 +354,12 @@ if (arguments.Contains("-progress"))
 {
     var output = arguments[^1];
     Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+    if (output.Contains("simulate-merge-diskfull", StringComparison.Ordinal))
+    {
+        await File.WriteAllTextAsync(output, "synthetic-partial-output");
+        Console.Error.WriteLine("Error writing trailer: No space left on device");
+        return -28;
+    }
     Console.WriteLine("out_time_us=6250000");
     await File.WriteAllBytesAsync(output, Encoding.UTF8.GetBytes("fake-remuxed-media"));
     if (ValueAfter(arguments, "-i") is { } input && File.Exists(input) &&

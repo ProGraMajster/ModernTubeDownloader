@@ -14,7 +14,8 @@ internal static class DownloadPostProcessor
         string finalPath,
         DownloadQueueItem item,
         AppSettings settings,
-        IAppLogger logger)
+        IAppLogger logger,
+        Action<Exception>? storageFailure = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(finalPath);
         ArgumentNullException.ThrowIfNull(item);
@@ -33,6 +34,7 @@ internal static class DownloadPostProcessor
             }
             catch (Exception ex)
             {
+                storageFailure?.Invoke(ex);
                 sidecarPath = null;
                 warnings.Add("metadata sidecar could not be saved");
                 logger.Error($"Could not save metadata sidecar for queue item {item.Id}.", ex);
@@ -48,6 +50,7 @@ internal static class DownloadPostProcessor
             }
             catch (Exception ex)
             {
+                storageFailure?.Invoke(ex);
                 warnings.Add("file creation date could not be set");
                 logger.Error($"Could not set the creation date for queue item {item.Id} from {publishTime.SourceField}.", ex);
             }

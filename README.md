@@ -12,6 +12,13 @@ the release page. Historical releases remain unchanged. See [cookie synchronizat
 
 ## New in 1.2.0
 
+Local hotfix qualification: **1.2.1-candidate.1**, not published. See
+[hotfix report](HOTFIX_1_2_1_CANDIDATE_1_REPORT.md). It adds storage-safe queue pause/recovery,
+bounded notification fallback/lifetime and friendly streaming Batch JSON envelopes.
+Source builds pin the committed MFN notification hotfix in
+[PR #271](https://github.com/ProGraMajster/ModernFormsNext/pull/271), based on current master.
+This is a source-only update, not a new public release or a claim that the PR is merged.
+
 Adds [tray/autostart](TRAY_AND_STARTUP.md), [SHA-verified application updates](UPDATES.md),
 Other/[Batch import](BATCH_IMPORT.md), [versioned appearance profiles and text scaling](PERSONALIZATION.md),
 and eleven categorized Settings pages. End users of the self-contained ZIP need no
@@ -147,13 +154,13 @@ Logs are local and redact common credential/URL data. Known auth values are scru
 
 ## Build from source
 
-Requires the .NET 10 SDK and Node.js for JavaScript tests. Development, CI and Release use ModernFormsNext `d36015711f63945a49025675acb9aca3df60101d` (origin/master fetched 2026-10-11), not a private fork or copied framework source:
+Requires the .NET 10 SDK and Node.js for JavaScript tests. The current ModernFormsNext pin is `8d8a7679779608b4edbee7dc687c13e3b1a611d9` ([notification hotfix PR #271](https://github.com/ProGraMajster/ModernFormsNext/pull/271)), based on master `18f47b085a59e65eb611e3fd1d38e8dffa3fb19c` fetched 2026-10-15. The pin includes the reviewed notification fix, so no uncommitted framework patch is needed. No framework source is copied into this repository:
 
 ```powershell
 git clone https://github.com/ProGraMajster/ModernTubeDownloader.git
 cd ModernTubeDownloader
 git clone --no-checkout https://github.com/ProGraMajster/ModernFormsNext.git .mfn-master-worktree
-git -C .mfn-master-worktree checkout --detach d36015711f63945a49025675acb9aca3df60101d
+git -C .mfn-master-worktree checkout --detach 8d8a7679779608b4edbee7dc687c13e3b1a611d9
 dotnet restore .\ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj
 dotnet build .\ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj -c Debug -m:1 /p:UseSharedCompilation=false
 ```

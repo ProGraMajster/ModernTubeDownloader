@@ -3,7 +3,13 @@ using ModernTubeDownloader.Models;
 
 namespace ModernTubeDownloader.Services;
 
-public sealed class QueuePersistenceService(AppPaths paths, IAppLogger logger)
+public interface IQueuePersistence
+{
+    Task<IReadOnlyList<DownloadQueueItem>> LoadAsync(CancellationToken cancellationToken = default);
+    Task SaveAsync(IReadOnlyList<DownloadQueueItem> items, CancellationToken cancellationToken = default);
+}
+
+public sealed class QueuePersistenceService(AppPaths paths, IAppLogger logger) : IQueuePersistence
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 

@@ -6,6 +6,8 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("ModernTubeDownloader.Tests")]
+
 namespace ModernTubeDownloader.Authentication;
 
 public static class AuthenticationFiles
@@ -246,7 +248,8 @@ public sealed class CookieJarLease : IDisposable
     public string Path { get; }
     public long SnapshotVersion { get; }
     private CookieJarLease(string path, long version, FileStream owner) { Path = path; SnapshotVersion = version; ownership = owner; }
-    internal static CookieJarLease Create(string root, IEnumerable<BrowserCookie> cookies, long version)
+    internal static CookieJarLease Create(string root, IEnumerable<BrowserCookie> cookies, long version,
+        Action<string, string>? writeText = null)
     {
         AuthenticationFiles.EnsurePrivateDirectory(root);
         var path = System.IO.Path.Combine(root, Guid.NewGuid().ToString("N") + ".txt");
@@ -263,7 +266,10 @@ public sealed class CookieJarLease : IDisposable
                     .Append(cookie.Session ? 0 : (long)cookie.ExpirationDate!.Value).Append('\t')
                     .Append(cookie.Name).Append('\t').Append(cookie.Value).Append('\n');
             }
-            File.WriteAllText(path, text.ToString(), new UTF8Encoding(false));
+            // Local test seam for write exhaustion; native ownership/ACL/cleanup
+            // stays on this exact production boundary, never a real full disk.
+            if (writeText is null) File.WriteAllText(path, text.ToString(), new UTF8Encoding(false));
+            else writeText(path, text.ToString());
             return new(path, version, owner);
         }
         catch { owner.Dispose(); File.Delete(path + ".lock"); if (File.Exists(path)) File.Delete(path); throw; }

@@ -328,6 +328,20 @@ public sealed class SystemNotificationCoordinatorTests
         Assert.DoesNotContain(logger.Messages, message => message.Contains("https://thumbnail.invalid"));
     }
 
+    [Fact]
+    public async Task ThousandCapacityFailuresProduceOneWarningAndOneShutdownSummary()
+    {
+        var fake = new FakeNotifications { ResultStatus = SystemNotificationStatus.Failed,
+            Warnings = [new("ShellCapacity", "At most 32 concurrent Shell notification identities are retained.")] };
+        var log = new RecordingLogger();
+        var coordinator = new SystemNotificationCoordinator(fake, () => new(), new("en"), log);
+        for (var i = 0; i < 1000; i++) await coordinator.SendTestAsync();
+        Assert.Single(log.Messages, message => message.Contains("code=ShellCapacity"));
+        await coordinator.DisposeAsync();
+        Assert.Single(log.Messages, message => message.Contains("Notification warning summary: code=ShellCapacity; total=1000; suppressed=999"));
+        Assert.InRange(log.Messages.Count, 1, 6); // INFO diagnostics must not recreate the warning flood.
+    }
+
     private sealed class RecordingLogger : IAppLogger
     {
         public List<string> Messages { get; } = [];
@@ -342,6 +356,7 @@ public sealed class SystemNotificationCoordinatorTests
             SystemNotificationFeatures.Urgency | SystemNotificationFeatures.Replacement)
         { Platform = new WindowsSystemNotificationCapabilities(WindowsSystemNotificationFeatures.SuppressPopup | WindowsSystemNotificationFeatures.Priority | WindowsSystemNotificationFeatures.AppLogo) };
         public IReadOnlyList<SystemNotificationWarning> Warnings { get; set; } = [];
+        public SystemNotificationStatus ResultStatus { get; set; } = SystemNotificationStatus.Accepted;
         public SystemNotificationAvailability Access { get; set; } = SystemNotificationAvailability.Ready;
         public bool Throw { get; set; }
         public Task? SubmissionGate { get; set; }
@@ -354,7 +369,7 @@ public sealed class SystemNotificationCoordinatorTests
         public Task<SystemNotificationAccess> GetStatusAsync(CancellationToken token = default) { Queries++; return Task.FromResult(new SystemNotificationAccess(Access)); }
         public Task<SystemNotificationAccess> RequestPermissionAsync(SystemNotificationPermissionRequest? request = null, CancellationToken token = default) => GetStatusAsync(token);
         public async Task<SystemNotificationResult> ShowAsync(SystemNotification n, CancellationToken token = default)
-        { if (Throw) throw new IOException("Native transport failed"); Shown.Add(n); if (SubmissionGate is { } gate) await gate; return new SystemNotificationResult(SystemNotificationStatus.Accepted, new(n.Id, n.Group), Warnings); }
+        { if (Throw) throw new IOException("Native transport failed"); Shown.Add(n); if (SubmissionGate is { } gate) await gate; return new SystemNotificationResult(ResultStatus, new(n.Id, n.Group), Warnings); }
         public Task<SystemNotificationResult> UpdateAsync(SystemNotificationKey key, SystemNotificationProgress progress, CancellationToken token = default)
         { Updated.Add((key, progress)); return Result(); }
         private static Task<SystemNotificationResult> Result() => Task.FromResult(new SystemNotificationResult(SystemNotificationStatus.Accepted));

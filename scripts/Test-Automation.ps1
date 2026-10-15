@@ -7,6 +7,7 @@ param(
     [switch]$UpdateSmoke,
     [switch]$OtherSmoke,
     [switch]$BatchSmoke,
+    [switch]$HotfixSmoke,
     [switch]$RealBatchSmoke,
     [switch]$TextScaleSmoke,
     [switch]$AppearanceSmoke,
@@ -355,6 +356,12 @@ $settings = @{
     UseCustomFfmpeg = $true; CustomFfmpegPath = (Join-Path $toolRoot 'ffmpeg.exe')
     UseCustomDeno = $true; CustomDenoPath = (Join-Path $toolRoot 'deno.exe')
 }
+if ($HotfixSmoke) {
+    $settings.TemporaryDirectory = Join-Path $dataRoot 'simulate-merge-diskfull'
+    $settings.MaxSimultaneousDownloads = 1
+    $settings.PreservePartialDownloadsOnFailure = $false
+    $settings.BrowserIntegrationEnabled = $false
+}
 if ($TraySmoke) {
     $settings.Startup = @{ ShowTrayIcon = $true; CloseBehavior = 2; MinimizeBehavior = 1; FirstHideNotice = $false }
     $settings.BrowserIntegrationEnabled = $false # Do not mutate the owner's protocol registration for this test.
@@ -618,6 +625,96 @@ try {
             if ($saved.global.theme -ne 3 -or $saved.global.colors.Accent -ne '#3388CC') { throw 'Custom color preview/save failed.' }
         }
         Write-Output "Text scale native smoke PASS ($Language/$Theme): live 100/125/150/175/200/reset, persisted, page navigation. This is not physical DPI or visual-clipping qualification. Profile=$dataRoot"
+        return
+    }
+    if ($HotfixSmoke) {
+        Invoke-NodeAction (Find-Node 'NavOther' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        Invoke-NodeAction (Find-Node 'OtherOpenBatch' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        $batchRoots = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
+        $batchRoot = @($batchRoots.value | Where-Object rootId -ne $mainRoot) | Select-Object -First 1
+        if (-not $batchRoot) { throw 'Hotfix Batch window missing.' }
+        $bad = Join-Path $dataRoot 'invalid.json'
+        '{"wrongRoot":true}' | Set-Content -LiteralPath $bad -Encoding utf8
+        Invoke-NodeAction (Find-Node 'BatchFilePath' $batchRoot.rootId) $batchRoot.rootId 'SetValue' $bad | Out-Null
+        Invoke-NodeAction (Find-Node 'BatchImport' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+        $deadline = [Diagnostics.Stopwatch]::StartNew()
+        do { $errorNode = Find-Node 'BatchStatus' $batchRoot.rootId } while ($errorNode.name -notmatch 'JSON' -and $deadline.Elapsed.TotalSeconds -lt 10)
+        if ($errorNode.name -notmatch 'JSON' -or $errorNode.name -match 'JsonException|JsonElement|List<') { throw 'Batch localized JSON error missing or technical.' }
+        Start-Sleep -Milliseconds 1200
+        if ((Find-Node 'BatchStatus' $batchRoot.rootId).name -notmatch 'JSON') { throw 'Batch timer erased the import error.' }
+        Invoke-NodeAction (Find-Node 'BatchExamples' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+        $exampleRoots = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
+        $exampleRoot = @($exampleRoots.value | Where-Object { $_.rootId -ne $mainRoot -and $_.rootId -ne $batchRoot.rootId }) | Select-Object -First 1
+        if (-not $exampleRoot) { throw 'Batch examples dialog missing.' }
+        if ((Find-Node 'BatchExamplesText' $exampleRoot.rootId).name -notmatch '"urls"') { throw 'Batch examples are incomplete.' }
+        Invoke-NodeAction (Find-Node 'BatchExamplesClose' $exampleRoot.rootId) $exampleRoot.rootId 'Invoke' | Out-Null
+        foreach ($json in @('{"url":"https://example.test/watch/single"}', '{"urls":["https://example.test/watch/sample123?id=one","https://example.test/watch/sample456?id=two"]}')) {
+            $valid = Join-Path $dataRoot 'valid.json'
+            $json | Set-Content -LiteralPath $valid -Encoding utf8
+            Invoke-NodeAction (Find-Node 'BatchFilePath' $batchRoot.rootId) $batchRoot.rootId 'SetValue' $valid | Out-Null
+            Invoke-NodeAction (Find-Node 'BatchImport' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+            Wait-Node 'BatchEntryStatus1' $batchRoot.rootId | Out-Null
+        }
+        Wait-Node 'BatchEntryStatus2' $batchRoot.rootId | Out-Null
+        Invoke-NodeAction (Find-Node 'BatchAnalyze' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+        Wait-Node 'BatchAdd' $batchRoot.rootId 'Enabled' | Out-Null
+        $deadline.Restart()
+        # Wait on rendered status, not a guessed persistence filename.
+        do { $ready = (Find-Node 'BatchEntryStatus2' $batchRoot.rootId).name } while ($ready -notmatch 'Ready|Gotow' -and $deadline.Elapsed.TotalSeconds -lt 15)
+        if ($ready -notmatch 'Ready|Gotow') { throw 'Batch metadata did not finish.' }
+        Invoke-NodeAction (Find-Node 'BatchAdd' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+        Wait-Node 'BatchAdd' $batchRoot.rootId 'Enabled' | Out-Null
+        Invoke-NodeAction (Find-Node 'BatchClose' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+        Invoke-NodeAction (Find-Node 'NavDownloads' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        Invoke-NodeAction (Find-Node 'QueuePauseButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        Wait-Node 'QueueStorageWarning' $mainRoot | Out-Null
+        $deadline.Restart()
+        do {
+            $queue = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)
+        } while (@($queue | Where-Object failureCategory -eq 'Disk').Count -ne 1 -and $deadline.Elapsed.TotalSeconds -lt 15)
+        if (@($queue | Where-Object failureCategory -eq 'Disk').Count -ne 1 -or @($queue | Where-Object status -eq 0).Count -ne 1) { throw 'Disk-full native flow did not leave one failed and one pending item.' }
+        $parts = @(Get-ChildItem -LiteralPath $settings.TemporaryDirectory -Recurse -File)
+        if (-not @($parts | Where-Object Name -like '*.partial.mp4').Count) { throw 'Native storage failure lost partials.' }
+        $warning = Find-Node 'QueueStorageWarning' $mainRoot
+        if ($warning.name -notmatch 'disk|dysku') { throw 'Localized storage banner missing.' }
+        # Safely make only this isolated QA checkpoint unwritable as a file. No
+        # disk filling, ACL changes, user queue or real application data is involved.
+        $qaQueue = Join-Path $dataRoot 'queue.json'
+        $qaQueueBackup = Join-Path $dataRoot 'queue-before-checkpoint-fault.json'
+        Move-Item -LiteralPath $qaQueue -Destination $qaQueueBackup
+        New-Item -ItemType Directory -Path $qaQueue | Out-Null
+        try {
+            Invoke-NodeAction (Find-Node 'QueuePauseButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            $deadline.Restart()
+            do { $warning = Find-Node 'QueueStorageWarning' $mainRoot } while ($warning.name -notmatch 'memory|pamięci' -and $deadline.Elapsed.TotalSeconds -lt 10)
+            if ($warning.name -notmatch 'memory|pamięci') { throw 'Failed Resume checkpoint did not expose persistence degradation.' }
+            if ((Find-Node 'QueuePauseButton' $mainRoot).name -notmatch 'Resume|Wznów') { throw 'Failed checkpoint reopened queue admission.' }
+        }
+        finally {
+            # The deliberately created target is an empty directory, never recurse.
+            if (Test-Path -LiteralPath $qaQueue -PathType Container) { Remove-Item -LiteralPath $qaQueue }
+            Move-Item -LiteralPath $qaQueueBackup -Destination $qaQueue
+        }
+        if ($CaptureVisual) {
+            Add-Type -AssemblyName System.Drawing
+            $bounds = (Find-Node 'MainWindow' $mainRoot).bounds
+            $picture = [Drawing.Bitmap]::new([int]$bounds.width, [int]$bounds.height)
+            $drawing = [Drawing.Graphics]::FromImage($picture)
+            try { Capture-OwnedBitmap $drawing; $capture = Join-Path $dataRoot 'hotfix-storage-native.png'; $picture.Save($capture); Write-Output "Hotfix storage capture: $capture" }
+            finally { $drawing.Dispose(); $picture.Dispose() }
+        }
+        # Retire this owned QA instance through the real close-confirmation path;
+        # a forced finally cleanup is not evidence of a successful clean close.
+        $script:automationProcess.CloseMainWindow() | Out-Null
+        Start-Sleep -Milliseconds 400
+        if (-not $script:automationProcess.HasExited) {
+            $closeRoots = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
+            $closeRoot = @($closeRoots.value | Where-Object rootId -ne $mainRoot) | Select-Object -First 1
+            if (-not $closeRoot) { throw 'Close confirmation missing with pending work.' }
+            Invoke-NodeAction (Find-Node 'ShutdownExit' $closeRoot.rootId) $closeRoot.rootId 'Invoke' | Out-Null
+        }
+        if (-not $script:automationProcess.WaitForExit(30000)) { throw 'Hotfix QA did not close cleanly.' }
+        Write-Output "Hotfix native smoke PASS ($Language/$Theme): normal startup, valid single/envelope JSON, safe persistent JSON error, examples, canonical handoff, ENOSPC pause, pending job blocked, partials retained, failed Resume checkpoint stays paused with unsaved-state warning, clean close. Profile=$dataRoot"
         return
     }
     if ($BatchSmoke -or $RealBatchSmoke) {
@@ -912,7 +1009,18 @@ try {
                 Start-Sleep -Milliseconds 250
             }
         }
-        if (-not $script:automationProcess.CloseMainWindow() -or -not $script:automationProcess.WaitForExit(30000)) { throw 'Pairing QA did not close cleanly.' }
+        if (-not $script:automationProcess.CloseMainWindow()) { throw 'Pairing QA close request failed.' }
+        # A running remote host intentionally counts as active work. Accept the
+        # real confirmation in this owned test instead of waiting behind its dialog.
+        $closeTimer = [Diagnostics.Stopwatch]::StartNew(); $closeRoot = $null
+        do {
+            $closeRoots = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
+            $closeRoot = @($closeRoots.value | Where-Object rootId -ne $mainRoot) | Select-Object -First 1
+        } while (-not $closeRoot -and $closeTimer.Elapsed.TotalSeconds -lt 10)
+        if (-not $closeRoot) { throw 'Active Web Remote close confirmation missing.' }
+        Invoke-NodeAction (Find-Node 'ShutdownExit' $closeRoot.rootId) $closeRoot.rootId 'Invoke' | Out-Null
+        if (-not $script:automationProcess.WaitForExit(30000) -or $script:automationProcess.ExitCode -ne 0) { throw 'Pairing QA did not close cleanly.' }
+        Write-Output 'Web Remote native smoke PASS: protected endpoints, pairing code and work-aware clean shutdown.'
         return
     }
     if ($NotificationsSmoke) {

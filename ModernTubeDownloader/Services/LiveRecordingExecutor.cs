@@ -13,14 +13,29 @@ public sealed class LiveRecordingExecutor(
     YtDlpMetadataService metadataService,
     FfmpegService ffmpeg,
     HistoryService history,
-    IAppLogger logger) : ILiveRecordingExecutor
+    IAppLogger logger,
+    QueueStorageSafety? storage = null) : ILiveRecordingExecutor
 {
     private readonly YtDlpDownloadService downloader = new(runner, settings, logger);
 
     public async Task ExecuteAsync(LiveSession live,
         Action<Action<LiveSession>, bool> update, CancellationToken cancellationToken)
-        => await runner.ExecuteAuthenticationAttemptAsync(live.SourceUrl,
-            () => ExecutePartAsync(live, update, cancellationToken), cancellationToken).ConfigureAwait(false);
+    {
+        ThrowIfStorageExhausted();
+        try
+        {
+            await runner.ExecuteAuthenticationAttemptAsync(live.SourceUrl,
+                () => ExecutePartAsync(live, update, cancellationToken), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error) { storage?.Report(error); throw; }
+    }
+
+    private void ThrowIfStorageExhausted()
+    {
+        // VOD persistence degradation alone must not stop the independent LIVE subsystem.
+        if (storage?.State.Kind is StorageFailureKind.DiskFull or StorageFailureKind.InsufficientSpace)
+            throw new StoragePausedException();
+    }
 
     private async Task ExecutePartAsync(LiveSession live,
         Action<Action<LiveSession>, bool> update, CancellationToken cancellationToken)
@@ -108,6 +123,7 @@ public sealed class LiveRecordingExecutor(
         var sampleTask = SampleCaptureAsync(live, partDirectory, previousDuration, partStartedAt, update, sampling.Token);
         try
         {
+            ThrowIfStorageExhausted();
             var output = await downloader.DownloadFormatAsync(live.SourceUrl, format, partDirectory, progress,
                 cancellationToken, mergeOutputFormat: "mkv", liveStartPolicy: effectivePolicy,
                 outputTemplate: "capture.%(ext)s").ConfigureAwait(false);
@@ -159,11 +175,15 @@ public sealed class LiveRecordingExecutor(
             // launch; LiveRecordingScheduler marks the session Interrupted.
             throw;
         }
-        catch
+        catch (Exception error)
         {
+            var storageFailure = error is StoragePausedException || StorageFailureClassifier.Classify(error) != StorageFailureKind.None;
+            storage?.Report(error);
             live.RecordedDuration = previousDuration + (DateTimeOffset.UtcNow - partStartedAt);
             update(current => { current.State = LiveSessionState.Finalizing; current.StatusMessageKey = "Queue.Detail.Finalizing"; }, true);
-            var finalized = await FinalizePartAsync(live, partDirectory, selection).ConfigureAwait(false);
+            // Do not start a fresh remux on the same exhausted volume. Keep raw
+            // fragments for the existing explicit recovery path after space is freed.
+            var finalized = storageFailure ? null : await FinalizePartAsync(live, partDirectory, selection).ConfigureAwait(false);
             if (finalized is not null)
                 await RecordPartAsync(live, finalized, partIndex, "Partial", update).ConfigureAwait(false);
             if (finalized is not null || HasRawData(partDirectory))
@@ -174,7 +194,7 @@ public sealed class LiveRecordingExecutor(
                     current.RecoveryWarningKey = finalized is null ? "Live.RawDataPreserved" : null;
                 }, true);
             }
-            if (!live.PreservePartial &&
+            if (!storageFailure && !live.PreservePartial &&
                 live.AttemptCount >= live.MaximumAttempts)
             {
                 RemoveRawWorkspace(live, logger);
@@ -223,6 +243,7 @@ public sealed class LiveRecordingExecutor(
     private async Task<string?> FinalizePartAsync(LiveSession live,
         string partDirectory, FormatSelection selection, string? preferredFile = null)
     {
+        ThrowIfStorageExhausted();
         var candidates = Directory.EnumerateFiles(partDirectory, "*", SearchOption.AllDirectories)
             .Where(path => !path.EndsWith(".ytdl", StringComparison.OrdinalIgnoreCase) &&
                            !path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
@@ -239,6 +260,7 @@ public sealed class LiveRecordingExecutor(
             var recovered = Path.Combine(partDirectory, "recovered.mkv");
             try
             {
+                ThrowIfStorageExhausted();
                 await ffmpeg.RemuxAsync(candidate, recovered, probe.DurationSeconds, null, CancellationToken.None)
                     .ConfigureAwait(false);
                 if (await CommitVerifiedPartAsync(live, recovered, selection).ConfigureAwait(false) is { } saved)
@@ -246,6 +268,7 @@ public sealed class LiveRecordingExecutor(
             }
             catch (Exception ex)
             {
+                if (ex is StoragePausedException || StorageFailureClassifier.Classify(ex) != StorageFailureKind.None) throw;
                 logger.Warning($"LIVE part could not be remuxed LiveSessionId={live.SessionId} PartIndex={live.PartIndex} Error={ex.GetType().Name}");
             }
         }
@@ -261,12 +284,16 @@ public sealed class LiveRecordingExecutor(
                 try
                 {
                     var recovered = Path.Combine(partDirectory, "recovered.mkv");
+                    ThrowIfStorageExhausted();
                     await ffmpeg.MergeAsync(video, audio, recovered, commonDuration, null, CancellationToken.None,
                         maximumDurationSeconds: commonDuration).ConfigureAwait(false);
                     return await CommitVerifiedPartAsync(live, recovered, selection, commonDuration).ConfigureAwait(false);
                 }
                 catch (Exception ex)
-                { logger.Warning($"LIVE split-stream recovery failed LiveSessionId={live.Id} Error={ex.GetType().Name}"); }
+                {
+                    if (ex is StoragePausedException || StorageFailureClassifier.Classify(ex) != StorageFailureKind.None) throw;
+                    logger.Warning($"LIVE split-stream recovery failed LiveSessionId={live.Id} Error={ex.GetType().Name}");
+                }
             }
         }
         return null;
@@ -294,6 +321,7 @@ public sealed class LiveRecordingExecutor(
         var finalPath = FileSystemUtilities.ResolveFinalPath(settings.Current.FinalOutputDirectory,
             $"{SafeTitle(live.Title)} [{FileSystemUtilities.SafeIdentifier(live.MediaId)}] [Part {live.PartIndex}]",
             "mkv", Settings.FileConflictBehavior.Rename, overwrite: false);
+        ThrowIfStorageExhausted();
         File.Move(recovered, finalPath);
         logger.Info($"LIVE part verified LiveSessionId={live.Id} PartIndex={live.PartIndex} " +
             $"RecoveredBytes={new FileInfo(finalPath).Length} RecordedDuration={verified.DurationSeconds:F1}");

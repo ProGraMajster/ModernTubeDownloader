@@ -41,6 +41,8 @@ public sealed class DownloadResilienceTests
     [InlineData("HTTP Error 503: Unavailable", DownloadFailureCategory.ServerError, true)]
     [InlineData("Private video", DownloadFailureCategory.Private, false)]
     [InlineData("Video is unavailable", DownloadFailureCategory.Unavailable, false)]
+    [InlineData("Playlist does not exist", DownloadFailureCategory.Unavailable, false)]
+    [InlineData("IncompleteRead: 100 more expected. Giving up after 10 retries", DownloadFailureCategory.Network, true)]
     [InlineData("Unsupported URL", DownloadFailureCategory.Unsupported, false)]
     [InlineData("Sign in to confirm your age", DownloadFailureCategory.Authentication, false)]
     [InlineData("ERROR: [youtube] RU6gEobXVHA: This live event will begin in 28 hours.", DownloadFailureCategory.Upcoming, false)]
@@ -167,6 +169,7 @@ public sealed class DownloadResilienceTests
     [InlineData("Private video", 2, true, 1, DownloadStatus.Failed)]
     [InlineData("Unsupported URL", 2, true, 1, DownloadStatus.Failed)]
     [InlineData("HTTP Error 403: Forbidden", 0, true, 1, DownloadStatus.Failed)]
+    [InlineData("IncompleteRead: 100 more expected. Giving up after 10 retries", 0, true, 1, DownloadStatus.Failed)]
     [InlineData("HTTP Error 403: Forbidden", 2, false, 1, DownloadStatus.Failed)]
     public async Task RetryLoopRespectsCategoryAndConfiguredAttemptLimit(
         string stderr, int extraAttempts, bool retryEnabled, int expectedAttempts, DownloadStatus expectedStatus)

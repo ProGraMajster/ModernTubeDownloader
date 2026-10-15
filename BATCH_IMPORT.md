@@ -1,4 +1,4 @@
-# Batch import (1.2.0)
+# Batch import (1.2.1 candidate)
 
 Open **Other → Batch import**, choose a TXT/CSV/JSON file, and import. Importing does
 not download or start analysis. Analyze with 1–8 metadata workers (default 3), pause,
@@ -9,7 +9,8 @@ unattended batch recording. Existing authentication and source checks are reused
 
 - TXT: one URL per line; blank lines and `#` comments ignored.
 - CSV: quoted RFC-style fields, required `url`, optional `quality,container,start,end`.
-- JSON: root array of URL strings or objects with these same fields; no `$type`,
+- JSON: root array of URL strings or objects with these same fields, a single `url`
+  object, or an object containing exactly one `urls` or `items` array; no `$type`,
   executable properties, external references, or unknown fields.
 - Quality: best, 2160, 1440, 1080, 720, 480, 360, audio (also `1080p`, `4k`).
 - Container: Auto/Mp4/Mkv/WebM. Times: seconds or `hh:mm:ss`; end must follow start.
@@ -17,6 +18,24 @@ unattended batch recording. Existing authentication and source checks are reused
 Limits: 250,000 rows, 256 MB input, 16 KiB textual lines/JSON strings, 64 KiB JSON
 objects/quoted CSV records (including multiline records). A page renders at most 20 rows; 50,000 imports do not create 50,000 controls
 or tasks. Search and filters operate on data before paging. Selection survives paging.
+
+JSON envelopes are streamed, not deserialized as a whole. Depth is limited to 8.
+`Supported formats` in the Batch window shows copyable examples:
+
+```json
+{"url":"https://example.com/video"}
+```
+
+```json
+{"urls":["https://example.com/one","https://example.com/two"]}
+```
+
+```json
+{"items":[{"url":"https://example.com/video","quality":"720"}]}
+```
+
+Unsupported roots/malformed JSON show a localized format explanation; technical parser
+details remain in the diagnostic log. Invalid individual rows remain visible row errors.
 With no selection, Analyze/Add applies to eligible rows; otherwise it applies to the
 selection. Apply/remove only changes preparation rows, never canonical active jobs.
 

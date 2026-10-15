@@ -91,13 +91,15 @@ public sealed class AppServices : IDisposable
         liveStore.MigrateLegacyQueueAsync(settings).GetAwaiter().GetResult();
         var live = new LiveSessionService(liveStore, settings, logger);
         live.LoadAsync().GetAwaiter().GetResult();
-        var queue = new DownloadQueueService(queueStore, logger, settings);
+        var storageSafety = new QueueStorageSafety(directories: () =>
+            [paths.RootDirectory, paths.AuthenticationDirectory, settings.Current.TemporaryDirectory, settings.Current.FinalOutputDirectory]);
+        var queue = new DownloadQueueService(queueStore, logger, settings, storageSafety);
         queue.LoadAsync().GetAwaiter().GetResult();
         var ffmpeg = new FfmpegService(processRunner, tools, logger);
-        var downloader = new DownloadJobExecutor(paths, settings, ytDlpRunner, metadata, ffmpeg, history, logger);
+        var downloader = new DownloadJobExecutor(paths, settings, ytDlpRunner, metadata, ffmpeg, history, logger, storageSafety);
         var processor = new QueueProcessor(queue, downloader, settings, logger);
         var liveScheduler = new LiveRecordingScheduler(live,
-            new LiveRecordingExecutor(settings, ytDlpRunner, metadata, ffmpeg, history, logger),
+            new LiveRecordingExecutor(settings, ytDlpRunner, metadata, ffmpeg, history, logger, storageSafety),
             new YtDlpLiveAvailabilityProbe(metadata), settings, logger);
         var thumbnails = new ThumbnailCacheService(paths, logger, () => settings.Current.DownloadThumbnail);
         var services = new AppServices(paths, logger, settings, localization, appearance, tools, metadata, queue, processor, history, thumbnails, httpClient);

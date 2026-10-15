@@ -2,6 +2,25 @@
 
 ## Boundaries
 
+### 1.2.1 storage safety boundary
+
+`QueueStorageSafety` is one process-local latch shared by existing VOD admission,
+queue persistence and executor phase boundaries; it is not another scheduler.
+Native disk-full HRESULTs and external ENOSPC diagnostics stop new jobs/phases without
+killing already running children. Persistence failure also latches degradation, retains
+the runtime queue and stops background retry storms. Immutable checkpoint snapshots and
+revision/failure generations prevent a stale save from clearing a newer failure.
+Explicit Resume probes configured writable directories, saves a current checkpoint and
+the pause preference, then reopens admission. Failed recovery remains paused. A best-effort
+persisted pause survives restart when storage permits; no application can guarantee a new
+checkpoint or pause preference on an unwritable disk. A forced exit can lose unsaved runtime
+changes. LIVE retains its independent scheduler/recovery; no new LIVE cancellation policy.
+Known-size preflight includes a 64 MiB reserve; unavailable/unknown sizes remain advisory.
+Partial/recovery workspaces survive storage errors regardless of ordinary failure cleanup.
+
+Notification provider failure recovery belongs to MFN's canonical service. MTD only treats
+notifications as optional and deduplicates diagnostic warning categories with a shutdown summary.
+
 The canonical `ModernTubeDownloader.slnx` contains six application/test projects plus the pinned framework source graph:
 
 - `ModernTubeDownloader` — the production .NET 10 Windows application and ModernFormsNext UI.
@@ -175,7 +194,7 @@ For isolated process/UI integration tests, `MODERNTUBEDOWNLOADER_DATA_ROOT` can 
 
 ## Build and release packaging
 
-Application and assembly versioning is centralized in `Directory.Build.props`. The application builds against a configurable `ModernFormsNextRoot`; local development defaults to the ignored `.mfn-master-worktree`, while CI checks out the exact `ModernFormsNextCommit` (`d36015711f63945a49025675acb9aca3df60101d`, origin/master fetched 2026-10-11) into an ignored dependency directory. CI/release read that central pin, verify the clean checkout and do not maintain a second hardcoded SHA. This source reference keeps development, CI, and release on the same framework revision; a NuGet migration is a separate decision.
+Application and assembly versioning is centralized in `Directory.Build.props`. The application builds against a configurable `ModernFormsNextRoot`; local development defaults to the ignored `.mfn-master-worktree`, while CI checks out the exact `ModernFormsNextCommit` (`8d8a7679779608b4edbee7dc687c13e3b1a611d9`, notification hotfix PR #271 based on master `18f47b085a59e65eb611e3fd1d38e8dffa3fb19c`) into an ignored dependency directory. CI/release read that central pin, verify the clean checkout and do not maintain a second hardcoded SHA. No local framework patch is needed for source builds. The earlier local 1.2.1 candidate artifact records its pre-commit patch fingerprints/provenance; it is not represented as a build of the later Git commit. An explicit candidate-only opt-in remains available for local patch qualification; default clean-pin gates remain enforced. A NuGet migration is a separate decision.
 
 The supported 1.0.0 distribution is self-contained `win-x64`. Publishing is deliberately multi-file, untrimmed, and without ReadyToRun or NativeAOT so ModernFormsNext reflection, resources, and native Skia dependencies retain their validated behavior. `scripts/Build-Release.ps1` creates a clean end-user directory, excludes PDB/test/fake-tool/managed-tool files, produces a separate symbols archive, and writes a SHA-256 checksum.
 

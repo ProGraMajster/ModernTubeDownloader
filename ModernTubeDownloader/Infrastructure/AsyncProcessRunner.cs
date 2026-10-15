@@ -27,7 +27,8 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
         foreach (var argument in request.Arguments)
             startInfo.ArgumentList.Add(argument);
 
-        logger.Info($"Starting process: {Path.GetFileName(request.FileName)} {RedactArguments(request.Arguments)}");
+        var correlation = ProcessLogContext.Describe(request);
+        logger.Info($"Starting process: {Path.GetFileName(request.FileName)} {RedactArguments(request.Arguments)}; {correlation}");
         var standardOutput = new ConcurrentQueue<string>();
         var standardError = new ConcurrentQueue<string>();
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
@@ -68,7 +69,7 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
 
         cancellationToken.ThrowIfCancellationRequested();
         var result = new ProcessRunResult(process.ExitCode, standardOutput.ToArray(), standardError.ToArray(), stopwatch.Elapsed);
-        logger.Info($"Process ended: {Path.GetFileName(request.FileName)}, exit={result.ExitCode}, duration={result.Duration.TotalSeconds:F2}s");
+        logger.Info($"Process ended: {Path.GetFileName(request.FileName)}, exit={result.ExitCode}, duration={result.Duration.TotalSeconds:F2}s; {correlation}");
         return result;
     }
 

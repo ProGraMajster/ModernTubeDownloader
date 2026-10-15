@@ -27,6 +27,7 @@ internal sealed class BatchImportForm : Form
     private int page;
     private bool busy, disposed;
     private string signature = "";
+    private string? lastErrorKey;
     public Func<Form, IDisposable?>? RegisterDialog { get; set; }
     public BatchImportForm(AppServices services, BatchImportSession? session = null)
     {
@@ -43,6 +44,7 @@ internal sealed class BatchImportForm : Form
         foreach (var value in Enum.GetValues<BatchFilter>()) filter.Items.Add(services.Localization["Batch.Filter." + value]); filter.SelectedIndex = 0;
         void Add(string key, Action action) { var button = new Button { Width = 160, Height = 38, Margin = new Padding(0, 0, 8, 8), AccessibleAutomationId = "Batch" + key }; AppUi.Secondary(button); button.Click += (_, _) => action(); toolbar.Controls.Add(button); buttons.Add(key, button); }
         Add("Browse", () => _ = RunAsync(BrowseAsync)); Add("Import", () => _ = RunAsync(ImportAsync));
+        Add("Examples", () => _ = RunAsync(ShowExamplesAsync));
         Add("Analyze", () => _ = RunAsync(AnalyzeAsync)); Add("Pause", () => _ = RunAsync(async () => { if (this.session is { } s) await services.Batch.SetPausedAsync(s, !s.Paused); }));
         Add("Cancel", () => _ = RunAsync(services.Batch.CancelAsync)); Add("Add", () => _ = RunAsync(async () => { if (this.session is { } s) await services.Batch.AddReadyAsync(s, selection.Count == 0 ? null : selection); }));
         Add("Export", () => _ = RunAsync(ExportAsync)); Add("SelectPage", () => { if (this.session is { } s) foreach (var entry in CurrentPage(s).Entries) selection.Add(entry.Id); signature = ""; Render(); });
@@ -71,15 +73,42 @@ internal sealed class BatchImportForm : Form
     private async Task RunAsync(Func<Task> action, bool showError = true)
     {
         if (disposed || busy) return; busy = true;
-        try { await action(); if (showError) signature = ""; }
+        try { await action(); if (showError) { signature = ""; lastErrorKey = null; } }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { services.Logger.Error("Batch UI action failed.", ex); if (!disposed && showError) status.Text = services.Localization[ex is InvalidDataException && ex.Message.StartsWith("Batch.") ? ex.Message : "Batch.Error.Analysis"]; }
-        finally { busy = false; if (!disposed) Render(); }
+        catch (Exception ex)
+        {
+            services.Logger.Error("Batch UI action failed.", ex);
+            if (!disposed && showError)
+            {
+                lastErrorKey = ex is BatchJsonFormatException ? "Batch.Error.JsonFormat" :
+                    ex is InvalidDataException && ex.Message.StartsWith("Batch.") ? ex.Message : "Batch.Error.Analysis";
+                signature = "";
+            }
+        }
+        finally { busy = false; if (!disposed) { Render(); LayoutPage(); } }
     }
     private async Task BrowseAsync()
     {
         var dialog = new OpenFileDialog(); dialog.AddFilter("TXT / CSV / JSON", "*.txt", "*.csv", "*.json");
         if (await dialog.ShowDialog(this) == DialogResult.OK && dialog.FileName is { } file) path.Text = file;
+    }
+    private async Task ShowExamplesAsync()
+    {
+        using var dialog = new Form { Text = services.Localization["Batch.Examples"], Size = new System.Drawing.Size(700, 570), MinimumSize = new System.Drawing.Size(520, 400) };
+        dialog.AccessibilityObject.AutomationId = "BatchExamplesWindow";
+        AppBranding.Apply(dialog);
+        var scroll = new ScrollableControl { Dock = DockStyle.Fill, AutoScroll = true };
+        AppUi.BindBackground(scroll);
+        var help = AppUi.Muted(services.Localization["Batch.Examples.Help"] + "\n\n" + BatchJsonExamples.Text);
+        help.Multiline = true; help.Dock = DockStyle.Top; help.Height = AppTypography.TextHeight(740); help.Padding = new Padding(16);
+        help.AccessibleAutomationId = "BatchExamplesText";
+        var close = new Button { Text = services.Localization["Common.Close"], Dock = DockStyle.Bottom,
+            Height = AppTypography.TextHeight(40), AccessibleAutomationId = "BatchExamplesClose" };
+        AppUi.Secondary(close);
+        close.Click += (_, _) => dialog.Close();
+        scroll.Controls.Add(help); dialog.Controls.AddRange([scroll, close]);
+        using var registration = RegisterDialog?.Invoke(dialog);
+        await dialog.ShowDialog(this);
     }
     private async Task ImportAsync()
     {
@@ -105,14 +134,14 @@ internal sealed class BatchImportForm : Form
     private void Render()
     {
         if (disposed) return;
-        foreach (var (key, button) in buttons) button.Enabled = !busy && (session is not null || key is "Browse" or "Import" or "Close");
+        foreach (var (key, button) in buttons) button.Enabled = !busy && (session is not null || key is "Browse" or "Import" or "Examples" or "Close");
         buttons["Analyze"].Enabled &= !services.Batch.IsAnalyzing; buttons["Pause"].Enabled &= services.Batch.IsAnalyzing;
-        if (session is not { } s) { status.Text = services.Localization["Batch.Empty"]; return; }
+        if (session is not { } s) { status.Text = services.Localization[lastErrorKey ?? "Batch.Empty"]; return; }
         var data = CurrentPage(s); page = data.Page; pageText.Text = services.Localization.Get("Sources.Page", page + 1, data.Pages, data.Total);
         progress.Visible = AppearancePresentation.Current.BatchImport.Progress != ProgressPresentation.Hidden;
         lock (s.Sync) progress.Value = s.ImportedCount == 0 ? 0 : Math.Clamp((int)(100L * s.Entries.Count(e => e.Status is not (BatchEntryStatus.Pending or BatchEntryStatus.Analyzing or BatchEntryStatus.Validating)) / s.ImportedCount), 0, 100);
         buttons["Previous"].Enabled &= page > 0; buttons["Next"].Enabled &= page < data.Pages - 1;
-        status.Text = services.Localization.Get("Batch.Summary", s.FileName, s.ImportedCount, selection.Count,
+        status.Text = lastErrorKey is { } importErrorKey ? services.Localization[importErrorKey] : services.Localization.Get("Batch.Summary", s.FileName, s.ImportedCount, selection.Count,
             services.Localization[s.Paused ? "Batch.Paused" : "Batch.Running"]);
         buttons["Pause"].Text = services.Localization[s.Paused ? "Batch.Resume" : "Batch.Pause"];
         var nextSignature = string.Join(';', data.Entries.Select(entry => $"{entry.Id}/{entry.Status}/{entry.Quality}/{entry.Container}/{entry.Title}/{entry.Range}"));
@@ -176,21 +205,23 @@ internal sealed class BatchImportForm : Form
         heading.SetBounds(20, 12, width, 38); path.SetBounds(20, 58, width - 426, 36);
         quality.SetBounds(path.Right + 10, 58, 160, 36); container.SetBounds(quality.Right + 10, 58, 150, 36); workers.SetBounds(container.Right + 10, 58, 86, 36);
         toolbar.SetBounds(20, 104, width, 142); filter.SetBounds(20, 252, 170, 36); search.SetBounds(200, 252, width - 710, 36); range.SetBounds(width - 500, 250, 520, 100);
-        status.SetBounds(20, 300, width - 540, 44); status.Multiline = true;
-        rows.SetBounds(20, 358, width, Math.Max(160, body.ClientSize.Height - 410)); pageText.SetBounds(20, rows.Bottom + 6, width, 32); LayoutRows();
+        var statusHeight = lastErrorKey is null ? 44 : 100;
+        status.SetBounds(20, 300, width - 540, statusHeight); status.Multiline = true;
+        var rowsTop = Math.Max(358, status.Bottom + 14);
+        rows.SetBounds(20, rowsTop, width, Math.Max(160, body.ClientSize.Height - rowsTop - 52)); pageText.SetBounds(20, rows.Bottom + 6, width, 32); LayoutRows();
         if (AppTypography.Scale > 1) {
             heading.Height = AppTypography.TextHeight(38); path.Top = quality.Top = container.Top = workers.Top = heading.Bottom + 8;
             foreach (var input in new Control[] { path, quality, container, workers }) input.Height = AppTypography.TextHeight(36);
             foreach (var button in buttons.Values) { button.Height = AppTypography.TextHeight(38); button.Width = Math.Min(width, AppTypography.TextHeight(160)); }
             toolbar.Top = path.Bottom + 10; toolbar.Height = (int)Math.Ceiling(buttons.Count / (double)Math.Max(1, width / (Math.Min(width, AppTypography.TextHeight(160)) + 8))) * (AppTypography.TextHeight(38) + 8);
             filter.Top = search.Top = toolbar.Bottom + 8; filter.Height = search.Height = AppTypography.TextHeight(36);
-            range.SetBounds(20, filter.Bottom + 8, width, AppTypography.TextHeight(100)); status.SetBounds(20, range.Bottom + 8, width, AppTypography.TextHeight(44));
+            range.SetBounds(20, filter.Bottom + 8, width, AppTypography.TextHeight(100)); status.SetBounds(20, range.Bottom + 8, width, AppTypography.TextHeight(statusHeight));
             rows.Top = status.Bottom + 16; rows.Height = Math.Max(180, body.ClientSize.Height - rows.Top - 54); pageText.Top = rows.Bottom + 8; pageText.Height = AppTypography.TextHeight(32);
         }
         progress.SetBounds(20, rows.Top - 10, width, AppearancePresentation.Current.BatchImport.Progress == ProgressPresentation.Compact ? 3 : 8);
         foreach (var child in body.Controls) { child.Left += origin.X; child.Top += origin.Y; }
     }
-    private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() => { if (!disposed) { ApplyText(); signature = ""; Render(); } });
+    private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() => { if (!disposed) { ApplyText(); signature = ""; Render(); LayoutPage(); } });
     protected override void Dispose(bool disposing)
     {
         if (disposing && !disposed) { disposed = true; lifetime.Cancel(); timer.Stop(); timer.Dispose(); services.Localization.LanguageChanged -= LanguageChanged; lifetime.Dispose(); }

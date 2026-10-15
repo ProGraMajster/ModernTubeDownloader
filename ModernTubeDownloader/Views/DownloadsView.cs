@@ -77,6 +77,7 @@ internal sealed class DownloadsView : UserControl
     private readonly Panel queueToolbar;
     private readonly Label queueTitle;
     private readonly Label admissionCountdown;
+    private readonly Label storageWarning;
     private readonly ModernFormsNext.Timer admissionCountdownTimer;
     private readonly Button pauseButton;
     private readonly Button moreButton;
@@ -221,6 +222,14 @@ internal sealed class DownloadsView : UserControl
         AppUi.BindBackground(queueToolbar);
         queueTitle = AppUi.Heading(string.Empty, 16.5f);
         admissionCountdown = AppUi.Muted();
+        storageWarning = AppUi.Muted();
+        AppUi.Card(storageWarning, secondary: true);
+        AppTypography.Bind(storageWarning, AppTextToken.BodyStrong);
+        storageWarning.Padding = new Padding(12);
+        storageWarning.TextAlign = ContentAlignment.MiddleLeft;
+        storageWarning.Multiline = true;
+        storageWarning.AccessibleAutomationId = "QueueStorageWarning";
+        storageWarning.Visible = false;
         admissionCountdown.AccessibleAutomationId = "QueueAdmissionCountdown";
         admissionCountdown.Visible = false;
         pauseButton = new Button { AccessibleAutomationId = "QueuePauseButton" };
@@ -265,7 +274,7 @@ internal sealed class DownloadsView : UserControl
         queueArea.Controls.Add(queueHost);
         queueArea.Controls.Add(queueEmpty);
 
-        Controls.AddRange([header, urlPanel, previewPanel, playlistPreview, queueToolbar, queueArea]);
+        Controls.AddRange([header, urlPanel, previewPanel, playlistPreview, queueToolbar, storageWarning, queueArea]);
         SizeChanged += ViewSizeChanged;
         text.LanguageChanged += LanguageChanged;
         services.Queue.Changed += QueueChanged;
@@ -385,6 +394,11 @@ internal sealed class DownloadsView : UserControl
         AppTypography.ReflowRows(queueToolbar);
 
         var queueTop = queueToolbar.Bottom + 4;
+        if (services.Queue.Storage.State.IsBlocked)
+        {
+            storageWarning.SetBounds(page, queueTop, width, AppTypography.TextHeight(services.Queue.Storage.State.PersistenceDegraded ? 136 : 108));
+            queueTop = storageWarning.Bottom + 4;
+        }
         queueArea.SetBounds(page, queueTop, width, Math.Max(100, ClientSize.Height - queueTop - 16));
         var emptyCenter = Math.Max(70, queueEmpty.Height / 2);
         queueEmptyIcon.SetBounds(Math.Max(12, (queueEmpty.Width - queueEmptyIcon.Width) / 2), Math.Max(10, emptyCenter - 74), queueEmptyIcon.Width, queueEmptyIcon.Height);
@@ -976,6 +990,14 @@ internal sealed class DownloadsView : UserControl
 
     private void UpdateAdmissionCountdown()
     {
+        var storage = services.Queue.Storage.State;
+        var changed = storageWarning.Visible != storage.IsBlocked || storage.IsBlocked &&
+            storageWarning.Height != AppTypography.TextHeight(storage.PersistenceDegraded ? 136 : 108);
+        storageWarning.Visible = storage.IsBlocked;
+        storageWarning.Text = storage.IsBlocked ? text[storage.MessageKey] +
+            (storage.PersistenceDegraded && storage.Kind != StorageFailureKind.None ? "\n" + text["Storage.PersistenceDegraded"] : "") +
+            (storage.Directory is { Length: > 0 } directory ? "\n" + directory : "") : "";
+        if (changed) UpdateLayout();
         var remaining = services.Processor.RemainingAdmissionDelay;
         var seconds = remaining is { } delay ? (int)Math.Ceiling(delay.TotalSeconds) : 0;
         admissionCountdown.Visible = seconds > 0;

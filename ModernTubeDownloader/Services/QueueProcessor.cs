@@ -204,6 +204,7 @@ public sealed class QueueProcessor : IDisposable
 
     private async Task ProcessItemAsync(DownloadQueueItem item, ActiveDownload active)
     {
+        var executionStarted = false;
         try
         {
             var maxAttempts = settings.Current.RetryFailedDownloads
@@ -211,6 +212,7 @@ public sealed class QueueProcessor : IDisposable
             for (var attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 active.Cancellation.Token.ThrowIfCancellationRequested();
+                queue.Storage.ThrowIfBlocked();
                 queue.Update(item.Id, current =>
                 {
                     current.AttemptCount = attempt;
@@ -220,10 +222,14 @@ public sealed class QueueProcessor : IDisposable
                     current.FinalFile = null;
                     current.ProgressPercent = 0;
                 }, true);
+                await queue.CheckpointBeforeStartAsync(active.Cancellation.Token).ConfigureAwait(false);
                 var started = timing.UtcNow;
                 logger.Info($"Download started QueueItemId={item.Id} MediaId={item.VideoId} Attempt={attempt} MaxAttempts={maxAttempts} QualityPreset={item.QualityPresetId} Container={item.PreferredVideoContainer} VideoFormatId={item.SelectedFormats?.VideoFormatId ?? "unresolved"} AudioFormatId={item.SelectedFormats?.AudioFormatId ?? "none"}");
                 try
                 {
+                    using var correlation = ProcessLogContext.Begin(item.Id, attempt, "download");
+                    queue.Storage.ThrowIfBlocked();
+                    executionStarted = true;
                     await executor.ExecuteAsync(item, (update, persist) => queue.Update(item.Id, update, persist), active.Cancellation.Token).ConfigureAwait(false);
                     queue.Update(item.Id, current =>
                     {
@@ -236,8 +242,10 @@ public sealed class QueueProcessor : IDisposable
                     return;
                 }
                 catch (OperationCanceledException) { throw; }
+                catch (StoragePausedException) { throw; }
                 catch (Exception ex)
                 {
+                    queue.ReportStorageFailure(ex);
                     var stage = item.Status;
                     var failure = DownloadFailureClassifier.Classify(ex, stage);
                     var retry = failure.Retryable && attempt < maxAttempts;
@@ -281,6 +289,16 @@ public sealed class QueueProcessor : IDisposable
                 }
             }
         }
+        catch (Exception error) when (error is StoragePausedException || !executionStarted && queue.Storage.State.IsBlocked)
+        {
+            queue.Update(item.Id, current =>
+            {
+                current.Status = executionStarted ? DownloadStatus.Interrupted : DownloadStatus.Queued;
+                current.StatusMessageKey = "Queue.Detail.StoragePaused";
+                current.SpeedBytesPerSecond = null;
+                current.Eta = null;
+            }, true);
+        }
         catch (OperationCanceledException)
         {
             queue.Update(item.Id, queueItem =>
@@ -302,6 +320,7 @@ public sealed class QueueProcessor : IDisposable
         }
         catch (Exception ex)
         {
+            queue.ReportStorageFailure(ex);
             var failure = DownloadFailureClassifier.Classify(ex, item.Status);
             queue.Update(item.Id, current =>
             {
@@ -318,8 +337,7 @@ public sealed class QueueProcessor : IDisposable
         }
         finally
         {
-            try { await queue.SaveAsync(CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception ex) { logger.Error($"Could not save the queue after processing item {item.Id}.", ex); }
+            try { await queue.SaveSafelyAsync().ConfigureAwait(false); }
             finally
             {
                 // StopAsync must own the task until its final durable save has finished.

@@ -174,6 +174,7 @@ public sealed class LiveRecordingScheduler : IDisposable, ILiveSessionCommands
                 });
                 try
                 {
+                    using var correlation = ProcessLogContext.Begin(session.Id, attempt, "live");
                     await executor.ExecuteAsync(session, (change, persist) => live.Update(session.Id, change, persist),
                         worker.Cancellation.Token).ConfigureAwait(false);
                     return;
