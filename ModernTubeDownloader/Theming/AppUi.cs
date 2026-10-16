@@ -30,6 +30,12 @@ internal static class AppUi
         state.Refresh();
     }
 
+    public static void BindBorder(Control control, string token)
+    {
+        var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
+        state.BorderToken = token; state.Refresh();
+    }
+
     public static void BindInteractiveSurface(Control control, string normalToken, string hoverToken)
     {
         var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
@@ -203,10 +209,18 @@ internal static class AppUi
             target = new WeakReference<Control>(control);
             handler = ThemeChanged;
             ThemeManager.Current.ThemeChanged += handler;
+            control.Disposed += TargetDisposed;
+        }
+
+        private void TargetDisposed(object? sender, EventArgs e)
+        {
+            ThemeManager.Current.ThemeChanged -= handler;
+            if (sender is Control control) control.Disposed -= TargetDisposed;
         }
 
         public string? BackgroundToken { get; set; }
         public string? ForegroundToken { get; set; }
+        public string? BorderToken { get; set; }
         public ButtonVariant? ButtonVariant { get; set; }
         public bool IsComboBox { get; set; }
         public bool IsCard { get; set; }
@@ -217,6 +231,7 @@ internal static class AppUi
             if (!target.TryGetTarget(out var control))
                 return;
             if (IsCard) control.Style.Border.Radius = AppearancePresentation.Current.Global.CornerRadius;
+            if (BorderToken is not null) { control.Style.Border.Width = 1; control.Style.Border.Color = GetColor(BorderToken); }
             if (control is Button effectsButton)
             {
                 if (effectsButton.Ripple is { } ripple) ripple.Enabled = AppearancePresentation.Current.Global.Animations;

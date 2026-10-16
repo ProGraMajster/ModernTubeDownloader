@@ -10,6 +10,8 @@ public static class AppTypography
 {
     private sealed record Binding(float Size, FontStyle Style);
     private static readonly ConditionalWeakTable<Control, Binding> bindings = new();
+    private sealed record Presentation(bool Dashboard);
+    private static readonly ConditionalWeakTable<Control, Presentation> presentationRoots = new();
     private static readonly List<WeakReference<Control>> targets = [];
     private static readonly Dictionary<int, Action> layouts = [];
     private sealed record RowFrame(int Top, int Height, int AppliedTop, int AppliedHeight);
@@ -32,9 +34,22 @@ public static class AppTypography
     private static void Remove(object? sender, EventArgs e) { if (sender is Control control) bindings.Remove(control); }
     private static void Apply(Control control, Binding binding)
     {
-        control.Font = Font(binding.Size, binding.Style);
+        var factor = 1f;
+        for (Control? root = control; root is not null; root = root.Parent)
+            if (presentationRoots.TryGetValue(root, out var presentation)) { factor = presentation.Dashboard ? 1.28f : 1; break; }
+        control.Font = Font(binding.Size * factor, binding.Style);
         foreach (var style in new[] { control.Style, control.StyleHover, control.StyleFocused, control.StylePressed, control.StyleDisabled }) style.TextFont = control.Font;
         control.Invalidate();
+    }
+    internal static void SetDashboardPresentation(Control root, bool dashboard)
+    {
+        presentationRoots.Remove(root); presentationRoots.Add(root, new(dashboard));
+        RefreshPresentation(root);
+    }
+    private static void RefreshPresentation(Control root)
+    {
+        if (bindings.TryGetValue(root, out var binding)) Apply(root, binding);
+        foreach (var child in root.Controls) RefreshPresentation(child);
     }
     public static void SetScale(int percent)
     {

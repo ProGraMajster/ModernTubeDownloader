@@ -12,7 +12,7 @@ internal enum AppIconKind
     Queue,
     Live,
     History,
-    Settings
+    Settings, Help, Info
 }
 
 internal sealed class AppVectorIcon : UserControl
@@ -83,6 +83,13 @@ internal sealed class AppVectorIcon : UserControl
                 AddCircle(2 * scale, 2 * scale, 20 * scale, scale);
                 AddLine(12 * scale, 12 * scale, 12 * scale, 7 * scale, scale);
                 AddLine(12 * scale, 12 * scale, 16 * scale, 14 * scale, scale);
+                break;
+            case AppIconKind.Help:
+            case AppIconKind.Info:
+                AddCircle(2 * scale, 2 * scale, 20 * scale, scale);
+                if (kind == AppIconKind.Help) AddPath(scale, [OpenFigure((8, 8), (9, 5), (15, 5), (16, 9), (12, 12), (12, 14))]);
+                else AddLine(12 * scale, 10 * scale, 12 * scale, 17 * scale, scale);
+                AddFilledCircle(11 * scale, (kind == AppIconKind.Help ? 17 : 6) * scale, 2 * scale);
                 break;
             case AppIconKind.Settings:
                 AddLine(4 * scale, 6 * scale, 20 * scale, 6 * scale, scale);
