@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Optional Modern Dashboard interface, retaining Classic as the default.
+- Runtime interface selection and session-only `--classic-ui` recovery.
+- Dashboard queue inspector and editable queued options.
+- Real download speed, storage and observed-process widgets.
+- Responsive shell layout, bounded queue/history pages and shared navigation.
+- Modern LIVE, History, Other, Batch and categorized Settings presentation.
+
+Development identity: **1.3.0-candidate.1**, local only; no 1.3.0 release published.
+
+
 ## 1.2.1-candidate.1 — local, unreleased
 
 - Pause VOD admission and new media phases after confirmed disk exhaustion; retain partials

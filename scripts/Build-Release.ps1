@@ -182,6 +182,8 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'UPDATES.md') -Destination $re
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'TRAY_AND_STARTUP.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'BATCH_IMPORT.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'PERSONALIZATION.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'MODERN_DASHBOARD_UI.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'MFN_DASHBOARD_REPRO.md') -Destination $releaseRoot
 Copy-Item -LiteralPath $licensePath -Destination $releaseRoot
 
 # Keep redistribution notices from the exact restored packages, not a moving web page.

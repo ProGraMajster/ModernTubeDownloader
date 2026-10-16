@@ -1,5 +1,15 @@
 # Current status
 
+## Optional Modern Dashboard — local 1.3.0-candidate.1
+
+Development branch: `feature/modern-dashboard-ui`, based on `558ec43`. No stable
+release promotion. Classic is the migration default; both shells share the same
+AppServices and page instances. Source, responsiveness and qualification details:
+[MODERN_DASHBOARD_UI.md](MODERN_DASHBOARD_UI.md). Visual match is PARTIAL: native premature ellipsis is tracked in MFN #272, and owner visual acceptance is pending. Physical high-DPI qualification has not been executed.
+The full machine-specific evidence and branch-isolation report stays local in
+`MODERN_DASHBOARD_CANDIDATE1_REPORT.md`, excluded from publication/package data.
+
+
 ## Local 1.2.1-candidate.1 hotfix — 2026-10-15
 
 Qualification: **READY FOR OWNER MANUAL TEST**, not public/stable promotion.
