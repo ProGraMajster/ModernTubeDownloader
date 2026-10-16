@@ -54,6 +54,13 @@ internal sealed class MediaRangeEditor : Panel
         return error is null;
     }
 
+    public bool CompactLayout { get; set; }
+    public void SetRange(MediaTimeRange value)
+    {
+        mode.SelectedIndex = value.Mode == MediaRangeMode.Custom ? 1 : 0;
+        from.Text = value.Start?.ToString(@"hh\:mm\:ss") ?? ""; to.Text = value.End?.ToString(@"hh\:mm\:ss") ?? "";
+    }
+
     public void Reset()
     {
         mode.SelectedIndex = 0;
@@ -83,6 +90,14 @@ internal sealed class MediaRangeEditor : Panel
 
     private void LayoutControls()
     {
+        if (CompactLayout)
+        {
+            var line = AppTypography.TextHeight(28); var field = AppTypography.TextHeight(34);
+            label.SetBounds(0, 0, Width, line); mode.SetBounds(0, line + 2, Width, field);
+            fromLabel.SetBounds(0, mode.Bottom + 6, Width, line); from.SetBounds(0, fromLabel.Bottom, Width, field);
+            toLabel.SetBounds(0, from.Bottom + 6, Width, line); to.SetBounds(0, toLabel.Bottom, Width, field);
+            return;
+        }
         var available = Math.Max(450, Width);
         label.SetBounds(0, 7, 88, 24);
         mode.SetBounds(90, 0, 142, 34);

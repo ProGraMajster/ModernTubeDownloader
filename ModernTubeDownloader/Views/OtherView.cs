@@ -4,7 +4,7 @@ using ModernTubeDownloader.Theming;
 
 namespace ModernTubeDownloader.Views;
 
-internal sealed class OtherView : UserControl
+internal sealed partial class OtherView : UserControl
 {
     private readonly AppServices services;
     private readonly Label heading = AppUi.Heading("", 22);
@@ -40,7 +40,7 @@ internal sealed class OtherView : UserControl
             foreach (var session in sessions.Take(5))
             {
                 var button = new Button { Text = $"{session.FileName} • {session.ImportedCount}", AccessibleAutomationId = "BatchRecent" + session.Id.ToString("N") };
-                AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(400, Width - 100), 38); y += 44;
+                AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
                 button.Click += async (_, _) => { try { ResumeBatch?.Invoke(this, await services.Batch.OpenAsync(session.Id)); } catch (Exception ex) { services.Logger.Error("Batch session could not be reopened.", ex); } };
                 recent.Controls.Add(button);
             }
@@ -75,6 +75,7 @@ internal sealed class OtherView : UserControl
     }
     private void LayoutPage()
     {
+        if (dashboard) { LayoutDashboard(); return; }
         var width = Math.Max(480, ClientSize.Width - 48);
         heading.SetBounds(24, 20, width, AppTypography.TextHeight(36)); subtitle.SetBounds(24, heading.Bottom + 8, width, AppTypography.TextHeight(32));
         tools.SetBounds(24, subtitle.Bottom + 16, width, Math.Max(154, ClientSize.Height - subtitle.Bottom - 40));

@@ -11,7 +11,7 @@ using SkiaSharp;
 
 namespace ModernTubeDownloader.Views;
 
-internal sealed class DownloadsView : UserControl
+internal sealed partial class DownloadsView : UserControl
 {
 #if DEBUG
     internal Func<Form, IDisposable?>? RegisterDetailsForAutomation { get; set; }
@@ -99,7 +99,7 @@ internal sealed class DownloadsView : UserControl
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private bool disposed;
 
-    public DownloadsView(AppServices services)
+    public DownloadsView(AppServices services, bool useDashboard = false)
     {
         this.services = services;
         text = services.Localization;
@@ -280,15 +280,23 @@ internal sealed class DownloadsView : UserControl
         services.Queue.Changed += QueueChanged;
         services.Settings.Changed += SettingsChanged;
         services.Tools.Changed += ToolStatusChanged;
-        ApplyLocalization();
-        SetPreviewState(PreviewState.Empty);
-        BuildQueueCards();
-        UpdateLayout();
+        try
+        {
+            if (useDashboard) { dashboard = true; EnsureDashboard(); }
+            ApplyLocalization();
+            SetPreviewState(PreviewState.Empty);
+            BuildQueueCards();
+            UpdateLayout();
+        }
+        catch { Dispose(); throw; }
         AppTypography.RegisterLayout(this, UpdateLayout);
     }
 
     private void UpdateLayout()
     {
+        if (dashboard) { LayoutDashboard(); return; }
+        header.Visible = urlLabel.Visible = supportedSourcesButton.Visible = true;
+        pasteIcon.Visible = true; pasteButton.Text = "";
         AutoScroll = AppTypography.Scale > 1.25;
         var displayOrigin = DisplayRectangle.Location;
         const int page = 28;
@@ -975,6 +983,7 @@ internal sealed class DownloadsView : UserControl
             else if (e.ItemId is { } id && cards.TryGetValue(id, out var card) && services.Queue.Find(id) is { } item)
                 card.UpdateItem(item, selectedItemId == id);
             BuildQueueMenu();
+            if (dashboard) { RefreshDashboardSelection(); queueTitle.Text = text.Get("Dashboard.QueueTitle", services.Queue.Snapshot().Count); }
         });
     }
 
@@ -1038,14 +1047,17 @@ internal sealed class DownloadsView : UserControl
                 card.Dispose();
             cards.Clear();
             queueHost.Controls.Clear();
-            foreach (var item in items)
+            if (dashboard) dashboardPage = Math.Clamp(dashboardPage, 0, Math.Max(0, (items.Count - 1) / DashboardPageSize));
+            foreach (var item in dashboard ? items.Skip(dashboardPage * DashboardPageSize).Take(DashboardPageSize) : items)
             {
                 var card = new QueueItemCard(services.Thumbnails, text);
+                card.SetDashboard(dashboard);
+                card.KeyDown += DashboardKeys;
                 card.ActionRequested += CardActionRequested;
                 cards[item.Id] = card;
                 queueHost.Controls.Add(card);
                 card.UpdateItem(item, selectedItemId == item.Id);
-                if (queueBuilt && items.Count <= 40 && !previousIds.Contains(item.Id))
+                if (!dashboard && queueBuilt && items.Count <= 40 && !previousIds.Contains(item.Id))
                 {
                     card.Opacity = 0f;
                     card.TranslationY = 8f;
@@ -1069,6 +1081,7 @@ internal sealed class DownloadsView : UserControl
         if (scrollToItemId is { } id && !previousIds.Contains(id) && cards.ContainsKey(id))
             ScrollQueueCardIntoView(id);
         BuildQueueMenu();
+        if (dashboard) { RefreshDashboardSelection(); UpdateLayout(); }
         UiCrashDiagnostics.Record("queue.rebuild.end", "queueHost", queueHost.Controls.Count);
     }
 
@@ -1081,6 +1094,7 @@ internal sealed class DownloadsView : UserControl
 
     internal void RevealQueueItem(Guid itemId)
     {
+        if (dashboard) { var index = services.Queue.Snapshot().ToList().FindIndex(i => i.Id == itemId); if (index < 0) return; dashboardPage = index / DashboardPageSize; BuildQueueCards(); }
         if (!cards.ContainsKey(itemId)) return;
         selectedItemId = itemId;
         RefreshSelection();
@@ -1108,7 +1122,7 @@ internal sealed class DownloadsView : UserControl
         // DisplayRectangle reflects the space left after FlowLayoutPanel padding and any
         // visible vertical scrollbar. Size cards to that viewport so vertical overflow does
         // not create a secondary horizontal scrollbar.
-        var width = Math.Max(520, queueHost.DisplayRectangle.Width - 4);
+        var width = Math.Max(dashboard ? 320 : 520, queueHost.DisplayRectangle.Width - 4);
         foreach (var card in cards.Values)
             card.Width = width;
     }
@@ -1190,6 +1204,7 @@ internal sealed class DownloadsView : UserControl
 
     private void RefreshSelection()
     {
+        RefreshDashboardSelection();
         foreach (var pair in cards)
         {
             if (services.Queue.Find(pair.Key) is { } item)
@@ -1255,6 +1270,7 @@ internal sealed class DownloadsView : UserControl
         SetPreviewState(previewState);
         if (analyzedMetadata is not null) PopulateMetadata(analyzedMetadata);
         BuildQueueMenu();
+        LocalizeDashboard();
     }
 
     private string FormatViews(long? views)

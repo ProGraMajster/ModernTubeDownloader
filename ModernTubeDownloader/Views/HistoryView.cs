@@ -7,7 +7,7 @@ using ModernTubeDownloader.Theming;
 
 namespace ModernTubeDownloader.Views;
 
-internal sealed class HistoryView : UserControl
+internal sealed partial class HistoryView : UserControl
 {
     private readonly AppServices services;
     private readonly LocalizationService text;
@@ -23,7 +23,7 @@ internal sealed class HistoryView : UserControl
     private readonly Label emptyBody;
     private readonly List<HistoryEntryCard> cards = [];
 
-    public HistoryView(AppServices services)
+    public HistoryView(AppServices services, bool useDashboard = false)
     {
         this.services = services;
         text = services.Localization;
@@ -68,14 +68,21 @@ internal sealed class HistoryView : UserControl
         SizeChanged += ViewSizeChanged;
         services.History.Changed += HistoryChanged;
         text.LanguageChanged += LanguageChanged;
-        ApplyLocalization();
-        RefreshItems();
-        UpdateLayout();
+        try
+        {
+            if (useDashboard) SetDashboard(true);
+            ApplyLocalization();
+            RefreshItems();
+            UpdateLayout();
+        }
+        catch { Dispose(); throw; }
         AppTypography.RegisterLayout(this, UpdateLayout);
     }
 
     private void UpdateLayout()
     {
+        if (dashboard) { LayoutDashboard(); return; }
+        pageSubtitle.Visible = true;
         const int page = 28;
         var width = Math.Max(540, ClientSize.Width - (page * 2));
         header.SetBounds(page, 14, width, AppTypography.TextHeight(62));
@@ -110,10 +117,13 @@ internal sealed class HistoryView : UserControl
         list.Controls.Clear();
         var query = search.Text.Trim();
         var all = services.History.Snapshot();
-        var filtered = all.Where(entry => Matches(entry, query)).ToArray();
-        foreach (var entry in filtered)
+        var filtered = all.Where(entry => Matches(entry, query) && (!dashboard || FilterHistory(entry))).ToArray();
+        if (dashboard) dashboardPage = Math.Clamp(dashboardPage, 0, Math.Max(0, (filtered.Length - 1) / 40));
+        foreach (var entry in dashboard ? filtered.Skip(dashboardPage * 40).Take(40) : filtered)
         {
             var card = new HistoryEntryCard(entry, text, services.Thumbnails);
+            card.SetDashboard(dashboard, selectedId == entry.QueueItemId && selectedPath == entry.FinalPath);
+            card.SelectionRequested += (_, selected) => { selectedId = selected.QueueItemId; selectedPath = selected.FinalPath; inspector?.ShowHistory(selected); foreach (var row in cards) row.SetDashboard(dashboard, row.ItemId == selectedId && row.ItemPath == selectedPath); };
             cards.Add(card);
             list.Controls.Add(card);
         }
@@ -131,6 +141,7 @@ internal sealed class HistoryView : UserControl
             list.BringToFront();
         }
         ResizeCards();
+        if (dashboard) UpdateLayout();
         UiCrashDiagnostics.Record("history.rebuild.end", "historyList", list.Controls.Count);
     }
 
@@ -146,7 +157,7 @@ internal sealed class HistoryView : UserControl
 
     private void ResizeCards()
     {
-        var width = Math.Max(520, list.DisplayRectangle.Width - 4);
+        var width = Math.Max(dashboard ? 320 : 520, list.DisplayRectangle.Width - 4);
         foreach (var card in cards)
             card.Width = width;
     }
@@ -180,6 +191,7 @@ internal sealed class HistoryView : UserControl
     {
         if (disposing)
         {
+            dashboardTips.Dispose();
             services.History.Changed -= HistoryChanged;
             text.LanguageChanged -= LanguageChanged;
             SizeChanged -= ViewSizeChanged;

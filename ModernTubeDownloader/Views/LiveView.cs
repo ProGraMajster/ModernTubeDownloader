@@ -11,7 +11,7 @@ namespace ModernTubeDownloader.Views;
 
 internal sealed record LiveNavigationRequest(string SourceUrl, VideoMetadata? Metadata, MediaAvailabilityKind Kind);
 
-internal sealed class LiveView : UserControl
+internal sealed partial class LiveView : UserControl
 {
     private readonly AppServices services;
     private readonly LocalizationService text;
@@ -188,7 +188,8 @@ internal sealed class LiveView : UserControl
         {
             if (!cards.TryGetValue(session.Id, out var card))
             {
-                card = new LiveSessionCard(services, Edit); cards.Add(session.Id, card);
+                card = new LiveSessionCard(services, Edit); card.SelectionRequested += (_, value) => SelectSession(value); cards.Add(session.Id, card);
+                card.SetDashboard(dashboard);
 #if DEBUG
                 card.RegisterDetailsForAutomation = RegisterDetailsForAutomation;
 #endif
@@ -202,6 +203,8 @@ internal sealed class LiveView : UserControl
     }
     private void LayoutPage()
     {
+        if (dashboard) { LayoutDashboard(); return; }
+        heading.Visible = statistics.Visible = true;
         var width = Math.Max(480, scroll.ClientSize.Width - 56);
         var origin = scroll.DisplayRectangle.Location;
         heading.SetBounds(origin.X + 28, origin.Y + 16, width, AppTypography.TextHeight(38));
@@ -266,7 +269,7 @@ internal sealed class LiveView : UserControl
     }
 }
 
-internal sealed class LiveSessionCard : Panel
+internal sealed partial class LiveSessionCard : Panel
 {
     internal const int CardHeight = 226;
     private readonly AppServices services;
@@ -296,6 +299,9 @@ internal sealed class LiveSessionCard : Panel
         primary.Click += (_, _) => Act(); secondary.Click += (_, _) => Secondary(); details.Click += async (_, _) => await ShowDetailsAsync();
         folder.Click += (_, _) => { if (current?.Parts.LastOrDefault() is { } path && Directory.Exists(Path.GetDirectoryName(path)))
             Process.Start(new ProcessStartInfo("explorer.exe", Path.GetDirectoryName(path)!) { UseShellExecute = true }); };
+        Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
+        title.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
+        thumbnail.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
         SizeChanged += (_, _) => LayoutCard(); LayoutCard();
         AppTypography.RegisterLayout(this, () => { LayoutCard(); if (current is not null) UpdateSession(current); });
     }
@@ -320,7 +326,7 @@ internal sealed class LiveSessionCard : Panel
         facts.Text = string.Join(" • ", pieces) + Environment.NewLine + timingText +
             (countdown is { } next ? text.Get("Live.NextCheck", Math.Max(0, (int)(next - DateTimeOffset.UtcNow).TotalSeconds)) : session.FailureMessageKey is { } failureKey ? text[failureKey] : text[$"Quality.{session.QualityPresetId}"]);
         AppUi.BindBackground(this, appearance.EmphasizeActive && session.IsActive ? AppThemeTokens.NavigationSelected : AppThemeTokens.Surface);
-        if (appearance.ThumbnailSize != AppearanceSize.None && imageUrl != session.ThumbnailUrl) { imageUrl = session.ThumbnailUrl; _ = LoadImageAsync(imageUrl); }
+        if ((dashboard || appearance.ThumbnailSize != AppearanceSize.None) && imageUrl != session.ThumbnailUrl) { imageUrl = session.ThumbnailUrl; _ = LoadImageAsync(imageUrl); }
         primary.Visible = session.IsActive || session.CanResume || session.State == LiveSessionState.WaitingForLive;
         primary.Text = text[session.IsActive ? "Live.StopAndSave" : session.State == LiveSessionState.WaitingForLive ? "Live.Edit" : "Live.Resume"];
         primary.AccessibleAutomationId = (session.IsActive ? "LiveStopSaveButton-" : session.State == LiveSessionState.WaitingForLive ? "LiveEditButton-" : "LiveResumeButton-") + session.Id.ToString("N");
@@ -385,6 +391,7 @@ internal sealed class LiveSessionCard : Panel
     }
     private void LayoutCard()
     {
+        if (dashboard) { LayoutDashboardCard(); return; }
         var appearance = AppearancePresentation.Current.Live;
         var compactWaiting = appearance.CompactWaiting && current?.State == LiveSessionState.WaitingForLive;
         var gap = appearance.CardDensity == AppearanceDensity.Compact ? 4 : appearance.CardDensity == AppearanceDensity.Comfortable ? 16 : 8;

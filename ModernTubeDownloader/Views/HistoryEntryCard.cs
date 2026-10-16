@@ -8,7 +8,7 @@ using SkiaSharp;
 
 namespace ModernTubeDownloader.Views;
 
-internal sealed class HistoryEntryCard : UserControl
+internal sealed partial class HistoryEntryCard : UserControl
 {
     private readonly DownloadHistoryEntry entry;
     private readonly LocalizationService text;
@@ -54,6 +54,9 @@ internal sealed class HistoryEntryCard : UserControl
         openFile.Click += (_, _) => ShellService.OpenFile(entry.FinalPath);
         openFolder.Click += (_, _) => ShellService.OpenFolderForFile(entry.FinalPath);
         Controls.AddRange([placeholder, thumbnail, title, facts, path, openFile, openFolder]);
+        Click += (_, _) => SelectionRequested?.Invoke(this, entry);
+        title.Click += (_, _) => SelectionRequested?.Invoke(this, entry);
+        thumbnail.Click += (_, _) => SelectionRequested?.Invoke(this, entry);
         SizeChanged += CardSizeChanged;
         text.LanguageChanged += LanguageChanged;
         ApplyLocalization();
@@ -64,6 +67,7 @@ internal sealed class HistoryEntryCard : UserControl
 
     private void LayoutControls()
     {
+        if (dashboard) { LayoutDashboardCard(); return; }
         var appearance = AppearancePresentation.Current.History;
         // Compact list is a density choice, not the narrow-window stacked layout.
         var compact = Width < 760;
