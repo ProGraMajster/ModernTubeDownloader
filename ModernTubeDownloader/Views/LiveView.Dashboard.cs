@@ -7,6 +7,7 @@ namespace ModernTubeDownloader.Views;
 
 internal sealed partial class LiveView
 {
+    private bool dashboardSubmitted;
     private bool dashboard, showRecent;
     private Guid? selectedSession;
     private DashboardInspector? inspector;
@@ -17,6 +18,7 @@ internal sealed partial class LiveView
     public event EventHandler? SupportedSourcesRequested;
     public void SetDashboard(bool value)
     {
+        if (!value && dashboardSubmitted) { dashboardSubmitted = false; PopulateAnalysis(); }
         dashboard = value; url.Placeholder = value ? text["Dashboard.LivePlaceholder"] : "";
         if (value && inspector is null)
         {
@@ -45,7 +47,8 @@ internal sealed partial class LiveView
         var right = inline ? Math.Clamp(width * 25 / 100, 300, AppTypography.TextHeight(330)) : 0;
         var center = inline ? width - right - 12 : width;
         heading.Visible = statistics.Visible = false;
-        var expanded = metadata is not null || availability == MediaAvailabilityKind.Upcoming || !analyze.Enabled;
+        var expanded = !dashboardSubmitted && (metadata is not null || availability == MediaAvailabilityKind.Upcoming || !analyze.Enabled);
+        if (dashboardSubmitted) foreach (var control in new Control[] { quality, container, fromNow, fromStart, start, vod }) control.Visible = false;
         analysis.SetBounds(18 + origin.X, 26 + origin.Y, width, expanded ? AppTypography.TextHeight(start.Visible ? 332 : 218) : line + 8);
         AppUi.BindBackground(analysis); DashboardVisual.Flat(analysis);
         url.SetBounds(0, 0, Math.Max(180, center - AppTypography.TextHeight(272) - 24), line);

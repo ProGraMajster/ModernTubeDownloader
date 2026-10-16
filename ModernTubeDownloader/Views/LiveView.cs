@@ -76,12 +76,14 @@ internal sealed partial class LiveView : UserControl
     { url.Text = sourceUrl; await AnalyzeAsync(sourceUrl); }
     public void Present(LiveNavigationRequest request)
     {
+        dashboardSubmitted = false;
         url.Text = request.SourceUrl; metadata = request.Metadata; availability = request.Kind;
         editingId = null; PopulateAnalysis();
     }
 
     private async Task AnalyzeAsync(string sourceUrl)
     {
+        dashboardSubmitted = false;
         analysisCancellation?.Cancel(); analysisCancellation?.Dispose();
         analysisCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         var current = analysisCancellation;
@@ -150,6 +152,7 @@ internal sealed partial class LiveView : UserControl
             else services.Live.Add(url.Text, metadata, selected.Value.Id, policy, availability == MediaAvailabilityKind.Upcoming);
             message.Text = text[availability == MediaAvailabilityKind.Upcoming ? "Live.WaitingQueued" : "Live.RecordingQueued"];
             editingId = null; start.Enabled = false;
+            if (dashboard) { dashboardSubmitted = true; LayoutPage(); }
         }
         catch (Exception ex)
         { services.Logger.Error("Could not add or edit a LIVE session.", ex); message.Text = text["Downloads.AlreadyQueued"]; }
@@ -157,6 +160,7 @@ internal sealed partial class LiveView : UserControl
 
     private void Edit(LiveSession session)
     {
+        dashboardSubmitted = false;
         editingId = session.Id; availability = MediaAvailabilityKind.Upcoming; metadata = null;
         url.Text = session.SourceUrl; PopulateAnalysis(); editingId = session.Id;
         title.Text = session.Title;

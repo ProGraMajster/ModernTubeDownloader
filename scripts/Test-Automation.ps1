@@ -1474,6 +1474,7 @@ try {
         if ($queueItems.Count -ne 0) { throw 'LIVE leaked into queue.json.' }
         $statisticsId = if ($InterfaceMode -eq 'ModernDashboard') { 'LiveDashboardWidgets' } else { 'LiveStatistics' }
         Wait-Node $statisticsId $mainRoot | Out-Null
+        if ($InterfaceMode -eq 'ModernDashboard') { Wait-Node 'LiveStartButton' $mainRoot 'NodeNotExposed' | Out-Null }
         Invoke-NodeAction (Find-Node ('LiveSession-' + ([Guid]$items[0].sessionId).ToString('N')) $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
         Save-LiveVisual 'final'
         if (-not $script:automationProcess.CloseMainWindow()) { throw 'LIVE close request failed.' }
