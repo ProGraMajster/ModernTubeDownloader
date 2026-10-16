@@ -74,7 +74,7 @@ internal sealed class DashboardInspector : AppScrollPanel
             t[$"Status.{item.Status}"],
             t["Dashboard.AddedAt"] + ": " + item.AddedAt.ToLocalTime().ToString("g", t.Culture),
             SourcePresentation.Host(item.SourceUrl) + " · " + t["Quality." + item.QualityPresetId] + " · " + item.PreferredVideoContainer,
-            item.DurationSeconds is { } duration ? TimeSpan.FromSeconds(duration).ToString(@"hh\:mm\:ss") : null,
+            item.DurationSeconds is not null ? DashboardStyle.Duration(item.DurationSeconds) : null,
             item.DownloadedBytes is { } bytes ? DashboardStyle.Bytes(bytes) + (item.TotalBytes is { } total ? " / " + DashboardStyle.Bytes(total) : "") : null,
             item.FinalFile ?? services.Settings.Current.FinalOutputDirectory,
             item.FailureMessageKey is { } error ? t[error] : item.StatusMessageKey is { } status ? t[status] : null,

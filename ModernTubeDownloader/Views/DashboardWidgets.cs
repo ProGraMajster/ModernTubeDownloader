@@ -130,5 +130,12 @@ internal sealed class DashboardWidgets : Panel
 internal static class DashboardStyle
 {
     public static void Card(Control control) { AppUi.Card(control); AppUi.BindBorder(control, AppThemeTokens.Border); control.Style.Border.Radius = Math.Min(12, AppearancePresentation.Current.Global.CornerRadius); }
+    public static string Duration(double? seconds)
+    {
+        if (seconds is null) return "";
+        if (!double.IsFinite(seconds.Value) || seconds < 0 || seconds >= TimeSpan.MaxValue.TotalSeconds) return "—";
+        var time = TimeSpan.FromSeconds(seconds.Value);
+        return time.TotalHours >= 1 ? $"{(int)time.TotalHours}:{time.Minutes:D2}:{time.Seconds:D2}" : $"{time.Minutes}:{time.Seconds:D2}";
+    }
     public static string Bytes(long bytes) { string[] units = ["B", "KB", "MB", "GB", "TB"]; var value = (double)Math.Max(0, bytes); var i = 0; while (value >= 1024 && i < 4) { value /= 1024; i++; } return $"{value:0.#} {units[i]}"; }
 }

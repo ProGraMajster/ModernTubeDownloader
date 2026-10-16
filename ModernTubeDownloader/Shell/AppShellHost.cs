@@ -199,7 +199,7 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         var bottom = Math.Max(y + 20, Sidebar.Height - 2 * (row + 6) - 14);
         SetButton(AppPageId.Help, compact, 10, bottom, Sidebar.Width - 20, row);
         SetButton(AppPageId.About, compact, 10, bottom + row + 6, Sidebar.Width - 20, row);
-        Footer.Height = AppTypography.TextHeight(32); identity.Width = Math.Min(360, Root.Width / 3);
+        Footer.Height = AppTypography.TextHeight(32); identity.Width = Math.Min(AppTypography.TextHeight(360), Root.Width / 2);
         statusDot.SetBounds(identity.Width + 8, (Footer.Height - 8) / 2, 8, 8);
         Status.Padding = new Padding(26, 5, 8, 0);
         theme.Text = Text["Dashboard.Theme"]; updates.Text = Text["Updates.Check"];

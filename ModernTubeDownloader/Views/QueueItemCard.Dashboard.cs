@@ -27,7 +27,7 @@ internal sealed partial class QueueItemCard
         dashboard = value; TabStop = value; SetControlBehavior(ControlBehaviors.Selectable, value);
         if (value && duration is null)
         {
-            duration = AppUi.Muted(); duration.TextAlign = ContentAlignment.MiddleCenter;
+            duration = AppUi.Muted(); AppTypography.Bind(duration, 9); duration.TextAlign = ContentAlignment.MiddleCenter;
             AppUi.BindBackground(duration, AppThemeTokens.Background); thumbnail.Controls.Add(duration);
         }
         if (duration is not null) duration.Visible = value;
@@ -46,9 +46,9 @@ internal sealed partial class QueueItemCard
         Height = AppTypography.TextHeight(narrow ? Math.Max(h, 120) : h); Margin = new Padding(0, 0, 0, 1);
         Padding = new Padding(8); thumbnail.Visible = imageWidth > 0;
         thumbnail.SetBounds(8, 8, imageWidth, imageWidth * 9 / 16); thumbnailPlaceholder.Padding = new Padding(16);
-        if (duration is not null) { duration.SetBounds(Math.Max(0, imageWidth - 66), Math.Max(0, thumbnail.Height - 24), 64, 22); duration.Visible = imageWidth > 0; }
-        positionBadge.SetBounds(12, 12, 28, 24);
-        var left = imageWidth == 0 ? positionBadge.Visible ? 54 : 12 : imageWidth + 26; var right = Width - 98;
+        if (duration is not null) { var badgeWidth = Math.Min(imageWidth, AppTypography.TextHeight(64)); var badgeHeight = AppTypography.TextHeight(22); duration.SetBounds(Math.Max(0, imageWidth - badgeWidth), Math.Max(0, thumbnail.Height - badgeHeight), badgeWidth, badgeHeight); duration.Visible = imageWidth > 0; }
+        positionBadge.SetBounds(12, AppTypography.Scale > 1.25 && imageWidth > 0 ? thumbnail.Bottom + 8 : 12, AppTypography.TextHeight(28), AppTypography.TextHeight(24));
+        var left = imageWidth == 0 ? positionBadge.Visible ? positionBadge.Right + 14 : 12 : imageWidth + 26; var right = Width - 98;
         var progressWidth = narrow ? right - left : Math.Clamp(Width / 3, 180, 330);
         var progressLeft = narrow ? left : right - progressWidth - 10;
         var textWidth = Math.Max(100, (narrow ? right : progressLeft - 12) - left);
@@ -75,7 +75,7 @@ internal sealed partial class QueueItemCard
         if (p.ShowFormat) parts.Add(item.PreferredVideoContainer.ToString());
         if (p.ShowSize && item.TotalBytes is { } total) parts.Add(DashboardStyle.Bytes(total));
         subtitle.Text = string.Join(" · ", parts);
-        if (duration is not null) duration.Text = item.DurationSeconds is { } seconds ? TimeSpan.FromSeconds(seconds).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss") : "";
+        if (duration is not null) duration.Text = DashboardStyle.Duration(item.DurationSeconds);
         dashboardTips.SetToolTip(title, item.Title); dashboardTips.SetToolTip(subtitle, subtitle.Text);
         dashboardTips.SetToolTip(primaryAction, primaryAction.Text); primaryAction.AccessibleName = primaryAction.Text;
         primaryAction.Enabled = primaryAction.Tag is not QueueItemAction.OpenFile || File.Exists(item.FinalFile);
@@ -94,7 +94,7 @@ internal sealed partial class QueueItemCard
         if (p.ShowSize && item.DownloadedBytes is { } bytes) transferParts.Add(DashboardStyle.Bytes(bytes));
         if (p.ShowSpeed && item.SpeedBytesPerSecond is { } speed) transferParts.Add(DashboardStyle.Bytes((long)speed) + "/s");
         if (p.ShowEta && item.Eta is { } eta) transferParts.Add(text.Get("Queue.Eta", eta.ToString(@"hh\:mm\:ss")));
-        transfer.Text = string.Join(" · ", transferParts);
+        transfer.Text = string.Join(" · ", transferParts); transfer.AutoEllipsis = true; dashboardTips.SetToolTip(transfer, transfer.Text);
         LayoutDashboardRow();
     }
 }
