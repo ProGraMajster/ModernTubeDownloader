@@ -121,7 +121,7 @@ public sealed class DashboardShellTests
             var row = new QueueItemCard(thumbnails, new(language)) { Width = 960 }; row.SetDashboard(true);
             row.UpdateItem(new DownloadQueueItem { Title = new string('界', 150) + " Łódź 日本語", Status = DownloadStatus.Queued, SourceUrl = "https://example.test/video" }, false);
             test.Show(row, 960, row.Height); test.ProcessPendingWork();
-            Assert.InRange(row.Height, 84, 260); Assert.All(row.Controls.Where(c => c.Visible), c => { Assert.True(c.Left >= 0); Assert.True(c.Width >= 0); Assert.True(c.Right <= row.Width); });
+            Assert.InRange(row.Height, 84, 260); Assert.All(row.Controls.Where(c => c.Visible), c => { Assert.True(c.Left >= 0); Assert.True(c.Width >= 0); Assert.True(c.Right <= row.Width); Assert.True(c.Bottom <= row.Height, $"{c.GetType().Name} extends below its row."); });
             Assert.True((row.AccessibilityObject.SupportedActions & ModernFormsNext.Accessibility.AccessibleActions.Select) != 0);
             var primary = row.Controls.OfType<Button>().First(); Assert.False(string.IsNullOrWhiteSpace(primary.AccessibleName));
         }
@@ -198,6 +198,66 @@ public sealed class DashboardShellTests
                 if (count > 0) { view.RevealQueueItem(items[^1].Id); test.ProcessPendingWork(); Assert.Equal(items[^1].Id, view.SelectedItemId); Assert.Contains(list.Controls.OfType<QueueItemCard>(), c => c.AccessibleAutomationId == $"QueueItem-{items[^1].Id:N}"); }
                 var queuePanel = Find<Panel>(view, "DashboardQueuePanel"); Assert.True(queuePanel.Width >= 520);
                 Assert.All(view.Controls.Where(c => c.Visible), c => { Assert.True(c.Width >= 0 && c.Height >= 0); Assert.True(c.Left >= 0); });
+            }
+            await services.ShutdownAsync();
+        }
+        finally { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task HistoryFiltersDateRangeAndSortUseTheCanonicalHistoryWithoutMutatingIt()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-history-presentation-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            var recent = new DownloadHistoryEntry(Guid.NewGuid(), "Recent audio", "https://example.test/a", "a", "Channel", "best", "audio.mp3", DateTimeOffset.UtcNow.AddDays(-1), "Completed");
+            var old = recent with { QueueItemId = Guid.NewGuid(), Title = "Old playlist video", FinalPath = "video.mp4", CompletedAt = DateTimeOffset.UtcNow.AddDays(-40), PlaylistId = "playlist" };
+            await services.History.AddAsync(recent); await services.History.AddAsync(old);
+            var before = JsonSerializer.Serialize(services.History.Snapshot());
+            using (var host = ModernFormsTestHost.Create())
+            {
+                var view = new HistoryView(services, true); AppTypography.SetDashboardPresentation(view, true);
+                host.Show(view, 1536, 1024);
+                var list = Find<FlowLayoutPanel>(view, "HistoryList");
+                Assert.Equal(recent.QueueItemId, list.Controls.OfType<HistoryEntryCard>().First().ItemId);
+                Find<Button>(view, "HistoryDateSort").PerformClick();
+                Assert.Equal(old.QueueItemId, list.Controls.OfType<HistoryEntryCard>().First().ItemId);
+                Find<Button>(view, "HistoryFilterAudio").PerformClick(); Assert.Single(list.Controls.OfType<HistoryEntryCard>());
+                Assert.Equal(recent.QueueItemId, list.Controls.OfType<HistoryEntryCard>().Single().ItemId);
+                Find<Button>(view, "HistoryFilterPlaylists").PerformClick(); Assert.Equal(old.QueueItemId, list.Controls.OfType<HistoryEntryCard>().Single().ItemId);
+                Find<Button>(view, "HistoryFilterAll").PerformClick();
+                Find<ComboBox>(view, "HistoryDateRange").SelectedIndex = 1;
+                Assert.Equal(recent.QueueItemId, list.Controls.OfType<HistoryEntryCard>().Single().ItemId);
+                Assert.Equal(before, JsonSerializer.Serialize(services.History.Snapshot()));
+                view.SetDashboard(false); Assert.Equal(2, list.Controls.OfType<HistoryEntryCard>().Count());
+            }
+            await services.ShutdownAsync();
+        }
+        finally { AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData(100)] [InlineData(150)] [InlineData(200)]
+    public async Task RepeatedSettingsReflowKeepsLanguageLabelInsideItsCard(int scale)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-settings-presentation-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            using (var host = ModernFormsTestHost.Create())
+            {
+                AppTypography.SetScale(scale);
+                var view = new SettingsView(services); view.SetDashboard(true); AppTypography.SetDashboardPresentation(view, true);
+                host.Show(view, 1920, 1080);
+                IEnumerable<Control> Descendants(Control parent) => parent.Controls.SelectMany(c => new[] { c }.Concat(Descendants(c)));
+                var label = Descendants(view).OfType<Label>().Single(c => c.Text == services.Localization["Settings.Language"]);
+                var initial = label.Top;
+                for (var i = 0; i < 5; i++)
+                {
+                    view.Width = 1536; host.ProcessPendingWork(); view.Width = 1920; host.ProcessPendingWork();
+                    Assert.Equal(initial, label.Top); Assert.True(label.Bottom <= label.Parent!.Height);
+                }
             }
             await services.ShutdownAsync();
         }

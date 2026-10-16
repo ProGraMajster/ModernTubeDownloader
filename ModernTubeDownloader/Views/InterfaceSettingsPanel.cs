@@ -43,7 +43,7 @@ internal sealed class InterfaceSettingsPanel : Panel
     private void Changed(object? sender, EventArgs e) => Application.RunOnUIThread(RefreshText);
     private void RefreshText()
     {
-        heading.Text = services.Localization["Dashboard.InterfaceStyle"];
+        heading.Text = services.Localization["Dashboard.InterfaceStyle"] + (AppTypography.IsDashboard(this) ? " · " + services.Localization["Dashboard.Preview"] : "");
         classic.Text = services.Localization["Appearance.Value.Classic"]; modern.Text = services.Localization["Appearance.Value.ModernDashboard"];
         description.Text = services.Localization[services.Appearance.InterfaceMode != services.Appearance.Profile.InterfaceMode ? "Dashboard.RecoveryActive" : services.Appearance.Profile.InterfaceMode == AppInterfaceMode.Classic ? "Dashboard.ClassicDescription" : "Dashboard.ModernDescription"];
         AppUi.NavigationButton(classic, services.Appearance.Profile.InterfaceMode == AppInterfaceMode.Classic);

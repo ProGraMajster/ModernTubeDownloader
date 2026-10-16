@@ -228,7 +228,7 @@ internal sealed partial class BatchImportView : UserControl
     private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() => { if (!disposed) { ApplyText(); signature = ""; Render(); LayoutPage(); } });
     protected override void Dispose(bool disposing)
     {
-        if (disposing && !disposed) { disposed = true; lifetime.Cancel(); timer.Stop(); timer.Dispose(); services.Localization.LanguageChanged -= LanguageChanged; lifetime.Dispose(); }
+        if (disposing && !disposed) { disposed = true; dashboardTips.Dispose(); lifetime.Cancel(); timer.Stop(); timer.Dispose(); services.Localization.LanguageChanged -= LanguageChanged; lifetime.Dispose(); }
         base.Dispose(disposing);
     }
 }

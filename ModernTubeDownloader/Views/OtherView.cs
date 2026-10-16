@@ -35,7 +35,7 @@ internal sealed partial class OtherView : UserControl
         {
             var sessions = await services.Batch.RecentAsync(); if (disposed) return;
             foreach (var child in recent.Controls.ToArray()) { recent.Controls.Remove(child); child.Dispose(); }
-            var label = AppUi.Heading(services.Localization["Batch.Recent"], 16); label.SetBounds(24, 16, 600, 32); recent.Controls.Add(label);
+            var label = AppUi.Heading(services.Localization["Batch.Recent"], dashboard ? 12 : 16); label.SetBounds(24, 16, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(36)); recent.Controls.Add(label);
             var y = 56;
             foreach (var session in sessions.Take(5))
             {
@@ -44,6 +44,7 @@ internal sealed partial class OtherView : UserControl
                 button.Click += async (_, _) => { try { ResumeBatch?.Invoke(this, await services.Batch.OpenAsync(session.Id)); } catch (Exception ex) { services.Logger.Error("Batch session could not be reopened.", ex); } };
                 recent.Controls.Add(button);
             }
+            if (dashboard && sessions.Count == 0) { var hint = AppUi.Muted(services.Localization["Dashboard.NoRecent"]); hint.Multiline = true; hint.SetBounds(24, y, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(64)); recent.Controls.Add(hint); y = hint.Bottom; }
             recent.Height = Math.Max(100, y + 16); LayoutPage();
         }
         catch (Exception ex) { services.Logger.Error("Recent batch sessions could not be loaded.", ex); }

@@ -41,7 +41,7 @@ internal sealed partial class QueueItemCard : UserControl
     private readonly Label subtitle;
     private readonly Label status;
     private readonly Label transfer;
-    private readonly ProgressBar progress;
+    private readonly DashboardProgress progress;
     private readonly Button primaryAction;
     private readonly Button secondaryAction;
     private readonly Button moreAction;
@@ -86,7 +86,7 @@ internal sealed partial class QueueItemCard : UserControl
         transfer = AppUi.Muted();
         AppTypography.Bind(transfer, 10.25f);
         transfer.TextAlign = ContentAlignment.TopRight;
-        progress = new ProgressBar { Minimum = 0, Maximum = 100 };
+        progress = new DashboardProgress { Minimum = 0, Maximum = 100 };
         primaryAction = new Button();
         secondaryAction = new Button();
         moreAction = new Button { Text = "…" };
@@ -164,7 +164,7 @@ internal sealed partial class QueueItemCard : UserControl
         ConfigureActions(item);
         ShowActions(selected);
         BuildContextMenu(item);
-        AppUi.BindBackground(this, isSelected ? AppThemeTokens.NavigationSelected : AppThemeTokens.Surface);
+        AppUi.BindBackground(this, isSelected ? dashboard ? AppThemeTokens.RowSelected : AppThemeTokens.NavigationSelected : AppThemeTokens.Surface);
 
         if (dashboard) UpdateDashboardRow(item);
         if (!string.Equals(loadedThumbnail, item.ThumbnailUrl, StringComparison.Ordinal))

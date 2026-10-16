@@ -19,6 +19,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private readonly PictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom };
     private readonly Label title = AppUi.Heading("", 12), author = AppUi.Muted(), link = AppUi.Muted(), facts = AppUi.Muted(), hint = AppUi.Muted();
     private readonly Panel editor = new();
+    private readonly DashboardFields fields = new();
     private readonly Label qualityLabel = AppUi.Muted(), containerLabel = AppUi.Muted();
     private readonly ComboBox quality = new() { AccessibleAutomationId = "InspectorQuality" }, container = new() { AccessibleAutomationId = "InspectorContainer" };
     private readonly MediaRangeEditor range;
@@ -42,7 +43,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         AppUi.Primary(apply); AppUi.Input(quality); AppUi.Input(container); AppUi.Surface(editor);
         range = new(services.Localization, "Inspector") { CompactLayout = true };
         editor.Controls.AddRange([qualityLabel, quality, containerLabel, container, range, advanced, apply, hint]);
-        Controls.AddRange([details, options, image, title, author, link, copy, facts, editor, openFile, openFolder, retry]);
+        Controls.AddRange([details, options, image, title, author, link, copy, facts, fields, editor, openFile, openFolder, retry]);
         details.Click += (_, _) => { showOptions = false; LayoutInspector(); }; options.Click += (_, _) => { showOptions = true; LayoutInspector(); };
         copy.Click += async (_, _) =>
         {
@@ -92,6 +93,11 @@ internal sealed class DashboardInspector : AppScrollPanel
             range.SetRange(item.RequestedRange); subtitles = item.SubtitleOptions.Copy(); sponsors = item.SponsorBlockOptions.Copy();
             hint.Text = t[queued ? "Dashboard.QueuedOptions" : "Dashboard.ReadOnlyOptions"];
         }
+        fields.SetRows((t["Downloads.Container"], item.PreferredVideoContainer.ToString()), (t["Downloads.Quality"], t["Quality." + item.QualityPresetId]),
+            (t["Dashboard.AddedAt"], item.AddedAt.ToLocalTime().ToString("g", t.Culture)), (t["Dashboard.Duration"], DashboardStyle.Duration(item.DurationSeconds)),
+            (t["Dashboard.Status"], t["Status." + item.Status]), (t["Dashboard.Size"], item.TotalBytes is { } totalSize ? DashboardStyle.Bytes(totalSize) : null),
+            (t["Dashboard.Output"], item.FinalFile ?? services.Settings.Current.FinalOutputDirectory),
+            (t["Dashboard.Message"], item.FailureMessageKey is { } key ? t[key] : null));
         RefreshText(); LayoutInspector();
     }
     public void ShowHistory(DownloadHistoryEntry entry)
@@ -103,6 +109,8 @@ internal sealed class DashboardInspector : AppScrollPanel
         factText = entry.Status + "\n\n" + entry.CompletedAt.ToLocalTime().ToString("g", t.Culture) + "\n\n" +
             SourcePresentation.Host(entry.SourceUrl) + " · " + entry.Quality + "\n\n" + entry.FinalPath +
             (entry.RecordedDuration is { } duration ? "\n\n" + duration : "");
+        fields.SetRows((t["Dashboard.Source"], SourcePresentation.Host(entry.SourceUrl)), (t["Dashboard.AddedAt"], entry.CompletedAt.ToLocalTime().ToString("g", t.Culture)),
+            (t["Downloads.Quality"], entry.Quality), (t["Dashboard.Status"], t["Status." + (entry.WasPartial ? "Partial" : entry.Status)]), (t["Dashboard.Output"], entry.FinalPath));
         RefreshText(); LayoutInspector();
     }
     public void ShowLive(LiveSession session)
@@ -115,6 +123,9 @@ internal sealed class DashboardInspector : AppScrollPanel
             t["Quality." + session.QualityPresetId] + " · MKV\n\n" + session.RecordedDuration.ToString(@"hh\:mm\:ss") + " · " + DashboardStyle.Bytes(session.BytesWritten) +
             "\n\n" + t.Get("Live.PartCount", session.Parts.Count) + "\n\n" + t["Live.ReconnectCount"] + ": " + session.ResumeCount +
             (session.FailureMessageKey is { } error ? "\n\n" + t[error] : "");
+        fields.SetRows((t["Dashboard.Source"], SourcePresentation.Host(session.SourceUrl)), (t["Downloads.Quality"], t["Quality." + session.QualityPresetId]),
+            (t["Dashboard.Status"], t["Live.State." + session.State]), (t["Dashboard.Duration"], session.RecordedDuration.ToString(@"hh\:mm\:ss")),
+            (t["Dashboard.Size"], DashboardStyle.Bytes(session.BytesWritten)), (t["Live.ReconnectCount"], session.ResumeCount.ToString()), (t["Dashboard.Output"], session.Parts.LastOrDefault()));
         RefreshText(); LayoutInspector();
     }
     private void Present(string name, string channel, string url, string? thumbnail, string? path)
@@ -158,7 +169,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     private void RefreshText()
     {
-        var t = services.Localization; details.Text = t["Common.Details"]; options.Text = t["Dashboard.Options"];
+        var t = services.Localization; details.Text = t["Common.Details"]; options.Text = t["Dashboard.OptionsShort"];
         copy.Text = ""; copy.AccessibleName = t["Dashboard.CopyUrl"]; tips.SetToolTip(copy, copy.AccessibleName); openFile.Text = t["Common.OpenFile"]; openFolder.Text = t["Common.OpenFolder"];
         qualityLabel.Text = t["Downloads.Quality"]; containerLabel.Text = t["Downloads.Container"];
         retry.Text = t["Common.Retry"]; apply.Text = t["Dashboard.ApplyOptions"]; advanced.Text = t["Advanced.MoreOptions"]; facts.Text = factText;
@@ -171,26 +182,28 @@ internal sealed class DashboardInspector : AppScrollPanel
         var o = DisplayRectangle.Location; var width = Math.Max(220, ClientSize.Width - 28); var line = AppTypography.TextHeight(34);
         retry.Visible = historyMode && hasSelection;
         details.SetBounds(12 + o.X, 10 + o.Y, width / 2, line); options.SetBounds(details.Right + 4, details.Top, width / 2 - 4, line);
-        if (!hasSelection) { title.SetBounds(12 + o.X, details.Bottom + 40, width, AppTypography.TextHeight(100)); editor.Visible = false; return; }
+        DashboardVisual.Tab(details, !showOptions); DashboardVisual.Tab(options, showOptions);
+        if (!hasSelection) { title.SetBounds(12 + o.X, details.Bottom + 40, width, AppTypography.TextHeight(100)); editor.Visible = fields.Visible = false; return; }
         image.Visible = !string.IsNullOrWhiteSpace(thumbnailUrl) && !thumbnailFailed;
         image.SetBounds(12 + o.X, details.Bottom + 14, width, image.Visible ? width * 9 / 16 : 0);
-        title.SetBounds(12 + o.X, image.Bottom + 12, width, AppTypography.TextHeight(55));
+        title.SetBounds(12 + o.X, image.Bottom + 12, width, AppTypography.TextHeight(50));
         author.SetBounds(12 + o.X, title.Bottom + 2, width, AppTypography.TextHeight(24));
         link.SetBounds(12 + o.X, author.Bottom + 6, width - AppTypography.TextHeight(32) - 6, AppTypography.TextHeight(30));
         copy.SetBounds(link.Right + 6, link.Top, AppTypography.TextHeight(32), link.Height);
         copyGlyph.SetBounds((copy.Width - 18) / 2, (copy.Height - 18) / 2, 18, 18);
-        editor.Visible = showOptions && options.Visible; facts.Visible = !editor.Visible;
-        facts.SetBounds(12 + o.X, copy.Bottom + 14, width, AppTypography.TextHeight(290));
+        editor.Visible = showOptions && options.Visible; facts.Visible = false; fields.Visible = !editor.Visible;
+        fields.SetBounds(12 + o.X, copy.Bottom + 16, width, fields.Height);
         editor.SetBounds(12 + o.X, copy.Bottom + 14, width, AppTypography.TextHeight(390));
         qualityLabel.SetBounds(0, 0, width, AppTypography.TextHeight(24)); quality.SetBounds(0, qualityLabel.Bottom, width, line);
         containerLabel.SetBounds(0, quality.Bottom + 10, width, AppTypography.TextHeight(24)); container.SetBounds(0, containerLabel.Bottom, width, line);
         range.SetBounds(0, container.Bottom + 12, width, AppTypography.TextHeight(200));
         advanced.SetBounds(0, range.Bottom + 8, width, line); apply.SetBounds(0, advanced.Bottom + 8, width, line);
         hint.SetBounds(0, apply.Bottom + 8, width, AppTypography.TextHeight(70)); editor.Height = hint.Bottom + 4;
-        openFile.SetBounds(12 + o.X, (editor.Visible ? editor.Bottom : facts.Bottom) + 12, width, line);
+        openFile.SetBounds(12 + o.X, (editor.Visible ? editor.Bottom : fields.Bottom) + 12, width, line);
         openFolder.SetBounds(12 + o.X, openFile.Bottom + 8, width, line);
         retry.SetBounds(openFile.Left, openFolder.Bottom + 8, width, line);
-        AppUi.NavigationButton(details, !editor.Visible); AppUi.NavigationButton(options, editor.Visible);
+        DashboardVisual.Tab(details, !editor.Visible); DashboardVisual.Tab(options, editor.Visible);
+        foreach (var button in new[] { copy, openFile, openFolder, retry, advanced, apply }) DashboardVisual.Button(button, button == apply);
     }
     protected override void Dispose(bool disposing) { if (disposing && !disposed) { disposed = true; lifetime.Cancel(); lifetime.Dispose(); tips.Dispose(); services.Localization.LanguageChanged -= LanguageChanged; } base.Dispose(disposing); }
 }

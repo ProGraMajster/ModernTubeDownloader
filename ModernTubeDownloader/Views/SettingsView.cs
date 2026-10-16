@@ -34,14 +34,25 @@ internal sealed class SettingsView : UserControl
     private readonly PersonalizationSettingsPanel personalizationCard;
     private readonly InterfaceSettingsPanel interfaceCard;
     private bool dashboard;
+    private Action? restoreClassicTypography, restoreClassicLabels;
+    private readonly ToolTip compactTips = new();
     private readonly TextBox categorySearch = new() { AccessibleAutomationId = "SettingsCategorySearch", Visible = false };
-    public void SetDashboard(bool value) { dashboard = value; foreach (var button in categoryButtons.Values) button.Visible = !value || button.Text.Contains(categorySearch.Text.Trim(), StringComparison.CurrentCultureIgnoreCase); UpdateLayout(); }
+    public void SetDashboard(bool value)
+    {
+        if (value && !dashboard) { restoreClassicTypography = AppTypography.CaptureRecipes(this); restoreClassicLabels = DashboardVisual.CaptureLabels(this); }
+        var previous = dashboard; dashboard = value;
+        if (!value && previous) { AppTypography.SetDashboardPresentation(this, false); restoreClassicTypography?.Invoke(); restoreClassicLabels?.Invoke(); }
+        foreach (var button in categoryButtons.Values) button.Visible = !value || button.Text.Contains(categorySearch.Text.Trim(), StringComparison.CurrentCultureIgnoreCase);
+        UpdateLayout();
+    }
+
     private readonly FlowLayoutPanel categories = new() { WrapContents = true };
     private readonly Dictionary<string, Button> categoryButtons = [];
     private readonly Dictionary<Control, string> cardCategories = [];
     private string currentCategory = "General";
     private readonly IDisposable typographyLayout;
     private readonly Dictionary<Control, int> logicalCardHeights = [];
+    private readonly Dictionary<Label, (int Top, int Height)> rowLabelBounds = [];
     public event EventHandler? InstallUpdateRequested;
     private readonly NumericUpDown liveConcurrency;
     private readonly CheckBox preserveLive;
@@ -491,6 +502,7 @@ internal sealed class SettingsView : UserControl
         BindText(label, key);
         label.Multiline = width > 200;
         label.SetBounds(24, top + 7, width, width > 200 ? 36 : 24);
+        rowLabelBounds[label] = (label.Top, label.Height);
         panel.Controls.Add(label);
     }
 
@@ -512,7 +524,7 @@ internal sealed class SettingsView : UserControl
 
     private CheckBox CreateCheck(Panel panel, string key)
     {
-        var control = new CheckBox { Height = 30 };
+        var control = new DashboardToggle { Height = 30 };
         BindText(control, key);
         AppUi.BindForeground(control);
         control.Style.BackgroundColor = SkiaSharp.SKColors.Transparent;
@@ -579,6 +591,7 @@ internal sealed class SettingsView : UserControl
     private void LayoutSettings()
     {
         foreach (var card in logicalCardHeights.Keys) AppTypography.UnflowRows(card, true);
+        foreach (var (label, bounds) in rowLabelBounds) { label.Top = bounds.Top; label.Height = bounds.Height; }
         const int page = 24;
         var width = Math.Max(560, ClientSize.Width - (page * 2));
         header.SetBounds(page, 14, width, AppTypography.TextHeight(dashboard ? 80 : 60));
@@ -593,18 +606,25 @@ internal sealed class SettingsView : UserControl
         categories.SetBounds(24, categoryTop, categoryWidth, (int)Math.Ceiling(11d / Math.Max(1, categoryWidth / (buttonWidth + 8))) * AppTypography.TextHeight(44));
         scroll.SetBounds(0, categories.Bottom + 8, ClientSize.Width, Math.Max(120, ClientSize.Height - categories.Bottom - 8));
 
-        if (dashboard && ClientSize.Width >= AppTypography.TextHeight(1050))
+        categories.WrapContents = true; categories.FlowDirection = FlowDirection.LeftToRight;
+        if (dashboard)
         {
-            var navWidth = AppTypography.TextHeight(190);
-            categories.WrapContents = false; categories.FlowDirection = FlowDirection.TopDown;
-            foreach (var button in categoryButtons.Values) { button.Width = navWidth - 12; button.Height = AppTypography.TextHeight(38); }
-            categorySearch.SetBounds(18, header.Bottom + 12, navWidth, AppTypography.TextHeight(38));
-            categories.SetBounds(18, categorySearch.Bottom + 10, navWidth, AppTypography.TextHeight(11 * 46));
-            scroll.SetBounds(categories.Right + 12, categories.Top, ClientSize.Width - categories.Right - 24, Math.Max(120, ClientSize.Height - categories.Top - 12));
+            categorySearch.SetBounds(Math.Max(24, ClientSize.Width - 320), 28, 280, AppTypography.TextHeight(36));
+            pageSubtitle.Width = Math.Max(300, categorySearch.Left - page - 16);
+            var rowWidth = 0; var categoryRows = 1;
+            foreach (var button in categoryButtons.Values)
+            {
+                button.Width = Math.Min(categoryWidth, AppTypography.TextHeight(Math.Clamp(button.Text.Length * 8 + 24, 136, 230))); button.Height = AppTypography.TextHeight(38); DashboardVisual.Button(button);
+                if (!button.Visible) continue;
+                if (rowWidth > 0 && rowWidth + button.Width + 8 > categoryWidth) { rowWidth = 0; categoryRows++; }
+                rowWidth += button.Width + 8;
+            }
+            categories.SetBounds(24, header.Bottom + 12, categoryWidth, categoryRows * AppTypography.TextHeight(46));
+            scroll.SetBounds(0, categories.Bottom + 14, ClientSize.Width, Math.Max(120, ClientSize.Height - categories.Bottom - 26));
         }
-        else { categories.WrapContents = true; categories.FlowDirection = FlowDirection.LeftToRight; }
-        var grid = dashboard && scroll.ClientSize.Width >= 1260 && AppTypography.Scale <= 1.25;
-        var cardWidth = Math.Max(540, grid ? (scroll.ClientSize.Width - 72) / 2 : scroll.ClientSize.Width - 60);
+        var columnCount = dashboard && AppTypography.Scale <= 1.25 ? Math.Max(1, Math.Min(currentCategory == "General" ? 3 : 2, (scroll.ClientSize.Width - 36) / (currentCategory == "General" ? 370 : 556))) : 1;
+        var grid = columnCount > 1;
+        var cardWidth = Math.Max(dashboard && currentCategory == "General" ? 340 : 540, grid ? (scroll.ClientSize.Width - 48 - (columnCount - 1) * 12) / columnCount : scroll.ClientSize.Width - 60);
         notificationCard.LayoutForWidth(cardWidth);
         startupCard.LayoutForWidth(cardWidth);
         updatesCard.LayoutForWidth(cardWidth);
@@ -619,7 +639,7 @@ internal sealed class SettingsView : UserControl
         foreach (var card in new[] { generalCard, toolsCard, behaviorCard, resilienceCard, liveCard, notificationCard, subtitlesCard, sponsorCard,
                      cookiesCard, appearanceCard, interfaceCard, textScaleCard, personalizationCard, browserCard, remoteCard, updatesCard, startupCard, advancedCard, actionsCard })
         {
-            if (card != actionsCard) card.Visible = currentCategory == "All" || cardCategories.GetValueOrDefault(card) == currentCategory;
+            if (card != actionsCard) card.Visible = currentCategory == "All" || cardCategories.GetValueOrDefault(card) == currentCategory || dashboard && currentCategory == "General" && new Control[] { interfaceCard, textScaleCard, startupCard, updatesCard }.Contains(card);
             if (!card.Visible) continue;
             if (card != textScaleCard && card != remoteCard && card != personalizationCard && card != interfaceCard) card.Height = AppTypography.TextHeight(logicalCardHeights.GetValueOrDefault(card, card.Height));
             card.SetBounds(page + displayOrigin.X, top, cardWidth, card.Height);
@@ -736,18 +756,56 @@ internal sealed class SettingsView : UserControl
         if (services.Appearance.Profile.Settings.CompactCards)
             foreach (var card in cardCategories.Keys.Where(c => c.Visible && c != personalizationCard && c != interfaceCard && c != textScaleCard))
                 card.Height = Math.Max(AppTypography.TextHeight(100), card.Controls.Where(c => c.Visible).Select(c => c.Bottom + 12).DefaultIfEmpty(card.Height).Max());
+        if (dashboard) foreach (var card in scroll.Controls.Where(c => c.Visible)) { DashboardStyle.Card(card);
+            var headings = card.Controls.OfType<Label>().OrderBy(c => c.Top).Take(2).ToArray();
+            if (headings.Length > 0) AppTypography.Bind(headings[0], 12, FontStyle.Bold);
+            if (headings.Length > 1) { AppTypography.Bind(headings[1], 9.5f); headings[1].Multiline = true; headings[1].Height = Math.Max(headings[1].Height, AppTypography.TextHeight(36)); }
+            foreach (var inner in card.Controls.OfType<Panel>()) { DashboardVisual.Flat(inner); }
+            foreach (var button in card.Controls.OfType<Button>()) DashboardVisual.Button(button, button == save); }
+        if (dashboard && currentCategory == "General" && cardWidth < 540) LayoutCompactOverview(cardWidth);
         top = displayOrigin.Y;
         if (grid)
         {
-            var columns = new[] { displayOrigin.Y, displayOrigin.Y };
-            foreach (var card in scroll.Controls.Where(c => c.Visible))
+            var columns = Enumerable.Repeat(displayOrigin.Y, columnCount).ToArray();
+            foreach (var card in ModernVisibleCards())
             {
-                var column = columns[0] <= columns[1] ? 0 : 1;
+                var column = Array.IndexOf(columns, columns.Min());
                 card.Left = page + displayOrigin.X + column * (cardWidth + 12); card.Top = columns[column];
                 columns[column] = card.Bottom + services.Appearance.Profile.Settings.SectionSpacing;
             }
         }
-        else foreach (var card in scroll.Controls.Where(c => c.Visible)) { card.Left = page + displayOrigin.X; card.Top = top; top = card.Bottom + services.Appearance.Profile.Settings.SectionSpacing; }
+        else foreach (var card in ModernVisibleCards()) { card.Left = page + displayOrigin.X; card.Top = top; top = card.Bottom + services.Appearance.Profile.Settings.SectionSpacing; }
+    }
+
+    private void LayoutCompactOverview(int width)
+    {
+        var line = AppTypography.TextHeight(36); var labelHeight = AppTypography.TextHeight(24); var inner = width - 32;
+        var themeLabel = localizedText.First(p => p.Value == "Settings.Theme").Key;
+        var languageLabel = localizedText.First(p => p.Value == "Settings.Language").Key;
+        themeLabel.SetBounds(16, 92, inner, labelHeight); theme.SetBounds(16, themeLabel.Bottom + 4, inner, line);
+        languageLabel.SetBounds(16, theme.Bottom + 12, inner, labelHeight); language.SetBounds(16, languageLabel.Bottom + 4, inner, line); appearanceCard.Height = language.Bottom + 16;
+        var top = 100;
+        foreach (var panel in new[] { ytDlpToolCard, ffmpegToolCard, denoToolCard })
+        {
+            panel.SetBounds(16, top, inner, 104); top = panel.Bottom + 8;
+            var labels = panel.Controls.OfType<Label>().OrderBy(c => c.Top).ToArray();
+            foreach (var label in labels) { label.Left = 12; label.Width = panel.Width - 24; label.Multiline = true; }
+        }
+        ytDlpDescription.SetBounds(12, 34, inner - 24, 34); ytDlpStatus.SetBounds(12, 72, inner - 24, 24);
+        ffmpegDescription.SetBounds(12, 34, inner - 24, 34); ffmpegStatus.SetBounds(12, 72, inner - 24, 24);
+        denoDescription.SetBounds(12, 34, inner - 24, 34); denoStatus.SetBounds(12, 72, inner - 24, 24);
+        foreach (var bar in new[] { ytDlpProgress, ffmpegProgress, denoProgress }) bar.SetBounds(12, 100, inner - 24, 3);
+        checkUpdates.SetBounds(16, top, (inner - 8) / 2, line); retrySetup.SetBounds(checkUpdates.Right + 8, top, (inner - 8) / 2, line);
+        supportedSources.SetBounds(16, checkUpdates.Bottom + 8, inner, line); toolsCard.Height = supportedSources.Bottom + 16;
+        foreach (var label in new[] { ytDlpStatus,ffmpegStatus,denoStatus }) { label.Multiline = false; label.AutoEllipsis = true; compactTips.SetToolTip(label,label.Text); }
+        startupCard.LayoutForWidth(width); updatesCard.LayoutForWidth(width);
+        save.SetBounds(16, 16, inner, line); logs.SetBounds(16, save.Bottom + 8, inner, line); feedback.SetBounds(16, logs.Bottom + 8, inner, labelHeight); actionsCard.Height = feedback.Bottom + 12;
+    }
+
+    private IEnumerable<Control> ModernVisibleCards()
+    {
+        if (!dashboard || currentCategory != "General") return scroll.Controls.Where(c => c.Visible);
+        return new Control[] { appearanceCard, interfaceCard, startupCard, textScaleCard, toolsCard, updatesCard, actionsCard }.Where(c => c.Visible);
     }
 
     private static void ResizeSectionHeader(Panel card)
@@ -770,6 +828,11 @@ internal sealed class SettingsView : UserControl
         description.SetBounds(208, 11, Math.Max(150, card.Width - 224), 24);
         status.Width = card.Width - 32;
         progress.SetBounds(16, 65, card.Width - 32, 5);
+        if (AppTypography.IsDashboard(owner))
+        {
+            AppTypography.Bind(description, 9); description.Multiline = true; description.SetBounds(card.Width / 2, 10, card.Width / 2 - 16, 36);
+            status.SetBounds(16, 46, card.Width - 32, 22); AppTypography.Bind(status, 9);
+        }
     }
 
     private void LoadValues()
@@ -1448,7 +1511,7 @@ internal sealed class SettingsView : UserControl
         if (disposing)
         {
             remoteDisposed = true;
-            typographyLayout.Dispose();
+            compactTips.Dispose(); typographyLayout.Dispose();
             remoteClock.Dispose();
             services.Tools.Changed -= ToolsChanged;
             services.WebRemote.Changed -= RemoteChanged;

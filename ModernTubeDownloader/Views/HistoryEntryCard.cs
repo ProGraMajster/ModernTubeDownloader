@@ -23,6 +23,7 @@ internal sealed partial class HistoryEntryCard : UserControl
     private readonly Button openFolder;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private bool disposed;
+    private readonly ToolTip rowTips = new();
 
     public HistoryEntryCard(DownloadHistoryEntry entry, LocalizationService text, ThumbnailCacheService thumbnails)
     {
@@ -43,6 +44,7 @@ internal sealed partial class HistoryEntryCard : UserControl
         thumbnail.Style.Border.Width = 0;
         AppUi.BindBackground(thumbnail, AppThemeTokens.SurfaceSecondary);
         title = AppUi.Heading(entry.Title, 13.5f);
+        rowTips.SetToolTip(title, entry.Title);
         facts = AppUi.Muted();
         path = AppUi.Muted();
         openFile = new Button();
@@ -68,6 +70,7 @@ internal sealed partial class HistoryEntryCard : UserControl
     private void LayoutControls()
     {
         if (dashboard) { LayoutDashboardCard(); return; }
+        openFile.Visible = true; foreach (var cell in cells) cell.Visible = false;
         var appearance = AppearancePresentation.Current.History;
         // Compact list is a density choice, not the narrow-window stacked layout.
         var compact = Width < 760;
@@ -137,6 +140,7 @@ internal sealed partial class HistoryEntryCard : UserControl
         if (disposing)
         {
             disposed = true;
+            rowTips.Dispose();
             lifetimeCancellation.Cancel();
             SizeChanged -= CardSizeChanged;
             text.LanguageChanged -= LanguageChanged;

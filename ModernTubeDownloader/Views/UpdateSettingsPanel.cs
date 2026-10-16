@@ -9,7 +9,7 @@ internal sealed class UpdateSettingsPanel : Panel
 {
     private readonly AppServices services;
     private readonly Label heading = AppUi.Heading("", 15), versions = AppUi.Muted(), frequencyLabel = AppUi.Muted(), modeLabel = AppUi.Muted(), status = AppUi.Muted();
-    private readonly CheckBox automatic = new(), onExit = new();
+    private readonly DashboardToggle automatic = new(), onExit = new();
     private readonly ComboBox frequency = new(), mode = new();
     private readonly Button save = new(), check = new(), download = new(), install = new(), notes = new(), later = new(), skip = new();
     private readonly ProgressBar progress = new() { Minimum = 0, Maximum = 100 };
@@ -108,6 +108,18 @@ internal sealed class UpdateSettingsPanel : Panel
     }
     public void LayoutForWidth(int width)
     {
+        if (AppTypography.IsDashboard(this) && width < 540)
+        {
+            var innerWidth = width - 32; var line = AppTypography.TextHeight(36); var label = AppTypography.TextHeight(24);
+            heading.SetBounds(16,16,innerWidth,label); versions.SetBounds(16,heading.Bottom+8,innerWidth,label); automatic.SetBounds(16,versions.Bottom+10,innerWidth,line);
+            frequencyLabel.SetBounds(16,automatic.Bottom+10,innerWidth,label); frequency.SetBounds(16,frequencyLabel.Bottom+4,innerWidth,line);
+            modeLabel.SetBounds(16,frequency.Bottom+10,innerWidth,label); mode.SetBounds(16,modeLabel.Bottom+4,innerWidth,line);
+            status.Multiline = true; status.SetBounds(16,mode.Bottom+12,innerWidth,AppTypography.TextHeight(48)); progress.SetBounds(16,status.Bottom+6,innerWidth,5);
+            var buttons = new[] { save,check,download,install,notes,later,skip }; var y = progress.Bottom+12;
+            for (var i=0;i<buttons.Length;i++) buttons[i].SetBounds(16+(i%2)*(innerWidth/2+4),y+(i/2)*(line+8),(innerWidth-8)/2,line);
+            onExit.SetBounds(16,buttons[^1].Bottom+10,innerWidth,AppTypography.TextHeight(44)); Height=onExit.Bottom+16; return;
+        }
+
         var inner = Math.Max(480, width - 48);
         heading.SetBounds(24, 20, inner, 30); versions.SetBounds(24, 56, inner, 28);
         automatic.SetBounds(24, 94, inner, 30);

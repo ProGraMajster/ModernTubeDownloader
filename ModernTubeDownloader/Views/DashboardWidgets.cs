@@ -21,19 +21,36 @@ internal sealed class SpeedSamples(int capacity = 120)
 internal sealed class SpeedChart : Control
 {
     internal readonly SpeedSamples Samples = new();
-    public SpeedChart() { AppUi.BindBackground(this, AppThemeTokens.Surface); }
+    public string NoDataText { get; set; } = "";
+    public SpeedChart() { AppUi.BindBackground(this, AppThemeTokens.Surface); AppTypography.Bind(this, 8.5f); }
     public void Sample(double speed) { Samples.Add(speed); Invalidate(); }
     protected override void OnPaint(PaintEventArgs e)
     {
-        base.OnPaint(e); var values = Samples.Snapshot();
-        using var grid = new SKPaint { Color = AppUi.GetColor(AppThemeTokens.Border), StrokeWidth = 1, IsAntialias = true, Style = SKPaintStyle.Stroke };
-        var width = Math.Max(1, Width - 8); var height = Math.Max(1, Height - 8);
-        for (var i = 0; i <= 4; i++) e.Canvas.DrawLine(4, 4 + height * i / 4f, width + 4, 4 + height * i / 4f, grid);
-        if (values.Length < 2) return;
-        var max = Math.Max(1, values.Max()); using var path = new SKPath();
-        for (var i = 0; i < values.Length; i++) { var x = 4 + width * i / 119f; var y = 4 + height * (1 - (float)(values[i] / max)); if (i == 0) path.MoveTo(x, y); else path.LineTo(x, y); }
-        using var line = new SKPaint { Color = AppUi.GetColor(AppThemeTokens.Accent), StrokeWidth = 1.5f, IsAntialias = true, Style = SKPaintStyle.Stroke };
-        e.Canvas.DrawPath(path, line);
+        base.OnPaint(e); e.Canvas.Save(); e.Canvas.Scale((float)Scaling);
+        try
+        {
+            var values = Samples.Snapshot(); var left = 42; var width = Math.Max(1, Width - left - 8); var height = Math.Max(1, Height - 24);
+            using var grid = new SKPaint { Color = AppUi.GetColor(AppThemeTokens.Border), StrokeWidth = 1, IsAntialias = true, Style = SKPaintStyle.Stroke };
+            for (var i = 0; i <= 4; i++) e.Canvas.DrawLine(left, 4 + height * i / 4f, width + left, 4 + height * i / 4f, grid);
+            for (var i = 0; i <= 4; i++) e.Canvas.DrawLine(left + width * i / 4f, 4, left + width * i / 4f, height + 4, grid);
+            void Text(string text, int x, int y, int w, int h, ModernFormsNext.ContentAlignment align)
+                => e.Canvas.DrawText(text, CurrentStyle.GetFont(), CurrentStyle.GetFontSize(), new System.Drawing.Rectangle(x,y,w,h), AppUi.GetColor(AppThemeTokens.TextSecondary), align, maxLines:1, ellipsis:true);
+            var maximum = Math.Max(1, values.DefaultIfEmpty(0).Max());
+            Text("0", 0, height - 12, left - 6, 24, ModernFormsNext.ContentAlignment.MiddleRight);
+            Text("120 s", left, height + 3, 60, 22, ModernFormsNext.ContentAlignment.MiddleLeft);
+            Text("0 s", Width - 42, height + 3, 40, 22, ModernFormsNext.ContentAlignment.MiddleRight);
+            if (values.Length < 2 || !values.Any(v => v > 0))
+            { Text(NoDataText, left + 8, height / 2 - 12, width - 16, 28, ModernFormsNext.ContentAlignment.MiddleCenter); return; }
+            Text(DashboardStyle.Bytes((long)maximum), 0, 0, left - 6, 24, ModernFormsNext.ContentAlignment.MiddleRight);
+            using var path = new SKPath();
+            for (var i = 0; i < values.Length; i++) { var x = left + width * i / 119f; var y = 4 + height * (1 - (float)(values[i] / maximum)); if (i == 0) path.MoveTo(x, y); else path.LineTo(x, y); }
+            using var area = new SKPath(path); area.LineTo(left + width * (values.Length-1) / 119f, height + 4); area.LineTo(left, height + 4); area.Close();
+            using var fill = new SKPaint { Color = AppUi.GetColor(AppThemeTokens.Accent).WithAlpha(30), IsAntialias = true };
+            e.Canvas.DrawPath(area, fill);
+            using var line = new SKPaint { Color = AppUi.GetColor(AppThemeTokens.Accent), StrokeWidth = 1.5f, IsAntialias = true, Style = SKPaintStyle.Stroke };
+            e.Canvas.DrawPath(path, line);
+        }
+        finally { e.Canvas.Restore(); }
     }
 }
 
@@ -42,9 +59,10 @@ internal sealed class DashboardWidgets : Panel
     private readonly AppServices services;
     private readonly bool live;
     private readonly Panel statistics = new(), speed = new(), processes = new();
-    private readonly Label statisticsTitle = AppUi.Heading("", 10.5f), statisticsBody = AppUi.Muted(), disk = AppUi.Muted(), timing = AppUi.Muted();
+    private readonly Label statisticsTitle = AppUi.Heading("", 10.5f), disk = AppUi.Muted(), timing = AppUi.Muted();
+    private readonly List<(Label Caption, Label Value)> counts = [];
     private readonly Label speedTitle = AppUi.Heading("", 10.5f), speedValue = AppUi.Muted(), processTitle = AppUi.Heading("", 10.5f), processBody = AppUi.Muted();
-    private readonly ProgressBar diskBar = new() { Minimum = 0, Maximum = 100 };
+    private readonly DashboardProgress diskBar = new() { Minimum = 0, Maximum = 100 };
     private readonly SpeedChart chart = new();
     private readonly ModernFormsNext.Timer timer = new() { Interval = 1000 };
     private int ticks;
@@ -56,9 +74,18 @@ internal sealed class DashboardWidgets : Panel
         this.services = services; this.live = live; AccessibleAutomationId = live ? "LiveDashboardWidgets" : "DashboardWidgets";
         AppUi.BindBackground(this);
         foreach (var panel in new[] { statistics, speed, processes }) { DashboardStyle.Card(panel); Controls.Add(panel); }
-        statisticsBody.Multiline = disk.Multiline = processBody.Multiline = true;
-        AppTypography.Bind(statisticsBody, 9.5f); AppTypography.Bind(disk, 9.5f); AppTypography.Bind(processBody, 9.5f);
-        statistics.Controls.AddRange([statisticsTitle, statisticsBody, disk, timing, diskBar]);
+        disk.Multiline = processBody.Multiline = true;
+        AppTypography.Bind(speedValue, 11);
+        AppTypography.Bind(disk, 9.5f); AppTypography.Bind(processBody, 9.5f);
+        statistics.Controls.AddRange([statisticsTitle, disk, timing, diskBar]);
+        for (var i = 0; i < 4; i++)
+        {
+            var caption = AppUi.Muted(); var value = AppUi.Muted();
+            AppTypography.Bind(caption, 9.5f); AppTypography.Bind(value, 9.5f);
+            caption.AutoEllipsis = true; value.TextAlign = ModernFormsNext.ContentAlignment.MiddleRight;
+            counts.Add((caption, value)); statistics.Controls.AddRange([caption, value]);
+        }
+        for (var i=0;i<4;i++) { var dot = new Panel { Name = "StatDot"+i }; AppUi.BindBackground(dot, new[] { AppThemeTokens.Info,AppThemeTokens.TextSecondary,AppThemeTokens.Success,AppThemeTokens.Error }[i]); DashboardVisual.Flat(dot); dot.Style.Border.Radius=3; statistics.Controls.Add(dot); }
         diskBar.Padding = new Padding(0); diskBar.Style.Border.Width = 0; AppUi.BindBackground(diskBar, AppThemeTokens.SurfaceSecondary);
         speed.Controls.AddRange([speedTitle, speedValue, chart]); processes.Controls.AddRange([processTitle, processBody]);
         timer.Tick += Tick; VisibleChanged += (_, _) => { if (Visible) { timer.Start(); RefreshValues(); } else timer.Stop(); };
@@ -71,14 +98,19 @@ internal sealed class DashboardWidgets : Panel
         var active = items.Where(i => i.Status is DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing).ToArray();
         var rate = live ? sessions.Where(s => s.IsActive).Sum(s => s.CurrentSpeed ?? 0) : active.Sum(i => i.SpeedBytesPerSecond ?? 0);
         statisticsTitle.Text = text[live ? "Dashboard.LiveStatistics" : "Dashboard.Statistics"];
-        statisticsBody.Text = live ? text.Get("Dashboard.LiveCounts", sessions.Count(s => s.IsActive), sessions.Count(s => s.State == LiveSessionState.WaitingForLive), sessions.Count(s => s.State == LiveSessionState.Completed), DashboardStyle.Bytes(sessions.Sum(s => s.BytesWritten)))
+        var countText = live ? text.Get("Dashboard.LiveCounts", sessions.Count(s => s.IsActive), sessions.Count(s => s.State == LiveSessionState.WaitingForLive), sessions.Count(s => s.State == LiveSessionState.Completed), DashboardStyle.Bytes(sessions.Sum(s => s.BytesWritten)))
             : text.Get("Dashboard.Counts", active.Length, items.Count(i => i.Status is DownloadStatus.Queued or DownloadStatus.Waiting), items.Count(i => i.Status == DownloadStatus.Completed), items.Count(i => i.Status is DownloadStatus.Failed or DownloadStatus.Partial));
+        var rows = countText.Split('\n');
+        for (var i = 0; i < counts.Count; i++)
+        {
+            var fields = System.Text.RegularExpressions.Regex.Split(rows[i], @"\s{2,}", System.Text.RegularExpressions.RegexOptions.None);
+            counts[i].Caption.Text = fields[0]; counts[i].Value.Text = fields.Length > 1 ? fields[^1] : "";
+        }
         var eta = active.Length > 0 && active.All(i => i.Eta.HasValue) ? active.Max(i => i.Eta!.Value).ToString(@"hh\:mm\:ss") : "—";
         timing.Text = text.Get("Dashboard.EtaActive", eta);
-        speedTitle.Text = text["Dashboard.SpeedChart"]; speedValue.Text = DashboardStyle.Bytes((long)rate) + "/s · " + text.Get("Dashboard.ChartScale", DashboardStyle.Bytes((long)Math.Max(1, chart.Samples.Snapshot().DefaultIfEmpty(0).Max())));
+        chart.NoDataText = text["Dashboard.NoSpeed"]; speedTitle.Text = text["Dashboard.SpeedChart"]; speedValue.Text = DashboardStyle.Bytes((long)rate) + "/s";
         if (rate > 0 || chart.Samples.Snapshot().Any(v => v > 0)) chart.Sample(rate);
-        processTitle.Text = text["Dashboard.ActiveProcesses"];
-        var observed = ProcessActivity.Snapshot(); processBody.Text = observed.Count == 0 ? text["Dashboard.NoProcesses"] : string.Join("\n", observed.Select(p => p.Name + "  ·  " + p.Elapsed.ToString(@"mm\:ss")));
+        var observed = ProcessActivity.Snapshot(); processTitle.Text = text["Dashboard.ActiveProcesses"] + $" ({observed.Count})"; processBody.Text = observed.Count == 0 ? text["Dashboard.NoProcesses"] : string.Join("\n", observed.Select(p => p.Name + "  ·  " + p.Elapsed.ToString(@"mm\:ss")));
         var storage = services.Queue.Storage.State;
         if (storage.IsBlocked) { disk.Text = text[storage.MessageKey]; AppUi.BindForeground(disk, AppThemeTokens.Warning); }
         var target = SelectedPath?.Invoke() ?? services.Settings.Current.FinalOutputDirectory;
@@ -118,7 +150,13 @@ internal sealed class DashboardWidgets : Panel
             panel.SetBounds(stacked ? 0 : x, stacked ? index * (h + 10) : 0, Math.Max(1, cellWidth), h); index++; x += cellWidth + 12;
         }
         var line = AppTypography.TextHeight(23); var sw = statistics.Width; var cw = speed.Width; var pw = processes.Width;
-        statisticsTitle.SetBounds(14, 8, sw - 28, line); statisticsBody.SetBounds(14, line + 10, Math.Max(1, sw / 2 - 12), line * 4);
+        statisticsTitle.SetBounds(14, 8, sw - 28, line);
+        for (var i = 0; i < counts.Count; i++)
+        {
+            counts[i].Caption.SetBounds(28, line + 10 + i * line, Math.Max(1, sw / 2 - 90), line);
+            counts[i].Value.SetBounds(sw / 2 - 58, line + 10 + i * line, 44, line);
+        }
+        foreach(var dot in statistics.Controls.Where(c => c.Name.StartsWith("StatDot"))) { var i=int.Parse(dot.Name[7..]); dot.SetBounds(14,line+17+i*line,6,6); }
         timing.SetBounds(sw / 2, line * 3 + 10, Math.Max(1, sw / 2 - 14), line);
         disk.SetBounds(sw / 2, line + 10, Math.Max(1, sw / 2 - 14), line * 3); diskBar.SetBounds(sw / 2, h - 20, Math.Max(1, sw / 2 - 14), 5);
         speedTitle.SetBounds(14, 8, cw - 28, line); speedValue.SetBounds(14, line + 10, cw - 28, line); chart.SetBounds(12, line * 2 + 14, cw - 24, Math.Max(20, h - line * 2 - 24));
@@ -129,7 +167,7 @@ internal sealed class DashboardWidgets : Panel
 
 internal static class DashboardStyle
 {
-    public static void Card(Control control) { AppUi.Card(control); AppUi.BindBorder(control, AppThemeTokens.Border); control.Style.Border.Radius = Math.Min(12, AppearancePresentation.Current.Global.CornerRadius); }
+    public static void Card(Control control) { AppUi.Card(control); AppUi.BindBorder(control, AppThemeTokens.Border); AppUi.BindGradient(control, AppThemeTokens.Surface, AppThemeTokens.SurfaceSecondary); control.Style.Border.Width = 1; control.Style.Border.Radius = Math.Min(10, AppearancePresentation.Current.Global.CornerRadius); }
     public static string Duration(double? seconds)
     {
         if (seconds is null) return "";

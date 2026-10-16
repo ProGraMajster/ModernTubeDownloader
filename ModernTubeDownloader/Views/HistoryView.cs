@@ -118,6 +118,7 @@ internal sealed partial class HistoryView : UserControl
         var query = search.Text.Trim();
         var all = services.History.Snapshot();
         var filtered = all.Where(entry => Matches(entry, query) && (!dashboard || FilterHistory(entry))).ToArray();
+        if (dashboard) filtered = (oldestFirst ? filtered.OrderBy(e => e.CompletedAt) : filtered.OrderByDescending(e => e.CompletedAt)).ToArray();
         if (dashboard) dashboardPage = Math.Clamp(dashboardPage, 0, Math.Max(0, (filtered.Length - 1) / 40));
         foreach (var entry in dashboard ? filtered.Skip(dashboardPage * 40).Take(40) : filtered)
         {
@@ -167,6 +168,12 @@ internal sealed partial class HistoryView : UserControl
         pageTitle.Text = text["History.Title"];
         pageSubtitle.Text = text["History.Subtitle"];
         search.Placeholder = text["History.SearchPlaceholder"];
+        if (dateRange is not null)
+        {
+            dateRange.Items[0] = text["Dashboard.AllDates"];
+            dateRange.Items[1] = text["Dashboard.Last7Days"];
+            dateRange.Items[2] = text["Dashboard.Last30Days"];
+        }
         RefreshItems();
     }
 

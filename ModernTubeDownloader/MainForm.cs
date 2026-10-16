@@ -108,6 +108,8 @@ public sealed class MainForm : Form
         settingsView.InstallUpdateRequested += (_, _) => _ = RequestUpdateInstallationAsync();
         downloadsView.SupportedSourcesRequested += OpenSupportedSources;
         settingsView.SupportedSourcesRequested += OpenSupportedSources;
+        liveView.SupportedSourcesRequested += OpenSupportedSources;
+        otherView.NavigateRequested += (_, page) => Navigate(page);
         batchView = new BatchImportView(services) { Visible = false };
 #if DEBUG
         if (automation is not null) batchView.RegisterDialog = automation.RegisterWindow;
@@ -272,9 +274,12 @@ public sealed class MainForm : Form
     {
         shellHost.Apply(services.Appearance.InterfaceMode);
         var modern = shellHost.Mode == AppInterfaceMode.ModernDashboard;
+        if (!modern) foreach (var view in pages.Keys) DashboardVisual.RestoreTree(view);
         downloadsView.SetDashboard(modern); liveView.SetDashboard(modern);
         historyView.SetDashboard(modern); otherView.SetDashboard(modern); settingsView.SetDashboard(modern); batchView.SetDashboard(modern);
         Text = modern ? "ModernTubeDownloader   v" + AppBranding.Version : text["App.Title"];
+        AppTypography.SetDashboardPresentation(TitleBar, modern);
+        AppTypography.Bind(caption, modern ? 10.5f : 12, FontStyle.Bold);
         TitleBar.Height = modern ? AppTypography.TextHeight(48) : 34;
         AppUi.BindBackground(TitleBar, modern ? AppThemeTokens.Background : AppThemeTokens.Surface);
         foreach (var view in pages.Keys) AppTypography.SetDashboardPresentation(view, modern);
