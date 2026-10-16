@@ -21,6 +21,8 @@ param(
     [switch]$DashboardSmoke,
     [switch]$DashboardSwitchStress,
     [switch]$DashboardFixture,
+    [switch]$DashboardVisualFixture,
+    [switch]$DashboardEmptyFixture,
     [switch]$ClassicUiRecovery,
     [switch]$QualityDropdownSmoke,
     [ValidateRange(1, 100)][int]$QualityDropdownPasses = 20,
@@ -60,6 +62,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if ($ClassicUiRecovery) { $DashboardSmoke = $true }
+if ($DashboardVisualFixture) { $DashboardFixture = $true; $DashboardSmoke = $true }
+if ($DashboardEmptyFixture) { $DashboardSmoke = $true }
 if ($DashboardSmoke) { $InterfaceMode = 'ModernDashboard' }
 if (Get-Process -Name ModernTubeDownloader -ErrorAction SilentlyContinue) {
     throw 'Close the existing MTD instance (including other QA sessions) before starting an isolated smoke. No process was stopped.'
@@ -396,6 +400,7 @@ if ($RealLiveSmoke -or $RealSourcesSmoke -or $RealBatchSmoke) {
     $settings.FinalOutputDirectory = Join-Path $dataRoot 'output'
 }
 $settings | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'settings.json') -Encoding utf8
+if ($DashboardEmptyFixture) { '[]' | Set-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Encoding utf8 }
 @{ LastToolUpdateCheck = [DateTimeOffset]::UtcNow } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'Tools/state.json') -Encoding utf8
 if ($QueueScrollRepro -or $CrashStress -or $DashboardFixture) {
     $seededQueue = @()
@@ -418,6 +423,7 @@ if ($QueueScrollRepro -or $CrashStress -or $DashboardFixture) {
             CompletedAt = [DateTimeOffset]::UtcNow.AddMinutes(-$index); Status = 'Completed'
         }
     }
+    if ($DashboardVisualFixture) { & (Join-Path $PSScriptRoot 'New-DashboardVisualFixture.ps1') -DataRoot $dataRoot -Queue $seededQueue -History $seededHistory }
     $seededQueue | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Encoding utf8
     $seededHistory | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'history.json') -Encoding utf8
 }
@@ -514,6 +520,15 @@ try {
     if ($PublishStartupSmoke) { Write-Output "Published startup smoke PASS (isolated profile=$dataRoot; custom QA tools, not real provisioning/download)."; return }
     }
 
+    if ($DashboardVisualFixture) {
+        # Normal startup uses completed entries, so its no-work shutdown is still qualified.
+        # Pending/error presentation cases are installed only for the owned Automation process.
+        $seededQueue[1].Status = 0; $seededQueue[1].ProgressPercent = 0; $seededQueue[1].StatusMessageKey = 'Queue.Detail.Queued'
+        $seededQueue[2].Status = 7; $seededQueue[2].ProgressPercent = 0
+        $seededQueue[3].Status = 13; $seededQueue[3].ProgressPercent = 0
+        $seededQueue[4].Status = 8; $seededQueue[4].ProgressPercent = 0
+        $seededQueue | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Encoding utf8
+    }
     $automationArguments = @('--automation'); if ($ClassicUiRecovery) { $automationArguments += '--classic-ui' }
     $script:automationProcess = Start-Process -FilePath $app -ArgumentList $automationArguments -PassThru -WindowStyle Hidden
     Wait-Bridge $script:automationProcess.Id $true
@@ -559,7 +574,7 @@ try {
             $paged = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
             if (@($paged.nodes | Where-Object { $_.node.automationId -like 'QueueItem-*' }).Count -ne 40) { throw 'Dashboard queue did not bound 100 entries to 40 rows.' }
         }
-        if (-not $DashboardFixture) {
+        if (-not $DashboardFixture -and -not $DashboardEmptyFixture) {
             Invoke-NodeAction (Find-Node 'DownloadUrlInput' $mainRoot) $mainRoot 'SetValue' $SampleUrl | Out-Null
             Invoke-NodeAction (Find-Node 'DashboardQuickQueue' $mainRoot) $mainRoot 'Invoke' | Out-Null
             Wait-Node 'DashboardQuickQueue' $mainRoot 'Enabled' | Out-Null
@@ -593,6 +608,7 @@ try {
         for ($i = 0; $i -lt $passes; $i++) {
             Invoke-NodeAction $classicChoice $mainRoot 'Invoke' | Out-Null
             [void](Find-Node 'NavDownloads' $mainRoot)
+            if ($i -eq 0) { Capture-Dashboard 'classic-after-switch' }
             Invoke-NodeAction $modernChoice $mainRoot 'Invoke' | Out-Null
             [void](Find-Node 'NavBatch' $mainRoot)
         }

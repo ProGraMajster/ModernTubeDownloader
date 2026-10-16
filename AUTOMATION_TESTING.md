@@ -131,6 +131,11 @@ the matching Automation CLI before running these isolated native checks:
 
 `-DashboardFixture` seeds 100 explicitly synthetic QA entries in the isolated test
 profile; it is not production sample data or evidence of a real source download.
+`-DashboardVisualFixture` also creates original labelled geometric QA thumbnails,
+mixed terminal/waiting states and multilingual/long titles in that owned temporary
+profile. `-DashboardEmptyFixture` captures native empty routes without quick-queue
+seeding. Neither flag changes production behavior. Captures include Classic after
+switching, and the script refuses to run while any owner instance is open.
 The script captures its owned HWND and semantic trees for all eight routes, checks
 runtime selection and persistence, and uses the real native app with fake media
 tools. `-DashboardSwitchStress` performs twenty Classic → Modern cycles. Recovery
@@ -141,3 +146,8 @@ and real banner/cold activation still require separate evidence.
 constructor fallback, common notification/external routes, chrome disposal, singleton
 runtime preservation, 100-item paging/reveal, logical size/text-scale layouts, action
 contrast and bounded/sanitized telemetry. These tests do not replace visual QA.
+`DashboardVisualTests` verifies real raster text overflow, dynamic font restoration,
+canonical toggle semantics and restoration of Classic borders. History tests use
+the real controls to verify filtering/sorting/date ranges preserve stored data.
+Native visual evidence is kept locally under `artifacts/dashboard-visual/` with
+before/after/comparisons, an audit, acceptance matrix and explicit limitations.

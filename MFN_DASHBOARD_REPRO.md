@@ -1,7 +1,9 @@
 # MFN presentation limitations observed by the dashboard
 
 Framework pin: `8d8a7679779608b4edbee7dc687c13e3b1a611d9`.
-No framework source or application-local replacement controls were introduced.
+Framework source is unchanged. Small application presentation subclasses now use
+public painting APIs and the inherited canonical semantic providers; no copied
+renderer, private reflection or separate accessibility tree is used.
 
 ## Premature Label.AutoEllipsis
 
@@ -44,15 +46,37 @@ floating widths to int; TextMeasurer/DrawText then lays out again against that
 rounded-down width with ellipsis enabled. A subpixel difference can trigger
 premature ellipsis. Measurement also uses a fixed 1000 × 1000 maximum. The upstream
 fix should retain correct single-line alignment and account for the available
-field and fractional measurement. No proposed application workaround is applied.
+field and fractional measurement. DashboardLabel now draws against the actual
+available field using public Canvas.DrawText. Classic calls the original renderer.
+Headless raster regression tests at text 100/150/200 verify fitting Unicode has
+identical pixels with ellipsis enabled/disabled, while actual overflow differs.
+Native before/after captures separately confirm the application result. This is
+an app presentation mitigation; it does not claim an upstream fix.
 
 ## Per-item ProgressBar fill color
 
 The pinned native ProgressBarRenderer uses global `Theme.AccentColor2` for its fill.
 Control foreground/background styles do not select a per-instance fill color.
-Dashboard status labels distinguish success/warning/error; native progress fills
-use the shared accent. A future typed per-instance fill API would permit the
-reference's amber/green/red fills without replacing the framework control.
+DashboardProgress retains the native range/value model and provider and uses
+public painting for the real status fill. Completed/failed/cancelled rows hide
+active progress. Classic delegates to the pinned renderer.
+
+## Zero-width rounded border hairlines
+
+The pinned DrawBorder rounded path still invokes a Skia stroke with Width=0.
+Skia interprets that as a device hairline. A minimal public-API recipe is a Panel
+with Style.Border.Radius=8, Width=0 and an opaque border color. The before capture
+shows unwanted outlines on controls intended to be flat. DashboardVisual.Flat
+sets the zero border color explicitly transparent in all interaction states;
+actual card boundaries remain one unit wide. This recipe is extracted from the
+diagnosis, not a separately executed upstream native qualification.
+
+## Input padding precedence
+
+ControlStyle.Padding takes precedence over Control.Padding through
+PresentationPadding. Setting only Control.Padding leaves text under a leading
+icon. The app sets padding on the public state styles and restores the original
+recipes for Classic. This was app API usage, not a new framework defect.
 
 ## Existing composite typography issues
 

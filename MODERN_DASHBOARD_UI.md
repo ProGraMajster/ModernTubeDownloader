@@ -53,8 +53,8 @@ Stop and Save, reconnect/part facts and inspector. History provides search, filt
 paging, export, file/folder actions and canonical re-analysis/retry. Other lists
 only working tools; the reference's unimplemented conversion/subtitle/thumbnail
 utilities are intentionally absent. Settings retains all eleven categories,
-adds category search, uses an internal sidebar where space permits, and flows
-cards into two columns on sufficiently wide windows. Help/About expose branding,
+adds category search and horizontal category chips, and flows its General overview
+into three columns where space permits (other categories use up to two). Help/About expose branding,
 dynamic version, pinned framework metadata, repository/license and diagnostics.
 
 ## Responsive layout and text
@@ -70,7 +70,17 @@ when sufficient queue width remains; Details opens a section below the list at
 smaller sizes. Always shows that section automatically, Hidden suppresses it.
 Widgets stack at narrow widths or large text scales. Analysis actions stack at
 large scales; page scrolling retains access to the resulting vertical content.
-Long row titles use ellipsis, tooltips and bounded row heights.
+Long row titles use ellipsis, tooltips and bounded row heights. Fitting dashboard
+labels paint through MFN's public Unicode DrawText API over the available field,
+avoiding the premature tight-measurement ellipsis of the pinned Label renderer.
+Classic delegates to the original renderer and restores its font/style recipes.
+
+The reference rebuild uses subtle gradient cards, unframed navigation, native
+vector action icons, thumbnail duration badges, separated row metadata, aligned
+history columns and grouped inspector fields. Completed jobs do not display an
+active blue progress bar. History date ranges (all/7/30 days), timestamp sorting,
+audio/video/playlist filters and export all read the canonical history snapshot;
+they do not modify its records. Preview elements in Settings are labelled.
 
 Downloads and History render at most 40 rows per page. Revealing a notification
 target changes to its page before selecting it. Batch retains its existing bounded
@@ -127,8 +137,10 @@ acceptance and unavailable physical DPI checks must remain explicitly reported.
 ### Framework findings
 
 [MFN #272](https://github.com/ProGraMajster/ModernFormsNext/issues/272) tracks native
-premature `Label.AutoEllipsis` for fitting text. Full names/tooltips remain available.
-The pinned ProgressBar supports a global accent fill; status text provides per-state
-colors. Existing #204/#205 remain open. See [minimal repro and boundaries](MFN_DASHBOARD_REPRO.md).
-These findings prevent a claim of complete pixel matching; no local renderer copy
-or framework modification is included in this branch.
+premature `Label.AutoEllipsis` for fitting text. Small app presentation subclasses
+use public painting APIs while retaining the inherited Label, ProgressBar and
+CheckBox providers and behaviors. No renderer implementation is copied and no
+framework source is modified. Explicit transparent zero borders avoid Skia's
+hairline behavior. Existing composite typography #204/#205 remains upstream.
+See [reproduction and boundaries](MFN_DASHBOARD_REPRO.md). Physical DPI and owner
+visual acceptance remain separate from native smoke and headless raster tests.

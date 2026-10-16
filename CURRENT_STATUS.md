@@ -5,10 +5,19 @@
 Development branch: `feature/modern-dashboard-ui`, based on `558ec43`. No stable
 release promotion. Classic is the migration default; both shells share the same
 AppServices and page instances. Source, responsiveness and qualification details:
-[MODERN_DASHBOARD_UI.md](MODERN_DASHBOARD_UI.md). Visual match is PARTIAL: native premature ellipsis is tracked in MFN #272, and owner visual acceptance is pending. Physical high-DPI qualification has not been executed.
-Local candidate validation: Debug/Release 781/781 each, JS 92/92, zero warnings/errors/skips. CI qualification is blocked by the unchanged updater deadline regression in [issue #4](https://github.com/ProGraMajster/ModernTubeDownloader/issues/4); no timeout/assertion was weakened. This candidate is not ready for visual acceptance or integration.
-The full machine-specific evidence and branch-isolation report stays local in
-`MODERN_DASHBOARD_CANDIDATE1_REPORT.md`, excluded from publication/package data.
+[MODERN_DASHBOARD_UI.md](MODERN_DASHBOARD_UI.md). All six Modern pages have been
+rebuilt from the supplied references, including native presentation primitives,
+aligned History with real date/type filters, compact Batch metrics, grouped
+inspectors and horizontal Settings categories. Classic and the shared runtime
+remain available. Owner visual acceptance is pending; no pixel-perfect claim.
+MFN #272 is mitigated in dashboard labels through public DrawText; upstream
+composite typography #204/#205 and physical high-DPI qualification remain separate.
+The unchanged updater deadline regression in
+[issue #4](https://github.com/ProGraMajster/ModernTubeDownloader/issues/4) remains open;
+no timeout/assertion was weakened. Exact-run results, comparison images and
+branch-isolation evidence are recorded locally in
+`MODERN_DASHBOARD_VISUAL_REBUILD_REPORT.md` and `artifacts/dashboard-visual/`.
+These large, machine-specific artifacts are excluded from publication/package data.
 
 
 ## Local 1.2.1-candidate.1 hotfix — 2026-10-15

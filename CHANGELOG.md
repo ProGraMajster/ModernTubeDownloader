@@ -10,6 +10,10 @@
 - Real download speed, storage and observed-process widgets.
 - Responsive shell layout, bounded queue/history pages and shared navigation.
 - Modern LIVE, History, Other, Batch and categorized Settings presentation.
+- Reference-based rebuild of all six Modern pages: readable text, subtle surfaces,
+  vector actions, thumbnail duration, aligned history and grouped inspectors.
+- Real History date ranges, date sorting and audio/video/playlist filters.
+- Modern native switch/progress/text presentation with Classic recipe restoration.
 
 Development identity: **1.3.0-candidate.1**, local only; no 1.3.0 release published.
 
