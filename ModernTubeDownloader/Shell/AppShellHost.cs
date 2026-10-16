@@ -151,7 +151,7 @@ internal class ClassicAppShell : IAppShell
         button.Padding = new Padding(compact ? 0 : 46, 0, 8, 0);
         icon.Left = compact ? (button.Width - 24) / 2 : 14; icon.Top = (height - 24) / 2;
     }
-    public void Select(AppPageId page)
+    public virtual void Select(AppPageId page)
     {
         Selected = page;
         foreach (var (id, button) in Buttons) { if (button is ShellNavigationButton nav) nav.IsCurrent = id == page; AppUi.NavigationButton(button, id == page); Icons[id].SetColorToken(id == page ? AppThemeTokens.NavigationSelectedText : AppThemeTokens.TextPrimary); }
@@ -181,6 +181,11 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         Logo.SetBounds(16, 0, 28, 28); Brand.SetBounds(54, 0, 150, 28); Brand.Text = "ModernTubeDownloader"; Brand.Multiline = false; Brand.AutoEllipsis = true; AppTypography.Bind(Brand, 10, FontStyle.Bold);
         Refresh();
     }
+    public override void Select(AppPageId page)
+    {
+        base.Select(page);
+        foreach (var button in Buttons.Values) { DashboardVisual.Flat(button); AppTypography.Bind(button, 10.5f); button.StyleFocused.Border.Width = 1; button.StyleFocused.Border.Color = AppUi.GetColor(AppThemeTokens.Accent); }
+    }
     public override void SetStatus(string status, string token) { base.SetStatus(status, token); AppUi.BindBackground(statusDot, token); }
     public override void Refresh()
     {
@@ -189,8 +194,8 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         var p = AppearancePresentation.Current.ModernDashboardShell;
         var compact = p.Sidebar == DashboardSidebarMode.Compact || p.Sidebar == DashboardSidebarMode.Auto && (Root.Width < 1280 || AppTypography.Scale > 1.25);
         Sidebar.Width = compact ? 66 : Math.Max(212, AppTypography.TextHeight(170));
-        Brand.Visible = !compact; Logo.Left = compact ? 19 : 16; Brand.Width = Math.Max(0, Sidebar.Width - 60);
-        var row = AppTypography.TextHeight(44); var y = 40;
+        Brand.Visible = Logo.Visible = false; Logo.Left = compact ? 19 : 16; Brand.Width = Math.Max(0, Sidebar.Width - 60);
+        var row = AppTypography.TextHeight(44); var y = 34;
         foreach (var page in new[] { AppPageId.Downloads, AppPageId.Live, AppPageId.Other, AppPageId.Batch, AppPageId.History, AppPageId.Settings })
         {
             if (page == AppPageId.Settings) y += 22;
@@ -204,5 +209,6 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         Status.Padding = new Padding(26, 5, 8, 0);
         theme.Text = Text["Dashboard.Theme"]; updates.Text = Text["Updates.Check"];
         Select(Selected);
+        DashboardVisual.Flat(updates);
     }
 }

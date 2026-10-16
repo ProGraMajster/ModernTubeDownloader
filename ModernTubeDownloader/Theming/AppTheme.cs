@@ -14,6 +14,7 @@ public static class AppThemeTokens
     public const string Background = "App.Background";
     public const string Surface = "App.Surface";
     public const string SurfaceSecondary = "App.SurfaceSecondary";
+    public const string RowSelected = "App.RowSelected";
     public const string SurfaceHover = "App.SurfaceHover";
     public const string Border = "App.Border";
     public const string TextPrimary = "App.TextPrimary";
@@ -333,6 +334,7 @@ public sealed class AppAppearanceService : IDisposable
         Set(theme, AppThemeTokens.Navigation, navigation);
         Set(theme, AppThemeTokens.NavigationHover, navigationHover);
         Set(theme, AppThemeTokens.NavigationSelected, navigationSelected);
+        Set(theme, AppThemeTokens.RowSelected, variant == ThemeVariant.Dark ? "#172B42" : "#DDEBFA");
         Set(theme, AppThemeTokens.NavigationSelectedText, variant == ThemeVariant.Dark ? "#FFFFFF" : textPrimary);
 
         theme.Corners["Card"] = 16;
