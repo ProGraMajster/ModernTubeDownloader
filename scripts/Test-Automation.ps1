@@ -1430,6 +1430,7 @@ try {
         if ($activeLive) {
             $finalFile = @($items[0].parts)[-1]
             if ($items[0].state -ne 6 -or -not (Test-Path -LiteralPath $finalFile)) { throw 'LIVE page did not complete a recording.' }
+            if ($InterfaceMode -eq 'ModernDashboard') { Invoke-NodeAction (Find-Node 'DashboardLiveRecent' $mainRoot) $mainRoot 'Invoke' | Out-Null }
             $detailsId = 'LiveDetailsButton-' + ([Guid]$items[0].sessionId).ToString('N')
             Invoke-NodeAction (Find-Node $detailsId $mainRoot) $mainRoot 'Invoke' | Out-Null
             $deadline.Restart()
@@ -1455,7 +1456,8 @@ try {
         elseif ($items[0].state -ne 1 -or -not $items[0].waitForScheduledStart) { throw 'Upcoming LIVE intent was not persisted.' }
         $queueItems = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)
         if ($queueItems.Count -ne 0) { throw 'LIVE leaked into queue.json.' }
-        Wait-Node 'LiveStatistics' $mainRoot | Out-Null
+        $statisticsId = if ($InterfaceMode -eq 'ModernDashboard') { 'LiveDashboardWidgets' } else { 'LiveStatistics' }
+        Wait-Node $statisticsId $mainRoot | Out-Null
         Invoke-NodeAction (Find-Node ('LiveSession-' + ([Guid]$items[0].sessionId).ToString('N')) $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
         Save-LiveVisual 'final'
         if (-not $script:automationProcess.CloseMainWindow()) { throw 'LIVE close request failed.' }
