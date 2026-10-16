@@ -27,7 +27,7 @@ internal sealed class InformationView : UserControl
     private void RefreshText()
     {
         title.Text = services.Localization[about ? "Nav.About" : "Nav.Help"];
-        body.Text = about ? "ModernTubeDownloader\nv" + AppBranding.Version + "\n\nMIT · ProGraMajster\n\nModernFormsNext " +
+        body.Text = about ? "ModernTubeDownloader\nv" + AppBranding.Version + "\n\n" + services.Localization["Dashboard.SourceCommit"] + ": " + AppBranding.SourceCommit + "\n\nMIT · ProGraMajster\n\nModernFormsNext " +
             typeof(MainForm).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false).OfType<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "ModernFormsNextCommit")?.Value
             : services.Localization["Dashboard.HelpBody"];
         repository.Text = services.Localization["Dashboard.Repository"]; diagnostics.Text = services.Localization["Settings.OpenLogs"];

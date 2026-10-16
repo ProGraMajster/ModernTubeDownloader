@@ -141,10 +141,11 @@ internal sealed partial class DownloadsView
         AppUi.BindBackground(urlPanel); urlPanel.Style.Border.Width = 0;
         urlPanel.SetBounds(margin + origin.X, 38 + origin.Y, inputWidth, row);
         var addWidth = Math.Min(inputWidth / 3, AppTypography.TextHeight(212));
-        dashboardAdd!.SetBounds(margin + origin.X + inputWidth - addWidth, urlPanel.Top, addWidth, row);
-        analyzeButton.SetBounds(inputWidth - addWidth - 46, 0, 38, row); analyzeButton.Text = "⌄"; analyzeButton.AccessibleName = text["Common.Analyze"];
+        var dropWidth = AppTypography.TextHeight(38);
+        dashboardAdd!.SetBounds(margin + origin.X + inputWidth - addWidth, urlPanel.Top, addWidth - dropWidth, row);
+        analyzeButton.SetBounds(inputWidth - dropWidth, 0, dropWidth, row); analyzeButton.Text = "⌄"; analyzeButton.AccessibleName = text["Common.Analyze"];
         pasteToolTip.SetToolTip(analyzeButton, text["Common.Analyze"]);
-        pasteButton.SetBounds(analyzeButton.Left - AppTypography.TextHeight(100) - 8, 0, AppTypography.TextHeight(100), row);
+        pasteButton.SetBounds(inputWidth - addWidth - AppTypography.TextHeight(100) - 12, 0, AppTypography.TextHeight(100), row);
         urlInput.SetBounds(0, 0, Math.Max(180, pasteButton.Left - 12), row);
         dashboardChips!.SetBounds(margin + origin.X, urlPanel.Bottom + 12, width, AppTypography.TextHeight(38));
         foreach (var chip in dashboardChips.Controls) { chip.Width = AppTypography.TextHeight(186); chip.Height = AppTypography.TextHeight(36); }
@@ -183,7 +184,8 @@ internal sealed partial class DownloadsView
         dashboardStatus.SetBounds(margin + origin.X + inputWidth + 28, urlPanel.Top, Math.Max(0, width - inputWidth - 28), row);
         dashboardStatusDot.SetBounds(dashboardStatus.Left - 16, urlPanel.Top + (row - 8) / 2, 8, 8);
         var showDetails = !inline && p.Inspector != DashboardInspectorMode.Hidden;
-        var toolbarHeight = AppTypography.TextHeight(toolbarRows == 1 ? 54 : 96);
+        var toolbarBaseHeight = AppTypography.TextHeight(toolbarRows == 1 ? 54 : 96);
+        var toolbarHeight = toolbarBaseHeight + (admissionCountdown.Visible ? AppTypography.TextHeight(28) : 0);
         queueToolbar.SetBounds(margin + origin.X + 12, top + 2, queueWidth - 24, toolbarHeight);
         AppUi.BindBackground(queueToolbar, AppThemeTokens.Surface);
         queueTitle.Text = text.Get("Dashboard.QueueTitle", services.Queue.Snapshot().Count);
@@ -201,6 +203,7 @@ internal sealed partial class DownloadsView
         dashboardPrevious.SetBounds(queueWidth - 162, 4, 30, AppTypography.TextHeight(30)); dashboardNext.SetBounds(queueWidth - 62, 4, 30, dashboardPrevious.Height);
         dashboardPaging.SetBounds(dashboardPrevious.Right + 4, 6, 62, dashboardPrevious.Height); dashboardPaging.Text = $"{dashboardPage + 1}/{pages}";
         dashboardPrevious.Enabled = dashboardPage > 0; dashboardNext.Enabled = dashboardPage < pages - 1;
+        admissionCountdown.SetBounds(0, toolbarBaseHeight - 2, queueToolbar.Width, AppTypography.TextHeight(28));
         var listTop = queueToolbar.Bottom + 4;
         if (services.Queue.Storage.State.IsBlocked) { storageWarning.SetBounds(margin + origin.X + 12, listTop, queueWidth - 24, AppTypography.TextHeight(104)); listTop = storageWarning.Bottom + gap; }
         dashboardWidgets!.Visible = p.Widgets != DashboardWidgetsMode.Hidden;

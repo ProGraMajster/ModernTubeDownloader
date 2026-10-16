@@ -291,8 +291,8 @@ public sealed class MainForm : Form
         if (modern)
         {
             TitleBar.Text = ""; caption.Text = "ModernTubeDownloader   v" + AppBranding.Version;
-            caption.SetBounds(52, 0, Math.Max(180, TitleBar.Width - 330), TitleBar.Height);
             captionTheme.Text = text["Dashboard.Theme"]; captionTheme.SetBounds(Math.Max(52, TitleBar.Width - 252), 8, 96, Math.Max(28, TitleBar.Height - 16));
+            var captionLeft = TitleBar.Height + 8; caption.SetBounds(captionLeft, 0, Math.Max(180, captionTheme.Left - captionLeft - 14), TitleBar.Height);
         }
         else TitleBar.Text = Text;
     }

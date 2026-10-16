@@ -45,7 +45,7 @@ internal sealed class InterfaceSettingsPanel : Panel
     {
         heading.Text = services.Localization["Dashboard.InterfaceStyle"];
         classic.Text = services.Localization["Appearance.Value.Classic"]; modern.Text = services.Localization["Appearance.Value.ModernDashboard"];
-        description.Text = services.Localization[services.Appearance.Profile.InterfaceMode == AppInterfaceMode.Classic ? "Dashboard.ClassicDescription" : "Dashboard.ModernDescription"];
+        description.Text = services.Localization[services.Appearance.InterfaceMode != services.Appearance.Profile.InterfaceMode ? "Dashboard.RecoveryActive" : services.Appearance.Profile.InterfaceMode == AppInterfaceMode.Classic ? "Dashboard.ClassicDescription" : "Dashboard.ModernDescription"];
         AppUi.NavigationButton(classic, services.Appearance.Profile.InterfaceMode == AppInterfaceMode.Classic);
         AppUi.NavigationButton(modern, services.Appearance.Profile.InterfaceMode == AppInterfaceMode.ModernDashboard);
     }

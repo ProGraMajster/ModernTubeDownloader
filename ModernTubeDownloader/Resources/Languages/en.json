@@ -946,5 +946,7 @@
   "Dashboard.UpdateReady": "Update {0} ready",
   "Dashboard.LivePlaceholder": "Paste a live stream URL (YouTube, Twitch or another supported source)…",
   "Appearance.Field.Statistics": "Statistics widget",
-  "Dashboard.EtaActive": "Active ETA: {0}"
+  "Dashboard.EtaActive": "Active ETA: {0}",
+  "Dashboard.RecoveryActive": "Classic recovery is active for this session. Your saved interface preference is retained for the next launch.",
+  "Dashboard.SourceCommit": "Application commit"
 }

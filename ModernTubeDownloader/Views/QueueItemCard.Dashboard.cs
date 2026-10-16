@@ -81,6 +81,15 @@ internal sealed partial class QueueItemCard
         primaryAction.Enabled = primaryAction.Tag is not QueueItemAction.OpenFile || File.Exists(item.FinalFile);
         primaryAction.Text = primaryAction.Tag is QueueItemAction action ? action switch { QueueItemAction.OpenFile => "▷", QueueItemAction.Retry => "↻", QueueItemAction.Cancel or QueueItemAction.Remove => "×", _ => "…" } : "…";
         moreAction.AccessibleName = text["Dashboard.MoreActions"]; dashboardTips.SetToolTip(moreAction, text["Dashboard.MoreActions"]);
+        AppUi.BindForeground(status, item.StatusMessageKey == "Queue.Detail.StoragePaused" || item.RetryDelaySeconds > 0 ? AppThemeTokens.Warning : item.Status switch
+        {
+            DownloadStatus.Completed => AppThemeTokens.Success,
+            DownloadStatus.Failed or DownloadStatus.Partial => AppThemeTokens.Error,
+            DownloadStatus.Cancelled or DownloadStatus.Interrupted => AppThemeTokens.TextSecondary,
+            DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing => AppThemeTokens.Info,
+            _ => AppThemeTokens.TextSecondary
+        });
+        if (item.StatusMessageKey == "Queue.Detail.StoragePaused") status.Text = text[item.StatusMessageKey];
         var transferParts = new List<string>();
         if (p.ShowSize && item.DownloadedBytes is { } bytes) transferParts.Add(DashboardStyle.Bytes(bytes));
         if (p.ShowSpeed && item.SpeedBytesPerSecond is { } speed) transferParts.Add(DashboardStyle.Bytes((long)speed) + "/s");

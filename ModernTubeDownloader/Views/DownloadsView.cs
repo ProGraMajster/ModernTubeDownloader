@@ -1009,8 +1009,10 @@ internal sealed partial class DownloadsView : UserControl
         if (changed) UpdateLayout();
         var remaining = services.Processor.RemainingAdmissionDelay;
         var seconds = remaining is { } delay ? (int)Math.Ceiling(delay.TotalSeconds) : 0;
+        var countdownChanged = admissionCountdown.Visible != (seconds > 0);
         admissionCountdown.Visible = seconds > 0;
         if (seconds > 0) admissionCountdown.Text = text.Get("Queue.NextDownloadIn", seconds);
+        if (dashboard && countdownChanged) UpdateLayout();
     }
 
     private void UpdateEngineStatus()

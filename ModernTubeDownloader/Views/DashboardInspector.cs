@@ -15,6 +15,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private bool historyMode;
     private readonly Button retry = new() { AccessibleAutomationId = "HistoryRetry" };
     private readonly Button details = new(), options = new(), copy = new(), openFile = new(), openFolder = new(), apply = new(), advanced = new();
+    private readonly AppVectorIcon copyGlyph = new(AppIconKind.Clipboard, 18);
     private readonly PictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom };
     private readonly Label title = AppUi.Heading("", 12), author = AppUi.Muted(), link = AppUi.Muted(), facts = AppUi.Muted(), hint = AppUi.Muted();
     private readonly Panel editor = new();
@@ -37,6 +38,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         DashboardStyle.Card(this); AppUi.BindBackground(image, AppThemeTokens.SurfaceSecondary); title.Multiline = facts.Multiline = hint.Multiline = true;
         title.AutoEllipsis = author.AutoEllipsis = link.AutoEllipsis = true;
         foreach (var button in new[] { details, options, copy, openFile, openFolder, advanced, retry }) AppUi.Secondary(button);
+        copyGlyph.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden; copyGlyph.Click += (_, _) => copy.PerformClick(); copy.Controls.Add(copyGlyph); AppTypography.Bind(options, 9.5f);
         AppUi.Primary(apply); AppUi.Input(quality); AppUi.Input(container); AppUi.Surface(editor);
         range = new(services.Localization, "Inspector") { CompactLayout = true };
         editor.Controls.AddRange([qualityLabel, quality, containerLabel, container, range, advanced, apply, hint]);
@@ -118,7 +120,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private void Present(string name, string channel, string url, string? thumbnail, string? path)
     {
         hasSelection = true; title.Text = name; author.Text = channel; source = url; finalPath = path; link.Text = url;
-        tips.SetToolTip(title, name); tips.SetToolTip(link, url);
+        tips.SetToolTip(title, name); tips.SetToolTip(author, channel); tips.SetToolTip(link, url);
         openFile.Enabled = File.Exists(path); openFolder.Enabled = path is not null && Directory.Exists(System.IO.Path.GetDirectoryName(path));
         copy.Enabled = source.Length > 0;
         if (thumbnailUrl != thumbnail) { thumbnailUrl = thumbnail; thumbnailFailed = false; image.Image = null; _ = LoadAsync(thumbnail); }
@@ -157,7 +159,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private void RefreshText()
     {
         var t = services.Localization; details.Text = t["Common.Details"]; options.Text = t["Dashboard.Options"];
-        copy.Text = t["Dashboard.CopyUrl"]; openFile.Text = t["Common.OpenFile"]; openFolder.Text = t["Common.OpenFolder"];
+        copy.Text = ""; copy.AccessibleName = t["Dashboard.CopyUrl"]; tips.SetToolTip(copy, copy.AccessibleName); openFile.Text = t["Common.OpenFile"]; openFolder.Text = t["Common.OpenFolder"];
         qualityLabel.Text = t["Downloads.Quality"]; containerLabel.Text = t["Downloads.Container"];
         retry.Text = t["Common.Retry"]; apply.Text = t["Dashboard.ApplyOptions"]; advanced.Text = t["Advanced.MoreOptions"]; facts.Text = factText;
         quality.Enabled = container.Enabled = range.Enabled = advanced.Enabled = apply.Enabled = queued && metadata is not null;
@@ -174,8 +176,9 @@ internal sealed class DashboardInspector : AppScrollPanel
         image.SetBounds(12 + o.X, details.Bottom + 14, width, image.Visible ? width * 9 / 16 : 0);
         title.SetBounds(12 + o.X, image.Bottom + 12, width, AppTypography.TextHeight(55));
         author.SetBounds(12 + o.X, title.Bottom + 2, width, AppTypography.TextHeight(24));
-        link.SetBounds(12 + o.X, author.Bottom + 6, width, AppTypography.TextHeight(28));
-        copy.SetBounds(12 + o.X, link.Bottom + 4, width, line);
+        link.SetBounds(12 + o.X, author.Bottom + 6, width - AppTypography.TextHeight(32) - 6, AppTypography.TextHeight(30));
+        copy.SetBounds(link.Right + 6, link.Top, AppTypography.TextHeight(32), link.Height);
+        copyGlyph.SetBounds((copy.Width - 18) / 2, (copy.Height - 18) / 2, 18, 18);
         editor.Visible = showOptions && options.Visible; facts.Visible = !editor.Visible;
         facts.SetBounds(12 + o.X, copy.Bottom + 14, width, AppTypography.TextHeight(290));
         editor.SetBounds(12 + o.X, copy.Bottom + 14, width, AppTypography.TextHeight(390));

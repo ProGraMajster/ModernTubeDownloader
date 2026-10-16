@@ -946,5 +946,7 @@
   "Dashboard.UpdateReady": "Aktualizacja {0} gotowa",
   "Dashboard.LivePlaceholder": "Wklej adres streamu na żywo (YouTube, Twitch lub inne obsługiwane źródło)…",
   "Appearance.Field.Statistics": "Widget statystyk",
-  "Dashboard.EtaActive": "ETA aktywnych: {0}"
+  "Dashboard.EtaActive": "ETA aktywnych: {0}",
+  "Dashboard.RecoveryActive": "W tej sesji działa klasyczny tryb ratunkowy. Zapisany wybór interfejsu zostaje zachowany na następne uruchomienie.",
+  "Dashboard.SourceCommit": "Commit aplikacji"
 }
