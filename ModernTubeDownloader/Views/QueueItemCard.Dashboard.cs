@@ -21,7 +21,7 @@ internal sealed partial class QueueItemCard
     }
     private bool dashboard;
     private Label? duration, dashboardAuthor;
-    private AppVectorIcon? actionGlyph, menuGlyph;
+    private AppVectorIcon? actionGlyph, menuGlyph, statusGlyph;
     private readonly ToolTip dashboardTips = new();
     public void SetDashboard(bool value)
     {
@@ -35,16 +35,18 @@ internal sealed partial class QueueItemCard
         if (dashboardAuthor is not null) dashboardAuthor.Visible = value;
         if (value && actionGlyph is null)
         {
+            statusGlyph = new AppVectorIcon(AppIconKind.Info, 16) { AccessibilityView = AccessibilityView.Hidden }; Controls.Add(statusGlyph);
             actionGlyph = new AppVectorIcon(AppIconKind.Play, 20); menuGlyph = new AppVectorIcon(AppIconKind.More, 20);
             actionGlyph.AccessibilityView = menuGlyph.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden;
             actionGlyph.Click += (_, _) => primaryAction.PerformClick(); menuGlyph.Click += (_, _) => moreAction.PerformClick();
             primaryAction.Controls.Add(actionGlyph); moreAction.Controls.Add(menuGlyph);
         }
         if (actionGlyph is not null) actionGlyph.Visible = menuGlyph!.Visible = value;
+        if (statusGlyph is not null) statusGlyph.Visible = value;
         if (!value && currentItem is not null) ConfigureActions(currentItem);
         if (duration is not null) duration.Visible = value;
         AppTypography.Bind(title, value ? 10.5f : 13.5f, value ? FontStyle.Regular : FontStyle.Bold);
-        AppTypography.Bind(subtitle, value ? 9.5f : 10.5f); AppTypography.Bind(status, value ? 9.5f : 10.5f);
+        AppTypography.Bind(subtitle, value ? 9.5f : 10.5f); AppTypography.Bind(status, value ? 9.5f : 10.5f, value ? FontStyle.Regular : FontStyle.Bold);
         AppTypography.Bind(transfer, value ? 9 : 10.25f);
         AppTypography.SetDashboardPresentation(this, value);
         LayoutControls();
@@ -69,7 +71,8 @@ internal sealed partial class QueueItemCard
         dashboardAuthor!.SetBounds(left, title.Bottom + (narrow ? 2 : 4), textWidth, line);
         subtitle.SetBounds(left, dashboardAuthor.Bottom + (narrow ? 2 : 3), textWidth, line); subtitle.AutoEllipsis = true;
         progress.SetBounds(progressLeft, narrow ? subtitle.Bottom + 4 : 32, Math.Max(50, progressWidth), 6);
-        status.SetBounds(progressLeft, progress.Bottom + (narrow ? 4 : 7), Math.Max(50, progressWidth), line);
+        status.SetBounds(progressLeft + 22, progress.Bottom + (narrow ? 4 : 7), Math.Max(50, progressWidth - 22), line);
+        statusGlyph?.SetBounds(progressLeft, status.Top + 2, 16, 16);
         transfer.SetBounds(progressLeft, status.Bottom, Math.Max(50, progressWidth), line); transfer.TextAlign = ContentAlignment.TopLeft;
         primaryAction.SetBounds(Width - 84, (Height - 36) / 2, 36, 36); secondaryAction.SetBounds(Width - 84, Height - 34, 36, 28);
         moreAction.SetBounds(Width - 42, (Height - 36) / 2, 34, 36);
@@ -77,7 +80,7 @@ internal sealed partial class QueueItemCard
         actionGlyph?.SetBounds(8, 8, 20, 20); menuGlyph?.SetBounds(7, 8, 20, 20);
         progress.Visible = currentItem?.Status is not DownloadStatus.Completed and not DownloadStatus.Failed and not DownloadStatus.Cancelled and not DownloadStatus.Interrupted; progress.Padding = new Padding(0); progress.Style.Border.Width = 0; AppUi.BindBackground(progress, AppThemeTokens.SurfaceSecondary);
         DashboardVisual.Flat(this, !selected); Style.Border.Radius = selected ? 6 : 0;
-        if (selected) { Style.Border.Width = 1; Style.Border.Color = AppUi.GetColor(AppThemeTokens.Border); }
+        if (selected) { Style.Border.Width = 1; Style.Border.Color = AppUi.GetColor(AppThemeTokens.Accent).WithAlpha(130); }
         DashboardVisual.Button(primaryAction); DashboardVisual.Button(moreAction);
     }
     private void UpdateDashboardRow(DownloadQueueItem item)
@@ -106,6 +109,10 @@ internal sealed partial class QueueItemCard
             _ => AppThemeTokens.TextSecondary
         });
         if (item.StatusMessageKey == "Queue.Detail.StoragePaused") status.Text = text[item.StatusMessageKey];
+        else if (item.Status != DownloadStatus.Waiting) status.Text = text["Status." + item.Status] +
+            (item.Status == DownloadStatus.Completed && item.HasPostProcessingWarnings ? " · " + text["Queue.CompletedWithWarnings"] : "");
+        statusGlyph?.SetKind(item.Status switch { DownloadStatus.Completed => AppIconKind.Check, DownloadStatus.Failed or DownloadStatus.Partial => AppIconKind.Info, DownloadStatus.Cancelled or DownloadStatus.Interrupted => AppIconKind.Close, _ => AppIconKind.History });
+        statusGlyph?.SetColorToken(item.Status switch { DownloadStatus.Completed => AppThemeTokens.Success, DownloadStatus.Failed or DownloadStatus.Partial => AppThemeTokens.Error, _ => AppThemeTokens.TextSecondary });
         var transferParts = new List<string>();
         if (p.ShowSize && item.DownloadedBytes is { } bytes) transferParts.Add(DashboardStyle.Bytes(bytes));
         if (p.ShowSpeed && item.SpeedBytesPerSecond is { } speed) transferParts.Add(DashboardStyle.Bytes((long)speed) + "/s");

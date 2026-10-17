@@ -12,8 +12,23 @@ internal static class DashboardVisual
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Control, BorderRecipe[]> originalBorders = new();
     private sealed record PaddingRecipe(Padding ControlPadding, Padding?[] Styles);
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Control, PaddingRecipe> originalPadding = new();
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Button, AppVectorIcon> icons = new();
     public const int Margin = 20, Gap = 12, Radius = 10, Input = 46, Action = 36, Row = 98;
     public static int Text(int value) => AppTypography.TextHeight(value);
+    public static int LabelHeight(Label label, int width, int maxLines)
+    {
+        var style = label.CurrentStyle;
+        var line = (int)Math.Ceiling(TextMeasurer.MeasureText("Ag", style.GetFont(), style.GetFontSize(), new Size(int.MaxValue, int.MaxValue), style.GetFontStyle()).Height) + 2;
+        var measured = (int)Math.Ceiling(TextMeasurer.MeasureText(label.Text, style.GetFont(), style.GetFontSize(), new Size(Math.Max(1, width), int.MaxValue), style.GetFontStyle()).Height) + 2;
+        return Math.Clamp(measured, line, line * maxLines);
+    }
+    public static int ActionWidth(Button button, bool withIcon = false)
+    {
+        var style = button.CurrentStyle;
+        var size = TextMeasurer.MeasureText(button.Text, style.GetFont(), style.GetFontSize(),
+            new Size(int.MaxValue, int.MaxValue), style.GetFontStyle());
+        return (int)Math.Ceiling(size.Width) + (withIcon ? 48 : 26);
+    }
     public static void Flat(Control control, bool separator = false)
     {
         originalBorders.GetValue(control, c => Styles(c).Select(s => new BorderRecipe(s.Border.Width, s.Border.Radius, s.Border.Color, s.Border.Bottom.Width, s.Border.Bottom.Color)).ToArray());
@@ -38,6 +53,7 @@ internal static class DashboardVisual
     }
     public static void RestoreTree(Control control)
     {
+        if (control is Button button && icons.TryGetValue(button, out var icon)) icon.Visible = false;
         if (originalPadding.TryGetValue(control, out var padding))
         {
             control.Padding = padding.ControlPadding; var styles = Styles(control);
@@ -58,10 +74,33 @@ internal static class DashboardVisual
     }
     public static void Button(Button button, bool primary = false)
     {
+        Flat(button); // Capture the Classic recipe before applying Modern presentation.
         if (primary) AppUi.Primary(button); else AppUi.Secondary(button);
-        Flat(button);
+        foreach (var style in Styles(button))
+        {
+            style.Border.Width = 1;
+            style.Border.Radius = 7;
+            style.Border.Color = AppUi.GetColor(primary ? AppThemeTokens.Accent : AppThemeTokens.Border);
+        }
         button.StyleFocused.Border.Width = 1; button.StyleFocused.Border.Color = AppUi.GetColor(AppThemeTokens.Accent);
         SetPadding(button, new Padding(12, 0, 12, 0));
+    }
+    public static void Icon(Button button, AppIconKind kind, bool iconOnly = false)
+    {
+        if (!icons.TryGetValue(button, out var icon))
+        {
+            icon = new AppVectorIcon(kind, 18, AppThemeTokens.TextPrimary)
+            { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
+            icon.Click += (_, _) => button.PerformClick();
+            // ControlAdded/layout callbacks may reenter Icon: publish before attaching.
+            icons.Add(button, icon);
+            button.Controls.Add(icon);
+        }
+        icon.SetKind(kind); icon.Visible = true;
+        icon.SetColorToken(button.Style.ForegroundColor == AppUi.GetColor(AppThemeTokens.AccentText)
+            ? AppThemeTokens.AccentText : AppThemeTokens.TextPrimary);
+        icon.SetBounds(iconOnly ? (button.Width - 18) / 2 : 12, (button.Height - 18) / 2, 18, 18);
+        SetPadding(button, new Padding(iconOnly ? 0 : 36, 0, 10, 0));
     }
     public static void Tab(Button button, bool selected)
     {
@@ -82,6 +121,25 @@ internal class DashboardLabel : Label
         var bounds = new Rectangle(LogicalToDeviceUnits(p.Left), LogicalToDeviceUnits(p.Top),
             Math.Max(0, LogicalToDeviceUnits(Width - p.Horizontal)), Math.Max(0, LogicalToDeviceUnits(Height - p.Vertical)));
         e.Canvas.DrawText(Text, bounds, this, TextAlign, maxLines: Multiline ? null : 1, ellipsis: AutoEllipsis);
+    }
+}
+
+/// <summary>Text-only dashboard action; native Button still owns input, focus, background and Invoke semantics.</summary>
+internal class DashboardButton : Button
+{
+    static DashboardButton() => ModernFormsNext.Renderers.RenderManager.SetRenderer<DashboardButton>(new DashboardButtonRenderer());
+}
+
+internal sealed class DashboardButtonRenderer : ModernFormsNext.Renderers.ButtonRenderer
+{
+    public override Type Type => typeof(DashboardButton);
+    protected override void Render(Button button, PaintEventArgs e)
+    {
+        if (!AppTypography.IsDashboard(button) || button.Image is not null) { base.Render(button, e); return; }
+        var p = button.Padding;
+        var bounds = new Rectangle(button.LogicalToDeviceUnits(p.Left), button.LogicalToDeviceUnits(p.Top),
+            Math.Max(0, button.LogicalToDeviceUnits(button.Width - p.Horizontal)), Math.Max(0, button.LogicalToDeviceUnits(button.Height - p.Vertical)));
+        e.Canvas.DrawText(button.Text, bounds, button, button.TextAlign, maxLines: 1, ellipsis: button.AutoEllipsis);
     }
 }
 

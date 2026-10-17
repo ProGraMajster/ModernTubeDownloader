@@ -920,6 +920,7 @@
   "Dashboard.Activity": "Recent tool activity",
   "Dashboard.QuickActions": "Quick actions",
   "Dashboard.BatchSource": "Import videos from a file",
+  "Dashboard.BatchWorkers": "Concurrent analyses",
   "Dashboard.BatchHint": "Choose a TXT, CSV or JSON file, verify the entries and add them to the download queue.",
   "Dashboard.ActiveScheduled": "Active and scheduled",
   "Dashboard.BatchImport": "Import from file",

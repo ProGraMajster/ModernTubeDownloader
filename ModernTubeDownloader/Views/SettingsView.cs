@@ -20,6 +20,7 @@ internal sealed class SettingsView : UserControl
     private readonly Panel header;
     private readonly Label pageTitle;
     private readonly Label pageSubtitle;
+    private readonly AppVectorIcon dashboardHeadingIcon = new(AppIconKind.Settings, 40, AppThemeTokens.Info) { Visible = false, AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
     private readonly Panel scroll;
     private readonly Dictionary<Control, string> localizedText = [];
     private readonly Panel generalCard;
@@ -36,12 +37,22 @@ internal sealed class SettingsView : UserControl
     private bool dashboard;
     private Action? restoreClassicTypography, restoreClassicLabels;
     private readonly ToolTip compactTips = new();
+    private readonly Dictionary<Panel, AppVectorIcon> overviewIcons = [];
     private readonly TextBox categorySearch = new() { AccessibleAutomationId = "SettingsCategorySearch", Visible = false };
     public void SetDashboard(bool value)
     {
         if (value && !dashboard) { restoreClassicTypography = AppTypography.CaptureRecipes(this); restoreClassicLabels = DashboardVisual.CaptureLabels(this); }
         var previous = dashboard; dashboard = value;
-        if (!value && previous) { AppTypography.SetDashboardPresentation(this, false); restoreClassicTypography?.Invoke(); restoreClassicLabels?.Invoke(); }
+        if (!value && previous)
+        {
+            AppTypography.SetDashboardPresentation(this, false);
+            restoreClassicTypography?.Invoke(); restoreClassicLabels?.Invoke();
+            AppUi.Primary(checkUpdates);
+            foreach (var (name, button) in categoryButtons) AppUi.NavigationButton(button, name == currentCategory);
+        }
+        dashboardHeadingIcon.Visible = value;
+        if (!value) foreach (var button in categoryButtons.Values) foreach (var icon in button.Controls.OfType<AppVectorIcon>()) icon.Visible = false;
+        if (!value) foreach (var icon in overviewIcons.Values) icon.Visible = false;
         foreach (var button in categoryButtons.Values) button.Visible = !value || button.Text.Contains(categorySearch.Text.Trim(), StringComparison.CurrentCultureIgnoreCase);
         UpdateLayout();
     }
@@ -184,7 +195,7 @@ internal sealed class SettingsView : UserControl
         AppUi.BindBackground(header);
         pageTitle = AppUi.Heading(string.Empty, 22f);
         pageSubtitle = AppUi.Muted();
-        header.Controls.AddRange([pageTitle, pageSubtitle]);
+        header.Controls.AddRange([pageTitle, pageSubtitle, dashboardHeadingIcon]);
         scroll = new AppScrollPanel { AutoScroll = true, AccessibleAutomationId = "SettingsScroll" };
         AppUi.BindBackground(scroll);
 
@@ -448,11 +459,11 @@ internal sealed class SettingsView : UserControl
             ("WebRemote", [remoteCard]), ("Updates", [updatesCard]), ("Startup", [startupCard]), ("Personalization", [interfaceCard, textScaleCard, personalizationCard]), ("Advanced", [advancedCard]) })
         {
             foreach (var card in cards) cardCategories[card] = name;
-            var button = new Button { AccessibleAutomationId = "SettingsCategory" + name, Width = 160, Height = 36, Margin = new Padding(0, 0, 8, 8) };
+            var button = new DashboardButton { AccessibleAutomationId = "SettingsCategory" + name, Width = 160, Height = 36, Margin = new Padding(0, 0, 8, 8) };
             AppUi.Secondary(button); button.Click += (_, _) => ShowCategory(name); categories.Controls.Add(button); categoryButtons[name] = button;
         }
         AppUi.Input(categorySearch);
-        categorySearch.TextChanged += (_, _) => { foreach (var button in categoryButtons.Values) button.Visible = button.Text.Contains(categorySearch.Text.Trim(), StringComparison.CurrentCultureIgnoreCase); };
+        categorySearch.TextChanged += (_, _) => { foreach (var button in categoryButtons.Values) button.Visible = button.Text.Contains(categorySearch.Text.Trim(), StringComparison.CurrentCultureIgnoreCase); UpdateLayout(); };
         AppUi.BindBackground(categories); Controls.AddRange([header, categories, scroll, categorySearch]);
         SizeChanged += ViewSizeChanged;
         scroll.SizeChanged += ScrollSizeChanged;
@@ -542,7 +553,7 @@ internal sealed class SettingsView : UserControl
 
     private Button CreateButton(Panel panel, string key, bool primary)
     {
-        var control = new Button { Height = 36 };
+        var control = new DashboardButton { Height = 36 };
         BindText(control, key);
         if (primary)
             AppUi.Primary(control);
@@ -592,6 +603,13 @@ internal sealed class SettingsView : UserControl
     {
         foreach (var card in logicalCardHeights.Keys) AppTypography.UnflowRows(card, true);
         foreach (var (label, bounds) in rowLabelBounds) { label.Top = bounds.Top; label.Height = bounds.Height; }
+        // Restore absolute section coordinates before the optional overview layout.
+        foreach (var (card, icon) in overviewIcons)
+        {
+            icon.Visible = false;
+            card.Controls[0].SetBounds(24, 20, Math.Max(1, card.Width - 48), 28);
+            card.Controls[1].SetBounds(24, 50, Math.Max(1, card.Width - 48), 28);
+        }
         const int page = 24;
         var width = Math.Max(560, ClientSize.Width - (page * 2));
         header.SetBounds(page, 14, width, AppTypography.TextHeight(dashboard ? 80 : 60));
@@ -609,17 +627,22 @@ internal sealed class SettingsView : UserControl
         categories.WrapContents = true; categories.FlowDirection = FlowDirection.LeftToRight;
         if (dashboard)
         {
-            categorySearch.SetBounds(Math.Max(24, ClientSize.Width - 320), 28, 280, AppTypography.TextHeight(36));
-            pageSubtitle.Width = Math.Max(300, categorySearch.Left - page - 16);
+            var searchInline = width >= AppTypography.TextHeight(850);
+            categorySearch.SetBounds(searchInline ? ClientSize.Width - 304 : page, searchInline ? 28 : header.Bottom + 8, searchInline ? 280 : width, AppTypography.TextHeight(36));
+            dashboardHeadingIcon.SetBounds(0, 6, 40, 40);
+            pageTitle.Left = pageSubtitle.Left = 60;
+            pageTitle.Width = pageSubtitle.Width = Math.Max(1, (searchInline ? categorySearch.Left - page - 16 : width) - 60);
             var rowWidth = 0; var categoryRows = 1;
-            foreach (var button in categoryButtons.Values)
+            foreach (var (name, button) in categoryButtons)
             {
-                button.Width = Math.Min(categoryWidth, AppTypography.TextHeight(Math.Clamp(button.Text.Length * 8 + 24, 136, 230))); button.Height = AppTypography.TextHeight(38); DashboardVisual.Button(button);
+                DashboardVisual.Button(button, name == currentCategory);
+                button.Width = Math.Min(categoryWidth, DashboardVisual.ActionWidth(button, withIcon: true)); button.Height = AppTypography.TextHeight(40);
+                DashboardVisual.Icon(button, CategoryIcon(name));
                 if (!button.Visible) continue;
                 if (rowWidth > 0 && rowWidth + button.Width + 8 > categoryWidth) { rowWidth = 0; categoryRows++; }
                 rowWidth += button.Width + 8;
             }
-            categories.SetBounds(24, header.Bottom + 12, categoryWidth, categoryRows * AppTypography.TextHeight(46));
+            categories.SetBounds(24, (searchInline ? header.Bottom : categorySearch.Bottom) + 12, categoryWidth, categoryRows * (AppTypography.TextHeight(40) + 8));
             scroll.SetBounds(0, categories.Bottom + 14, ClientSize.Width, Math.Max(120, ClientSize.Height - categories.Bottom - 26));
         }
         var columnCount = dashboard && AppTypography.Scale <= 1.25 ? Math.Max(1, Math.Min(currentCategory == "General" ? 3 : 2, (scroll.ClientSize.Width - 36) / (currentCategory == "General" ? 370 : 556))) : 1;
@@ -762,7 +785,9 @@ internal sealed class SettingsView : UserControl
             if (headings.Length > 1) { AppTypography.Bind(headings[1], 9.5f); headings[1].Multiline = true; headings[1].Height = Math.Max(headings[1].Height, AppTypography.TextHeight(36)); }
             foreach (var inner in card.Controls.OfType<Panel>()) { DashboardVisual.Flat(inner); }
             foreach (var button in card.Controls.OfType<Button>()) DashboardVisual.Button(button, button == save); }
-        if (dashboard && currentCategory == "General" && cardWidth < 540) LayoutCompactOverview(cardWidth);
+        if (dashboard && currentCategory == "General" && columnCount > 1) LayoutCompactOverview(cardWidth);
+        // Generic card styling must not erase the canonical interface selection.
+        interfaceCard.RefreshPresentation();
         top = displayOrigin.Y;
         if (grid)
         {
@@ -777,27 +802,63 @@ internal sealed class SettingsView : UserControl
         else foreach (var card in ModernVisibleCards()) { card.Left = page + displayOrigin.X; card.Top = top; top = card.Bottom + services.Appearance.Profile.Settings.SectionSpacing; }
     }
 
+    private static AppIconKind CategoryIcon(string name) => name switch
+    {
+        "Downloads" => AppIconKind.Download, "Live" => AppIconKind.Live,
+        "Authentication" or "Browser" or "WebRemote" => AppIconKind.Link,
+        "Updates" => AppIconKind.Retry, "Notifications" => AppIconKind.Info,
+        "Startup" => AppIconKind.Play, "Personalization" => AppIconKind.Queue,
+        _ => AppIconKind.Settings
+    };
+
     private void LayoutCompactOverview(int width)
     {
         var line = AppTypography.TextHeight(36); var labelHeight = AppTypography.TextHeight(24); var inner = width - 32;
+        int OverviewHeader(Panel card, AppIconKind kind)
+        {
+            if (!overviewIcons.TryGetValue(card, out var icon))
+            {
+                icon = new AppVectorIcon(kind, 24, AppThemeTokens.Info) { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
+                overviewIcons.Add(card, icon); card.Controls.Add(icon);
+            }
+            icon.Visible = true; icon.SetBounds(16, 18, 24, 24);
+            var title = (Label)card.Controls[0]; var description = (Label)card.Controls[1];
+            title.SetBounds(52, 16, width - 68, AppTypography.TextHeight(30));
+            description.Multiline = true;
+            var style = description.CurrentStyle;
+            var measured = TextMeasurer.MeasureText(description.Text, style.GetFont(), style.GetFontSize(), new System.Drawing.Size(inner, int.MaxValue), style.GetFontStyle());
+            description.SetBounds(16, title.Bottom + 8, inner, Math.Max(AppTypography.TextHeight(32), (int)Math.Ceiling(measured.Height) + 4));
+            return description.Bottom + 12;
+        }
+        var appearanceTop = OverviewHeader(appearanceCard, AppIconKind.Settings);
         var themeLabel = localizedText.First(p => p.Value == "Settings.Theme").Key;
         var languageLabel = localizedText.First(p => p.Value == "Settings.Language").Key;
-        themeLabel.SetBounds(16, 92, inner, labelHeight); theme.SetBounds(16, themeLabel.Bottom + 4, inner, line);
+        themeLabel.SetBounds(16, appearanceTop, inner, labelHeight); theme.SetBounds(16, themeLabel.Bottom + 4, inner, line);
         languageLabel.SetBounds(16, theme.Bottom + 12, inner, labelHeight); language.SetBounds(16, languageLabel.Bottom + 4, inner, line); appearanceCard.Height = language.Bottom + 16;
-        var top = 100;
-        foreach (var panel in new[] { ytDlpToolCard, ffmpegToolCard, denoToolCard })
+        var top = OverviewHeader(toolsCard, AppIconKind.Download);
+        foreach (var (panel, description, status, progress) in new[]
         {
-            panel.SetBounds(16, top, inner, 104); top = panel.Bottom + 8;
-            var labels = panel.Controls.OfType<Label>().OrderBy(c => c.Top).ToArray();
-            foreach (var label in labels) { label.Left = 12; label.Width = panel.Width - 24; label.Multiline = true; }
+            (ytDlpToolCard, ytDlpDescription, ytDlpStatus, ytDlpProgress),
+            (ffmpegToolCard, ffmpegDescription, ffmpegStatus, ffmpegProgress),
+            (denoToolCard, denoDescription, denoStatus, denoProgress)
+        })
+        {
+            panel.SetBounds(16, top, inner, 1); DashboardVisual.Flat(panel, separator: true);
+            var title = panel.Controls.OfType<Label>().First(label => label != description && label != status);
+            AppTypography.Bind(title, 10.5f, FontStyle.Bold); title.SetBounds(0, 8, inner, AppTypography.TextHeight(22));
+            foreach (var label in new[] { description, status })
+            {
+                AppTypography.Bind(label, 9); label.Multiline = true; label.AutoEllipsis = false;
+                if (label == description) label.TextAlign = ContentAlignment.TopLeft;
+                var style = label.CurrentStyle;
+                var measured = TextMeasurer.MeasureText(label.Text, style.GetFont(), style.GetFontSize(), new System.Drawing.Size(inner, int.MaxValue), style.GetFontStyle());
+                label.SetBounds(0, label == description ? title.Bottom + 2 : description.Bottom + 4, inner, Math.Max(AppTypography.TextHeight(18), (int)Math.Ceiling(measured.Height) + 2));
+                compactTips.SetToolTip(label, label.Text);
+            }
+            progress.SetBounds(0, status.Bottom + 5, inner, 3); panel.Height = progress.Bottom + 8; top = panel.Bottom + 6;
         }
-        ytDlpDescription.SetBounds(12, 34, inner - 24, 34); ytDlpStatus.SetBounds(12, 72, inner - 24, 24);
-        ffmpegDescription.SetBounds(12, 34, inner - 24, 34); ffmpegStatus.SetBounds(12, 72, inner - 24, 24);
-        denoDescription.SetBounds(12, 34, inner - 24, 34); denoStatus.SetBounds(12, 72, inner - 24, 24);
-        foreach (var bar in new[] { ytDlpProgress, ffmpegProgress, denoProgress }) bar.SetBounds(12, 100, inner - 24, 3);
         checkUpdates.SetBounds(16, top, (inner - 8) / 2, line); retrySetup.SetBounds(checkUpdates.Right + 8, top, (inner - 8) / 2, line);
         supportedSources.SetBounds(16, checkUpdates.Bottom + 8, inner, line); toolsCard.Height = supportedSources.Bottom + 16;
-        foreach (var label in new[] { ytDlpStatus,ffmpegStatus,denoStatus }) { label.Multiline = false; label.AutoEllipsis = true; compactTips.SetToolTip(label,label.Text); }
         startupCard.LayoutForWidth(width); updatesCard.LayoutForWidth(width);
         save.SetBounds(16, 16, inner, line); logs.SetBounds(16, save.Bottom + 8, inner, line); feedback.SetBounds(16, logs.Bottom + 8, inner, labelHeight); actionsCard.Height = feedback.Bottom + 12;
     }
@@ -805,7 +866,7 @@ internal sealed class SettingsView : UserControl
     private IEnumerable<Control> ModernVisibleCards()
     {
         if (!dashboard || currentCategory != "General") return scroll.Controls.Where(c => c.Visible);
-        return new Control[] { appearanceCard, interfaceCard, startupCard, textScaleCard, toolsCard, updatesCard, actionsCard }.Where(c => c.Visible);
+        return new Control[] { appearanceCard, startupCard, interfaceCard, textScaleCard, toolsCard, updatesCard, actionsCard }.Where(c => c.Visible);
     }
 
     private static void ResizeSectionHeader(Panel card)
@@ -825,8 +886,11 @@ internal sealed class SettingsView : UserControl
     private static void LayoutToolCard(Panel card, Label description, Label status, ProgressBar progress, Panel owner, int top)
     {
         card.SetBounds(24, top, owner.Width - 48, 74);
+        var title = card.Controls.OfType<Label>().First(label => label != description && label != status);
+        title.SetBounds(16, 10, 190, 24);
         description.SetBounds(208, 11, Math.Max(150, card.Width - 224), 24);
-        status.Width = card.Width - 32;
+        description.TextAlign = ContentAlignment.TopRight;
+        status.SetBounds(16, 40, card.Width - 32, 22); status.Multiline = false;
         progress.SetBounds(16, 65, card.Width - 32, 5);
         if (AppTypography.IsDashboard(owner))
         {

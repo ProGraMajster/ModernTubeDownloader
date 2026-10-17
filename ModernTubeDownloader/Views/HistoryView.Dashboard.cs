@@ -4,6 +4,7 @@ using ModernFormsNext.Accessibility;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Theming;
+using Size = System.Drawing.Size;
 
 namespace ModernTubeDownloader.Views;
 
@@ -28,32 +29,44 @@ internal sealed partial class HistoryView
     private readonly List<Label> tableHeadings = [];
     private readonly Dictionary<Button, string> filterButtons = [];
     private readonly ToolTip dashboardTips = new();
+    private AppVectorIcon? searchIcon;
     public void SetDashboard(bool value)
     {
         dashboard = value;
-        if (!value) { AutoScroll = false; AppUi.Card(searchPanel); }
+        if (!value)
+        {
+            AutoScroll = false; AppUi.Card(searchPanel);
+            DashboardVisual.RestoreTree(search);
+            AppTypography.Bind(pageTitle, 24, FontStyle.Bold);
+            pageSubtitle.TextAlign = ContentAlignment.TopLeft;
+        }
         if (value && inspector is null)
         {
             inspector = new(services); inspector.RetryRequested += (_, source) => RetryRequested?.Invoke(this, source); filters = new FlowLayoutPanel { WrapContents = true }; AppUi.BindBackground(filters);
             foreach (var id in new[] { "All", "Completed", "Errors", "Audio", "Video", "Playlists", "Live" })
             {
-                var button = new Button { AccessibleAutomationId = "HistoryFilter" + id, Width = 154, Height = 36, Margin = new Padding(0, 0, 10, 6) };
+                var button = new DashboardButton { AccessibleAutomationId = "HistoryFilter" + id, Width = 154, Height = 36, Margin = new Padding(0, 0, 10, 6) };
                 filterButtons[button] = id; button.Click += (_, _) => { dashboardFilter = id; dashboardPage = 0; RefreshItems(); }; filters.Controls.Add(button);
             }
-            export = new Button { AccessibleAutomationId = "HistoryExport" }; AppUi.Primary(export); export.Click += async (_, _) => await ExportAsync();
+            export = new DashboardButton { AccessibleAutomationId = "HistoryExport" }; AppUi.Primary(export); export.Click += async (_, _) => await ExportAsync();
             previous = new Button { Text = "‹", AccessibleAutomationId = "HistoryPrevious" }; next = new Button { Text = "›", AccessibleAutomationId = "HistoryNext" };
             AppUi.Secondary(previous); AppUi.Secondary(next); previous.Click += (_, _) => { dashboardPage--; RefreshItems(); }; next.Click += (_, _) => { dashboardPage++; RefreshItems(); };
             dateRange = new ComboBox { AccessibleAutomationId = "HistoryDateRange" }; AppUi.Input(dateRange);
             dateRange.Items.Add(services.Localization["Dashboard.AllDates"]); dateRange.Items.Add(services.Localization["Dashboard.Last7Days"]); dateRange.Items.Add(services.Localization["Dashboard.Last30Days"]); dateRange.SelectedIndex = 0;
             dateRange.SelectedIndexChanged += (_,_) => { days = dateRange.SelectedIndex switch { 1 => 7, 2 => 30, _ => 0 }; dashboardPage = 0; RefreshItems(); }; Controls.Add(dateRange);
-            dateSort = new Button { AccessibleAutomationId = "HistoryDateSort" }; dateSort.Click += (_,_) => { oldestFirst = !oldestFirst; dashboardPage = 0; RefreshItems(); };
-            tableHeader = new Panel(); tableHeader.Controls.Add(dateSort); AppUi.BindBackground(tableHeader, AppThemeTokens.Surface);
+            dateSort = new DashboardButton { AccessibleAutomationId = "HistoryDateSort" }; dateSort.Click += (_,_) => { oldestFirst = !oldestFirst; dashboardPage = 0; RefreshItems(); };
+            tableHeader = new Panel { AccessibleAutomationId = "HistoryTableHeader" }; tableHeader.Controls.Add(dateSort); AppUi.BindBackground(tableHeader, AppThemeTokens.Surface);
             foreach (var key in new[] { "Dashboard.Title", "Dashboard.Source", "Dashboard.Date", "Downloads.Quality", "Dashboard.Status" })
-            { var label = AppUi.Muted(); label.Tag = key; AppTypography.Bind(label, 9.5f); tableHeadings.Add(label); tableHeader.Controls.Add(label); }
+            { var label = AppUi.Muted(); label.Tag = key; label.TextAlign = ContentAlignment.MiddleLeft; AppTypography.Bind(label, 9.5f); tableHeadings.Add(label); tableHeader.Controls.Add(label); }
             Controls.Add(tableHeader);
             paging = AppUi.Muted(); Controls.AddRange([inspector, filters, export, previous, next, paging]);
+            searchIcon = new AppVectorIcon(AppIconKind.Search, 18) { AccessibilityView = AccessibilityView.Hidden };
+            searchIcon.Click += (_, _) => search.Select(); searchPanel.Controls.Add(searchIcon);
         }
-        foreach (var control in new Control?[] { inspector, filters, export, previous, next, paging, tableHeader, dateRange }) if (control is not null) control.Visible = value;
+        if (searchIcon is not null) searchIcon.Visible = value;
+        foreach (var control in new Control?[] { inspector, filters, export, previous, next, paging, tableHeader, dateRange })
+            if (control is not null) { control.Visible = value; if (!value) control.SetBounds(0, 0, 0, 0); }
+        AppTypography.SetDashboardPresentation(this, value);
         RefreshItems(); UpdateLayout();
     }
     private static bool Completed(DownloadHistoryEntry entry) => !entry.WasPartial && entry.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase);
@@ -80,45 +93,82 @@ internal sealed partial class HistoryView
     {
         if (inspector is null) return;
         AutoScroll = true; var origin = DisplayRectangle.Location; var width = Math.Max(560, ClientSize.Width - 36);
-        var line = AppTypography.TextHeight(42); var inline = width >= AppTypography.TextHeight(1050);
+        var line = AppTypography.TextHeight(42);
+        inspector.Visible = AppearancePresentation.Current.ModernDashboardShell.Inspector != DashboardInspectorMode.Hidden;
+        var inline = inspector.Visible && width >= AppTypography.TextHeight(1050);
         var right = inline ? Math.Clamp(width / 4, 290, AppTypography.TextHeight(320)) : 0;
         var center = inline ? width - right - 12 : width;
-        header.SetBounds(18 + origin.X, 18 + origin.Y, width, AppTypography.TextHeight(60));
-        pageTitle.SetBounds(0, 0, width, AppTypography.TextHeight(48)); pageSubtitle.Visible = false;
-        searchPanel.SetBounds(18 + origin.X, header.Bottom + 8, width, line); AppUi.BindBackground(searchPanel); searchPanel.Style.Border.Width = 0;
-        var exportWidth = AppTypography.TextHeight(180); search.SetBounds(0, 0, Math.Max(160, width - exportWidth - AppTypography.TextHeight(190) - 24), line);
-        export!.SetBounds(18 + origin.X + width - exportWidth, searchPanel.Top, exportWidth, line); export.Text = text["Dashboard.ExportHistory"];
-        dateRange!.SetBounds(searchPanel.Left + search.Right + 12, searchPanel.Top, AppTypography.TextHeight(190), line);
-        filters!.SetBounds(18 + origin.X, searchPanel.Bottom + 12, width, (int)Math.Ceiling(filterButtons.Count / (double)Math.Max(1, width / (AppTypography.TextHeight(144) + 10))) * AppTypography.TextHeight(42));
+        AppTypography.Bind(pageTitle, 20, FontStyle.Bold);
+        header.SetBounds(18 + origin.X, 18 + origin.Y, width, line);
+        var titleWidth = Math.Min(width, HistoryTable.MeasuredWidth(pageTitle) + 8);
+        pageTitle.SetBounds(0, 0, titleWidth, line);
+        pageSubtitle.Visible = width - titleWidth > AppTypography.TextHeight(300);
+        pageSubtitle.SetBounds(titleWidth + 16, 6, Math.Max(0, width - titleWidth - 16), line - 6);
+        pageSubtitle.TextAlign = ContentAlignment.MiddleLeft;
+        export!.Text = text["Dashboard.ExportHistory"]; DashboardVisual.Button(export, true);
+        var exportWidth = Math.Max(AppTypography.TextHeight(160), DashboardVisual.ActionWidth(export, true));
+        var dateWidth = AppTypography.TextHeight(174);
+        var inlineTools = width >= AppTypography.TextHeight(220) + exportWidth + dateWidth + 24;
+        var searchWidth = inlineTools ? width - exportWidth - dateWidth - 24 : width;
+        searchPanel.SetBounds(18 + origin.X, header.Bottom + 12, searchWidth, line); AppUi.BindBackground(searchPanel); searchPanel.Style.Border.Width = 0;
+        search.SetBounds(0, 0, searchWidth, line); DashboardVisual.SetPadding(search, new Padding(42, 0, 12, 0));
+        searchIcon!.SetBounds(14, (line - 18) / 2, 18, 18); searchIcon.BringToFront();
+        var toolsTop = inlineTools ? searchPanel.Top : searchPanel.Bottom + 8;
+        export.SetBounds(18 + origin.X + width - Math.Min(exportWidth, width / 2 - 6), toolsTop, Math.Min(exportWidth, width / 2 - 6), line);
+        dateRange!.SetBounds(inlineTools ? searchPanel.Right + 12 : searchPanel.Left, toolsTop, inlineTools ? dateWidth : Math.Min(dateWidth, export.Left - searchPanel.Left - 12), line);
+        DashboardVisual.Icon(export, AppIconKind.Download);
         var entries = services.History.Snapshot();
+        var filterRows = 1; var filterX = 0; var filterHeight = AppTypography.TextHeight(36);
         foreach (var (button, filter) in filterButtons)
         {
             var count = entries.Count(e => InDateRange(e) && MatchesFilter(e, filter));
             button.Text = text[filter == "Live" ? "Nav.Live" : "Dashboard." + filter] + $" ({count})";
-            button.Width = AppTypography.TextHeight(144); button.Height = AppTypography.TextHeight(36); DashboardVisual.Button(button); AppUi.NavigationButton(button, dashboardFilter == filter); DashboardVisual.Flat(button);
+            DashboardVisual.Button(button, dashboardFilter == filter);
+            button.Width = Math.Min(width, Math.Max(AppTypography.TextHeight(94), DashboardVisual.ActionWidth(button, true)));
+            button.Height = filterHeight;
+            if (filterX > 0 && filterX + button.Width + 10 > width) { filterRows++; filterX = 0; }
+            filterX += button.Width + 10;
+            DashboardVisual.Icon(button, filter switch { "Completed" => AppIconKind.Check, "Errors" => AppIconKind.Close, "Live" => AppIconKind.Live, "Playlists" => AppIconKind.Queue, "Audio" or "Video" => AppIconKind.Play, _ => AppIconKind.Info });
         }
+        filters!.SetBounds(18 + origin.X, toolsTop + line + 12, width, filterRows * (filterHeight + 6));
         var tableTop = filters.Bottom + 12;
-        tableHeader!.SetBounds(18 + origin.X, tableTop, center, AppTypography.TextHeight(36));
-        var cols = HistoryTable.Columns(center);
-        var compact = center < 850 || AppTypography.Scale > 1.25;
-        for (var i = 0; i < tableHeadings.Count; i++) { var c = cols[i]; tableHeadings[i].SetBounds(c.Left, 0, c.Width, tableHeader.Height); tableHeadings[i].Text = text[(string)tableHeadings[i].Tag!]; tableHeadings[i].Visible = !compact || i == 0; }
-        tableHeadings[2].Visible = false; dateSort!.Text = text["Dashboard.Date"] + (oldestFirst ? " ↑" : " ↓"); dateSort.SetBounds(cols[2].Left, 0, cols[2].Width, tableHeader.Height); DashboardVisual.Button(dateSort);
-        if (compact) dateSort.SetBounds(center - AppTypography.TextHeight(140), 0, AppTypography.TextHeight(140), tableHeader.Height);
+        tableHeader!.SetBounds(18 + origin.X, tableTop, center, AppTypography.TextHeight(38));
         var top = tableHeader.Bottom; var height = Math.Max(AppTypography.TextHeight(250), ClientSize.Height - (top - origin.Y) - line - 30);
         list.SetBounds(18 + origin.X, top, center, height); empty.SetBounds(list.Left, top, center, height);
-        inspector.Visible = AppearancePresentation.Current.ModernDashboardShell.Inspector != DashboardInspectorMode.Hidden;
-        inspector.SetBounds(inline ? list.Right + 12 : list.Left, inline ? top : list.Bottom + line + 20, inline ? right : center, inline ? height + line + 12 : AppTypography.TextHeight(380));
-        previous!.SetBounds(list.Left + 12, list.Bottom + 10, 38, line); next!.SetBounds(previous.Right + 140, previous.Top, 38, line);
-        paging!.SetBounds(previous.Right + 12, previous.Top + 4, 120, line);
+        if (inspector.Visible)
+            inspector.SetBounds(inline ? list.Right + 12 : list.Left, inline ? tableTop : list.Bottom + line + 20, inline ? right : center, inline ? tableHeader.Height + height + line + 12 : AppTypography.TextHeight(380));
+        else inspector.SetBounds(0, 0, 0, 0);
+        previous!.SetBounds(list.Right - 88, list.Bottom + 10, 34, line); next!.SetBounds(previous.Right + 10, previous.Top, 34, line);
+        paging!.SetBounds(list.Left + 12, previous.Top + 4, Math.Max(120, previous.Left - list.Left - 24), line);
         var countFiltered = entries.Count(e => FilterHistory(e) && Matches(e, search.Text.Trim())); var pages = Math.Max(1, (countFiltered + 39) / 40);
-        paging.Text = $"{dashboardPage + 1} / {pages}"; previous.Enabled = dashboardPage > 0; next.Enabled = dashboardPage < pages - 1;
+        var first = countFiltered == 0 ? 0 : dashboardPage * 40 + 1; var last = Math.Min(countFiltered, (dashboardPage + 1) * 40);
+        paging.Text = $"{first}–{last} / {countFiltered}     ·     {dashboardPage + 1} / {pages}"; previous.Enabled = dashboardPage > 0; next.Enabled = dashboardPage < pages - 1;
         previous.AccessibleName = text["Batch.Previous"]; next.AccessibleName = text["Batch.Next"]; dashboardTips.SetToolTip(previous, previous.AccessibleName); dashboardTips.SetToolTip(next, next.AccessibleName);
         emptyIcon.SetBounds((center - 44) / 2, Math.Max(20, height / 2 - 80), 44, 44);
         emptyTitle.SetBounds(20, emptyIcon.Bottom + 8, center - 40, AppTypography.TextHeight(40)); emptyBody.SetBounds(20, emptyTitle.Bottom + 8, center - 40, AppTypography.TextHeight(60));
-        DashboardVisual.Button(export!, true); DashboardVisual.Button(previous); DashboardVisual.Button(next!);
+        DashboardVisual.Button(previous); DashboardVisual.Button(next!);
         ResizeCards();
         var entry = entries.FirstOrDefault(e => e.QueueItemId == selectedId && e.FinalPath == selectedPath);
         if (entry is not null) inspector.ShowHistory(entry); else inspector.Clear();
+    }
+
+    private void LayoutDashboardTableHeading(int rowWidth)
+    {
+        if (tableHeader is null || dateSort is null) return;
+        var cols = HistoryTable.Columns(rowWidth); var compact = HistoryTable.IsCompact(rowWidth);
+        for (var i = 0; i < tableHeadings.Count; i++)
+        {
+            var column = cols[i]; var left = i == 0 ? HistoryTable.TitleLeft : column.Left;
+            tableHeadings[i].SetBounds(left, 0, Math.Max(0, column.Left + column.Width - left), tableHeader.Height);
+            tableHeadings[i].Text = text[(string)tableHeadings[i].Tag!]; tableHeadings[i].Visible = !compact || i == 0;
+        }
+        tableHeadings[2].Visible = false;
+        dateSort.Text = text["Dashboard.Date"] + (oldestFirst ? " ↑" : " ↓"); DashboardVisual.Button(dateSort);
+        AppUi.BindInteractiveSurface(dateSort, AppThemeTokens.Surface, AppThemeTokens.SurfaceHover);
+        AppUi.BindForeground(dateSort, AppThemeTokens.TextSecondary); AppTypography.Bind(dateSort, 9.5f);
+        dateSort.TextAlign = ContentAlignment.MiddleLeft; DashboardVisual.SetPadding(dateSort, new Padding(0));
+        DashboardVisual.Flat(dateSort); dateSort.Style.Border.Radius = 0;
+        dateSort.SetBounds(compact ? rowWidth - AppTypography.TextHeight(140) : cols[2].Left, 0, compact ? AppTypography.TextHeight(140) : cols[2].Width, tableHeader.Height);
     }
 }
 
@@ -128,6 +178,8 @@ internal sealed partial class HistoryEntryCard
     private bool rowSelected;
     private readonly List<Label> cells = [];
     private AppVectorIcon? folderIcon;
+    private AppVectorIcon? statusIcon;
+    private AppVectorIcon? placeholderIcon;
     internal Guid ItemId => entry.QueueItemId;
     internal string ItemPath => entry.FinalPath;
     protected override AccessibleObject CreateAccessibilityInstance() => new HistoryRowAccessibleObject(this);
@@ -147,48 +199,121 @@ internal sealed partial class HistoryEntryCard
     {
         dashboard = value; rowSelected = selected; TabStop = value; SetControlBehavior(ControlBehaviors.Selectable, value);
         AccessibleAutomationId = $"HistoryItem-{entry.QueueItemId:N}-{entry.LivePartIndex?.ToString() ?? "vod"}"; AccessibleName = entry.Title;
-        AppUi.BindBackground(this, selected ? AppThemeTokens.RowSelected : AppThemeTokens.Surface);
-        if (value) { AppTypography.Bind(title, 10.5f); AppTypography.Bind(facts, 9.5f); }
         AppTypography.SetDashboardPresentation(this, value);
+        if (value)
+        {
+            AppUi.BindBackground(this, selected ? AppThemeTokens.RowSelected : AppThemeTokens.Surface);
+            AppTypography.Bind(title, 10.5f); AppTypography.Bind(facts, 9.5f);
+        }
+        else
+        {
+            DashboardVisual.RestoreTree(this); AppUi.Card(this);
+            AppTypography.Bind(title, 13.5f, FontStyle.Bold); AppTypography.Bind(facts, 10.5f);
+            title.Multiline = facts.Multiline = false; title.AutoEllipsis = facts.AutoEllipsis = false;
+            title.TextAlign = facts.TextAlign = ContentAlignment.TopLeft;
+            Margin = new Padding(0, 0, 0, 14); ApplyLocalization();
+        }
         if (folderIcon is not null) folderIcon.Visible = value;
+        if (statusIcon is not null) statusIcon.Visible = value;
+        if (placeholderIcon is not null) placeholderIcon.Visible = value;
+        placeholderText.Visible = !value;
         if (!value) openFolder.Text = text["Common.OpenFolder"];
         LayoutControls();
     }
     private void LayoutDashboardCard()
     {
-        while (cells.Count < 4) { var label = AppUi.Muted(); label.Multiline = true; AppTypography.Bind(label, 9.25f); cells.Add(label); Controls.Add(label); }
-        var columns = HistoryTable.Columns(Width); var compact = Width < 850 || AppTypography.Scale > 1.25;
-        var line = AppTypography.TextHeight(23); Height = compact ? line * 5 + 24 : AppTypography.TextHeight(78); Margin = new Padding(0,0,0,1);
-        var imageWidth = 84; placeholder.SetBounds(12, 10, imageWidth, 54); thumbnail.Bounds = placeholder.Bounds;
-        title.SetBounds(108, 8, columns[0].Width - 108, line * 2); title.AutoEllipsis = true; title.Multiline = true;
-        facts.Text = entry.Channel; facts.SetBounds(title.Left, title.Bottom, title.Width, line); path.Visible = false;
+        while (cells.Count < 4)
+        {
+            var label = AppUi.Muted(); label.Multiline = true; label.TextAlign = ContentAlignment.MiddleLeft;
+            label.AccessibleAutomationId = "HistoryCell" + new[] { "Source", "Date", "Format", "Status" }[cells.Count];
+            label.Click += (_, _) => SelectionRequested?.Invoke(this, entry);
+            AppTypography.Bind(label, 9.25f); cells.Add(label); Controls.Add(label);
+        }
+        var columns = HistoryTable.Columns(Width); var compact = HistoryTable.IsCompact(Width);
+        var titleWidth = Math.Max(1, (compact ? Width - 54 : columns[0].Left + columns[0].Width - 12) - HistoryTable.TitleLeft);
+        title.AutoEllipsis = true; title.Multiline = true; title.TextAlign = ContentAlignment.TopLeft;
+        facts.AutoEllipsis = true; facts.Multiline = compact; facts.TextAlign = ContentAlignment.TopLeft;
+        facts.Text = compact
+            ? entry.Channel + " · " + SourcePresentation.Host(entry.SourceUrl) + "\n" + entry.CompletedAt.ToLocalTime().ToString("g", text.Culture) + " · " + System.IO.Path.GetExtension(entry.FinalPath).TrimStart('.').ToUpperInvariant() + " · " + entry.Quality
+            : entry.Channel;
+        var titleHeight = HistoryTable.MeasuredHeight(title, titleWidth, 2);
+        var factsHeight = HistoryTable.MeasuredHeight(facts, titleWidth, compact ? 2 : 1);
+        var statusHeight = HistoryTable.LineHeight(cells[3]);
+        var textHeight = titleHeight + 3 + factsHeight + (compact ? statusHeight + 6 : 0);
+        Height = Math.Max(AppTypography.TextHeight(72), textHeight + 20); Margin = new Padding(0, 0, 0, 1);
+        placeholder.SetBounds(12, (Height - 52) / 2, 92, 52); thumbnail.Bounds = placeholder.Bounds;
+        if (placeholderIcon is null)
+        {
+            placeholderIcon = new AppVectorIcon(AppIconKind.History, 24) { AccessibilityView = AccessibilityView.Hidden, AccessibleAutomationId = "HistoryThumbnailPlaceholder" };
+            placeholderIcon.Click += (_, _) => SelectionRequested?.Invoke(this, entry); placeholder.Controls.Add(placeholderIcon);
+        }
+        placeholderIcon.SetBounds((placeholder.Width - 24) / 2, (placeholder.Height - 24) / 2, 24, 24);
+        placeholderText.Visible = false;
+        placeholder.Visible = thumbnail.Image is null; thumbnail.Visible = thumbnail.Image is not null;
+        title.SetBounds(HistoryTable.TitleLeft, (Height - textHeight) / 2, titleWidth, titleHeight);
+        facts.SetBounds(title.Left, title.Bottom + 3, title.Width, factsHeight); path.Visible = false;
         cells[0].Text = SourcePresentation.Host(entry.SourceUrl);
         cells[1].Text = entry.CompletedAt.ToLocalTime().ToString("yyyy-MM-dd\nHH:mm", text.Culture);
         cells[2].Text = System.IO.Path.GetExtension(entry.FinalPath).TrimStart('.').ToUpperInvariant() + "\n" + entry.Quality;
         cells[3].Text = text["Status." + (entry.WasPartial ? "Partial" : entry.Status)];
-        for (var i = 0; i < 4; i++) { var c = columns[i + 1]; cells[i].SetBounds(c.Left, 12, c.Width - 8, line * 2); cells[i].Visible = !compact; cells[i].AutoEllipsis = true; }
-        AppUi.BindForeground(cells[3], entry.WasPartial ? AppThemeTokens.Warning : entry.Status == "Completed" ? AppThemeTokens.Success : AppThemeTokens.Error);
+        for (var i = 0; i < 4; i++)
+        {
+            var c = columns[i + 1]; cells[i].SetBounds(c.Left, 10, Math.Max(1, c.Width - 8), Height - 20);
+            cells[i].Visible = !compact; cells[i].AutoEllipsis = true;
+        }
+        var completed = entry.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase);
+        var statusColor = entry.WasPartial ? AppThemeTokens.Warning : completed ? AppThemeTokens.Success : AppThemeTokens.Error;
+        AppUi.BindForeground(cells[3], statusColor);
         if (compact)
         {
-            title.Width = Width - title.Left - 56;
-            facts.Text = entry.Channel + " · " + SourcePresentation.Host(entry.SourceUrl) + "\n" + entry.CompletedAt.ToLocalTime().ToString("g", text.Culture) + " · " + System.IO.Path.GetExtension(entry.FinalPath).TrimStart('.').ToUpperInvariant() + " · " + entry.Quality;
-            facts.Multiline = true; facts.SetBounds(title.Left, title.Bottom + 2, title.Width, line * 2);
-            cells[3].Visible = true; cells[3].SetBounds(title.Left, facts.Bottom + 4, title.Width, line);
+            cells[3].Visible = true; cells[3].SetBounds(title.Left, facts.Bottom + 6, title.Width, statusHeight);
         }
-        else facts.Multiline = false;
+        if (statusIcon is null)
+        {
+            statusIcon = new AppVectorIcon(AppIconKind.Check, 16) { AccessibilityView = AccessibilityView.Hidden };
+            statusIcon.Click += (_, _) => SelectionRequested?.Invoke(this, entry); Controls.Add(statusIcon);
+        }
+        statusIcon.SetKind(entry.WasPartial ? AppIconKind.Info : completed ? AppIconKind.Check : AppIconKind.Close);
+        statusIcon.SetColorToken(statusColor); statusIcon.Visible = true;
+        statusIcon.SetBounds(cells[3].Left, cells[3].Top + (cells[3].Height - 16) / 2, 16, 16);
+        cells[3].SetBounds(cells[3].Left + 22, cells[3].Top, Math.Max(1, cells[3].Width - 22), cells[3].Height);
         if (folderIcon is null) { folderIcon = new AppVectorIcon(AppIconKind.Folder, 20); folderIcon.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden; folderIcon.Click += (_,_) => openFolder.PerformClick(); openFolder.Controls.Add(folderIcon); }
         folderIcon.SetBounds(6,7,20,20);
-        openFile.Visible = false; openFolder.SetBounds(Width - 42, 20, 32, 34); openFolder.Text = ""; openFolder.AccessibleName = text["Common.OpenFolder"];
+        openFile.Visible = false; openFolder.SetBounds(Width - 42, (Height - 34) / 2, 32, 34); openFolder.Text = ""; openFolder.AccessibleName = text["Common.OpenFolder"];
         DashboardVisual.Button(openFolder); DashboardVisual.Flat(this, !rowSelected);
+        if (rowSelected)
+            foreach (var style in new[] { Style, StyleHover, StylePressed, StyleFocused, StyleDisabled })
+            { style.Border.Width = 1; style.Border.Color = AppUi.GetColor(AppThemeTokens.Accent); style.Border.Radius = 7; }
     }
 }
 
 internal static class HistoryTable
 {
+    internal const int TitleLeft = 116;
+    internal static bool IsCompact(int width) => width < AppTypography.TextHeight(820);
+    internal static int MeasuredWidth(Label label)
+    {
+        var style = label.CurrentStyle;
+        return (int)Math.Ceiling(TextMeasurer.MeasureText(label.Text, style.GetFont(), style.GetFontSize(),
+            new Size(int.MaxValue, int.MaxValue), style.GetFontStyle()).Width);
+    }
+    internal static int LineHeight(Label label)
+    {
+        var style = label.CurrentStyle;
+        return (int)Math.Ceiling(TextMeasurer.MeasureText("Ag", style.GetFont(), style.GetFontSize(),
+            new Size(int.MaxValue, int.MaxValue), style.GetFontStyle()).Height) + 1;
+    }
+    internal static int MeasuredHeight(Label label, int width, int maxLines)
+    {
+        var style = label.CurrentStyle; var line = LineHeight(label);
+        var measured = (int)Math.Ceiling(TextMeasurer.MeasureText(label.Text, style.GetFont(), style.GetFontSize(),
+            new Size(Math.Max(1, width), int.MaxValue), style.GetFontStyle()).Height) + 1;
+        return Math.Clamp(measured, line, line * maxLines);
+    }
     internal static (int Left, int Width)[] Columns(int width)
     {
-        var content = Math.Max(500, width - 52); var title = Math.Max(260, content * 42 / 100);
-        var source = content * 14 / 100; var date = content * 15 / 100; var format = content * 16 / 100;
-        return [(12, title), (title + 16, source), (title + source + 16, date), (title + source + date + 16, format), (title + source + date + format + 16, Math.Max(60, content - title - source - date - format))];
+        var content = Math.Max(1, width - 72); var title = content * 46 / 100;
+        var source = content * 11 / 100; var date = content * 14 / 100; var format = content * 13 / 100;
+        return [(12, title), (12 + title, source), (12 + title + source, date), (12 + title + source + date, format), (12 + title + source + date + format, content - title - source - date - format)];
     }
 }

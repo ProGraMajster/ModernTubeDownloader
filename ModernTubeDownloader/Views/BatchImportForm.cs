@@ -17,7 +17,7 @@ internal sealed partial class BatchImportView : UserControl
     private readonly TextBox path = new() { AccessibleAutomationId = "BatchFilePath" }, search = new() { AccessibleAutomationId = "BatchSearch" };
     private readonly ComboBox quality = new() { AccessibleAutomationId = "BatchQuality" }, container = new() { AccessibleAutomationId = "BatchContainer" }, filter = new() { AccessibleAutomationId = "BatchFilter" };
     private readonly NumericUpDown workers = new() { Minimum = 1, Maximum = 8, Value = 3, AccessibleAutomationId = "BatchWorkers" };
-    private readonly ProgressBar progress = new() { Minimum = 0, Maximum = 100 };
+    private readonly ProgressBar progress = new DashboardProgress { Minimum = 0, Maximum = 100 };
     private readonly MediaRangeEditor range;
     private readonly Dictionary<string, Button> buttons = [];
     private readonly HashSet<Guid> selection = [];
@@ -41,7 +41,7 @@ internal sealed partial class BatchImportView : UserControl
         quality.SelectedIndex = 0;
         foreach (var value in Enum.GetValues<PreferredVideoContainer>()) container.Items.Add(value.ToString()); container.SelectedIndex = 0;
         foreach (var value in Enum.GetValues<BatchFilter>()) filter.Items.Add(services.Localization["Batch.Filter." + value]); filter.SelectedIndex = 0;
-        void Add(string key, Action action) { var button = new Button { Width = 160, Height = 38, Margin = new Padding(0, 0, 8, 8), AccessibleAutomationId = "Batch" + key }; AppUi.Secondary(button); button.Click += (_, _) => action(); toolbar.Controls.Add(button); buttons.Add(key, button); }
+        void Add(string key, Action action) { var button = new DashboardButton { Width = 160, Height = 38, Margin = new Padding(0, 0, 8, 8), AccessibleAutomationId = "Batch" + key }; AppUi.Secondary(button); button.Click += (_, _) => action(); toolbar.Controls.Add(button); buttons.Add(key, button); }
         Add("Browse", () => _ = RunAsync(BrowseAsync)); Add("Import", () => _ = RunAsync(ImportAsync));
         Add("Examples", () => _ = RunAsync(ShowExamplesAsync));
         Add("Analyze", () => _ = RunAsync(AnalyzeAsync)); Add("Pause", () => _ = RunAsync(async () => { if (this.session is { } s) await services.Batch.SetPausedAsync(s, !s.Paused); }));
@@ -138,7 +138,7 @@ internal sealed partial class BatchImportView : UserControl
         RefreshDashboardCounters();
         foreach (var (key, button) in buttons) button.Enabled = !busy && (session is not null || key is "Browse" or "Import" or "Examples" or "Close");
         buttons["Analyze"].Enabled &= !services.Batch.IsAnalyzing; buttons["Pause"].Enabled &= services.Batch.IsAnalyzing;
-        if (session is not { } s) { status.Text = services.Localization[lastErrorKey ?? "Batch.Empty"]; return; }
+        if (session is not { } s) { status.Text = services.Localization[lastErrorKey ?? "Batch.Empty"]; RefreshDashboardStatus(); return; }
         var data = CurrentPage(s); page = data.Page; pageText.Text = services.Localization.Get("Sources.Page", page + 1, data.Pages, data.Total);
         progress.Visible = AppearancePresentation.Current.BatchImport.Progress != ProgressPresentation.Hidden;
         lock (s.Sync) progress.Value = s.ImportedCount == 0 ? 0 : Math.Clamp((int)(100L * s.Entries.Count(e => e.Status is not (BatchEntryStatus.Pending or BatchEntryStatus.Analyzing or BatchEntryStatus.Validating)) / s.ImportedCount), 0, 100);
@@ -146,6 +146,7 @@ internal sealed partial class BatchImportView : UserControl
         status.Text = lastErrorKey is { } importErrorKey ? services.Localization[importErrorKey] : services.Localization.Get("Batch.Summary", s.FileName, s.ImportedCount, selection.Count,
             services.Localization[s.Paused ? "Batch.Paused" : "Batch.Running"]);
         buttons["Pause"].Text = services.Localization[s.Paused ? "Batch.Resume" : "Batch.Pause"];
+        RefreshDashboardStatus();
         var nextSignature = string.Join(';', data.Entries.Select(entry => $"{entry.Id}/{entry.Status}/{entry.Quality}/{entry.Container}/{entry.Title}/{entry.Range}"));
         if (signature == nextSignature) return; signature = nextSignature;
         foreach (var child in rows.Controls.ToArray()) { rows.Controls.Remove(child); child.Dispose(); }
@@ -159,10 +160,10 @@ internal sealed partial class BatchImportView : UserControl
             var url = AppUi.Muted(entry.Url); url.Visible = appearance.ShowUrl;
             var state = AppUi.Muted(services.Localization["Batch.Status." + entry.Status] + (appearance.ShowQuality ? " • " + entry.Quality : "") + (appearance.ShowContainer ? " • " + entry.Container : "") + " " + entry.Range.DisplayText + (appearance.StatusDetails && entry.ErrorKey is { } errorKey ? " • " + services.Localization[errorKey] : ""));
             state.AccessibleAutomationId = "BatchEntryStatus" + entry.Ordinal;
-            var analyze = new Button { Text = services.Localization["Batch.Analyze"], Enabled = !services.Batch.IsAnalyzing && entry.QueueItemId is null };
-            var add = new Button { Text = services.Localization["Batch.Add"], Enabled = entry.Status == BatchEntryStatus.Ready };
-            var details = new Button { Text = services.Localization["Downloads.Details"], Enabled = entry.HasMetadata };
-            var remove = new Button { Text = services.Localization["Batch.Remove"], Enabled = entry.QueueItemId is null && entry.Status != BatchEntryStatus.Analyzing };
+            var analyze = new DashboardButton { Text = services.Localization["Batch.Analyze"], Enabled = !services.Batch.IsAnalyzing && entry.QueueItemId is null };
+            var add = new DashboardButton { Text = services.Localization["Batch.Add"], Enabled = entry.Status == BatchEntryStatus.Ready };
+            var details = new DashboardButton { Text = services.Localization["Downloads.Details"], Enabled = entry.HasMetadata };
+            var remove = new DashboardButton { Text = services.Localization["Batch.Remove"], Enabled = entry.QueueItemId is null && entry.Status != BatchEntryStatus.Analyzing };
             foreach (var button in new[] { analyze, add, details, remove }) AppUi.Secondary(button);
             analyze.Click += (_, _) => _ = RunAsync(() => { _ = ObserveAnalysis(services.Batch.StartAsync(s, new HashSet<Guid> { entry.Id })); return Task.CompletedTask; });
             add.Click += (_, _) => _ = RunAsync(async () => await services.Batch.AddReadyAsync(s, new HashSet<Guid> { entry.Id }));
@@ -170,6 +171,7 @@ internal sealed partial class BatchImportView : UserControl
             details.Click += (_, _) => _ = RunAsync(async () => { if (await services.Batch.MetadataAsync(s, entry.Id, lifetime.Token) is { } metadata) { using var window = new VideoDetailsForm(metadata, services.Localization, services.Thumbnails); using var registration = RegisterDialog?.Invoke(window); await window.ShowDialog(FindForm()!); } });
             panel.Controls.AddRange([checkbox, title, url, state, analyze, add, details, remove]); rows.Controls.Add(panel);
             if (appearance.Thumbnail && entry.HasMetadata) { var image = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom, Tag = "BatchThumbnail" }; panel.Controls.Add(image); _ = LoadThumbnailAsync(s, entry.Id, image); }
+            if (dashboard) PrepareDashboardRow(panel, entry);
         }
         LayoutRows();
     }

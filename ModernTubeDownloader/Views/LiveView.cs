@@ -20,7 +20,7 @@ internal sealed partial class LiveView : UserControl
     private readonly Label statistics = AppUi.Muted();
     private readonly Panel analysis = new();
     private readonly TextBox url = new() { AccessibleAutomationId = "LiveUrlInput" };
-    private readonly Button analyze = new() { AccessibleAutomationId = "LiveAnalyzeButton" };
+    private readonly Button analyze = new DashboardButton() { AccessibleAutomationId = "LiveAnalyzeButton" };
     private readonly Label title = AppUi.Heading(string.Empty, 14);
     private readonly Label message = AppUi.Muted();
     private readonly ComboBox quality = new() { AccessibleAutomationId = "LiveQualitySelector" };
@@ -281,15 +281,16 @@ internal sealed partial class LiveSessionCard : Panel
     private readonly Label title = AppUi.Heading(string.Empty, 13);
     private readonly Label state = AppUi.Muted();
     private readonly Label facts = AppUi.Muted();
-    private readonly Button primary = new();
-    private readonly Button secondary = new();
-    private readonly Button details = new();
-    private readonly Button folder = new();
+    private readonly Button primary = new DashboardButton();
+    private readonly Button secondary = new DashboardButton();
+    private readonly Button details = new DashboardButton();
+    private readonly Button folder = new DashboardButton();
     private LiveSession? current;
     private readonly PictureBox thumbnail = new() { SizeMode = PictureBoxSizeMode.Zoom };
     private string? imageUrl;
     private readonly CancellationTokenSource imageLifetime = new();
     private bool imageDisposed;
+    private bool dashboardSelectionWired;
 #if DEBUG
     internal Func<Form, IDisposable?>? RegisterDetailsForAutomation { get; set; }
 #endif
@@ -344,7 +345,7 @@ internal sealed partial class LiveSessionCard : Panel
     }
     private async Task LoadImageAsync(string? expected)
     {
-        try { var image = await services.Thumbnails.GetAsync(expected, imageLifetime.Token); if (!imageDisposed && imageUrl == expected) thumbnail.Image = image; }
+        try { var image = await services.Thumbnails.GetAsync(expected, imageLifetime.Token); if (!imageDisposed && imageUrl == expected) { thumbnail.Image = image; if (dashboard) LayoutCard(); } }
         catch (OperationCanceledException) { }
         catch (Exception ex) { services.Logger.Error("LIVE thumbnail unavailable.", ex); }
     }
@@ -395,7 +396,17 @@ internal sealed partial class LiveSessionCard : Panel
     }
     private void LayoutCard()
     {
-        if (dashboard) { LayoutDashboardCard(); return; }
+        if (dashboard)
+        {
+            LayoutDashboardCard();
+            if (!dashboardSelectionWired && dashboardChannel is not null && dashboardTiming is not null && dashboardState is not null)
+            {
+                dashboardSelectionWired = true;
+                foreach (var child in new Control[] { dashboardChannel, dashboardTiming, dashboardState })
+                    child.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
+            }
+            return;
+        }
         var appearance = AppearancePresentation.Current.Live;
         var compactWaiting = appearance.CompactWaiting && current?.State == LiveSessionState.WaitingForLive;
         var gap = appearance.CardDensity == AppearanceDensity.Compact ? 4 : appearance.CardDensity == AppearanceDensity.Comfortable ? 16 : 8;

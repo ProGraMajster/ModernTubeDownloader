@@ -13,8 +13,8 @@ internal sealed class DashboardInspector : AppScrollPanel
     private readonly AppServices services;
     public event EventHandler<string>? RetryRequested;
     private bool historyMode;
-    private readonly Button retry = new() { AccessibleAutomationId = "HistoryRetry" };
-    private readonly Button details = new(), options = new(), copy = new(), openFile = new(), openFolder = new(), apply = new(), advanced = new();
+    private readonly Button retry = new DashboardButton() { AccessibleAutomationId = "HistoryRetry" };
+    private readonly Button details = new DashboardButton(), options = new DashboardButton(), copy = new DashboardButton(), openFile = new DashboardButton(), openFolder = new DashboardButton(), apply = new DashboardButton(), advanced = new DashboardButton();
     private readonly AppVectorIcon copyGlyph = new(AppIconKind.Clipboard, 18);
     private readonly PictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom };
     private readonly Label title = AppUi.Heading("", 12), author = AppUi.Muted(), link = AppUi.Muted(), facts = AppUi.Muted(), hint = AppUi.Muted();
@@ -38,6 +38,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         AutoScroll = true; AccessibleAutomationId = "DashboardInspector";
         DashboardStyle.Card(this); AppUi.BindBackground(image, AppThemeTokens.SurfaceSecondary); title.Multiline = facts.Multiline = hint.Multiline = true;
         title.AutoEllipsis = author.AutoEllipsis = link.AutoEllipsis = true;
+        AppUi.BindForeground(link, AppThemeTokens.Info);
         foreach (var button in new[] { details, options, copy, openFile, openFolder, advanced, retry }) AppUi.Secondary(button);
         copyGlyph.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden; copyGlyph.Click += (_, _) => copy.PerformClick(); copy.Controls.Add(copyGlyph); AppTypography.Bind(options, 9.5f);
         AppUi.Primary(apply); AppUi.Input(quality); AppUi.Input(container); AppUi.Surface(editor);
@@ -179,31 +180,48 @@ internal sealed class DashboardInspector : AppScrollPanel
     private void LayoutInspector()
     {
         foreach (var control in new Control[] { image, author, link, copy, facts, openFile, openFolder }) control.Visible = hasSelection;
-        var o = DisplayRectangle.Location; var width = Math.Max(220, ClientSize.Width - 28); var line = AppTypography.TextHeight(34);
+        // DisplayRectangle is the actual viewport after the native scroll rail.
+        var viewport = DisplayRectangle; var o = viewport.Location; var width = Math.Max(180, viewport.Width - 24); var line = AppTypography.TextHeight(34);
         retry.Visible = historyMode && hasSelection;
         details.SetBounds(12 + o.X, 10 + o.Y, width / 2, line); options.SetBounds(details.Right + 4, details.Top, width / 2 - 4, line);
         DashboardVisual.Tab(details, !showOptions); DashboardVisual.Tab(options, showOptions);
-        if (!hasSelection) { title.SetBounds(12 + o.X, details.Bottom + 40, width, AppTypography.TextHeight(100)); editor.Visible = fields.Visible = false; return; }
+        if (!hasSelection)
+        {
+            title.SetBounds(12 + o.X, details.Bottom + 40, width, AppTypography.TextHeight(100)); editor.Visible = fields.Visible = false;
+            foreach (var hidden in new Control[] { image, author, link, copy, facts, fields, editor, openFile, openFolder, retry }) hidden.SetBounds(0, 0, 0, 0);
+            return;
+        }
         image.Visible = !string.IsNullOrWhiteSpace(thumbnailUrl) && !thumbnailFailed;
         image.SetBounds(12 + o.X, details.Bottom + 14, width, image.Visible ? width * 9 / 16 : 0);
-        title.SetBounds(12 + o.X, image.Bottom + 12, width, AppTypography.TextHeight(50));
+        title.SetBounds(12 + o.X, image.Bottom + 12, width, DashboardVisual.LabelHeight(title, width, 3));
         author.SetBounds(12 + o.X, title.Bottom + 2, width, AppTypography.TextHeight(24));
         link.SetBounds(12 + o.X, author.Bottom + 6, width - AppTypography.TextHeight(32) - 6, AppTypography.TextHeight(30));
         copy.SetBounds(link.Right + 6, link.Top, AppTypography.TextHeight(32), link.Height);
         copyGlyph.SetBounds((copy.Width - 18) / 2, (copy.Height - 18) / 2, 18, 18);
-        editor.Visible = showOptions && options.Visible; facts.Visible = false; fields.Visible = !editor.Visible;
-        fields.SetBounds(12 + o.X, copy.Bottom + 16, width, fields.Height);
+        var editing = showOptions && queueId is not null;
+        editor.Visible = editing; facts.Visible = false; fields.Visible = !editing;
+        fields.SetBounds(12 + o.X, copy.Bottom + 10, width, fields.Height);
         editor.SetBounds(12 + o.X, copy.Bottom + 14, width, AppTypography.TextHeight(390));
         qualityLabel.SetBounds(0, 0, width, AppTypography.TextHeight(24)); quality.SetBounds(0, qualityLabel.Bottom, width, line);
         containerLabel.SetBounds(0, quality.Bottom + 10, width, AppTypography.TextHeight(24)); container.SetBounds(0, containerLabel.Bottom, width, line);
         range.SetBounds(0, container.Bottom + 12, width, AppTypography.TextHeight(200));
         advanced.SetBounds(0, range.Bottom + 8, width, line); apply.SetBounds(0, advanced.Bottom + 8, width, line);
         hint.SetBounds(0, apply.Bottom + 8, width, AppTypography.TextHeight(70)); editor.Height = hint.Bottom + 4;
-        openFile.SetBounds(12 + o.X, (editor.Visible ? editor.Bottom : fields.Bottom) + 12, width, line);
-        openFolder.SetBounds(12 + o.X, openFile.Bottom + 8, width, line);
+        var paired = width >= AppTypography.TextHeight(240);
+        openFile.SetBounds(12 + o.X, (editing ? editor.Bottom : fields.Bottom) + 12, paired ? (width - 8) / 2 : width, line);
+        openFolder.SetBounds(paired ? openFile.Right + 8 : openFile.Left, paired ? openFile.Top : openFile.Bottom + 8, openFile.Width, line);
         retry.SetBounds(openFile.Left, openFolder.Bottom + 8, width, line);
-        DashboardVisual.Tab(details, !editor.Visible); DashboardVisual.Tab(options, editor.Visible);
+        DashboardVisual.Tab(details, !editing); DashboardVisual.Tab(options, editing);
         foreach (var button in new[] { copy, openFile, openFolder, retry, advanced, apply }) DashboardVisual.Button(button, button == apply);
+        if (paired) { AppTypography.Bind(openFile, 9); AppTypography.Bind(openFolder, 9); }
+        DashboardVisual.Icon(openFile, AppIconKind.Play); DashboardVisual.Icon(openFolder, AppIconKind.Folder);
+        if (paired) { DashboardVisual.SetPadding(openFile, new Padding(32, 0, 6, 0)); DashboardVisual.SetPadding(openFolder, new Padding(32, 0, 6, 0)); }
+        DashboardVisual.Icon(retry, AppIconKind.Retry);
+        // Pinned MFN includes hidden default-layout children in its scroll extent.
+        // Keep only the active section's bounds; the next layout rebuilds the other section.
+        facts.SetBounds(0, 0, 0, 0);
+        if (!editing) editor.SetBounds(0, 0, 0, 0); else fields.SetBounds(0, 0, 0, 0);
+        if (!historyMode) retry.SetBounds(0, 0, 0, 0);
     }
     protected override void Dispose(bool disposing) { if (disposing && !disposed) { disposed = true; lifetime.Cancel(); lifetime.Dispose(); tips.Dispose(); services.Localization.LanguageChanged -= LanguageChanged; } base.Dispose(disposing); }
 }

@@ -127,7 +127,7 @@ internal sealed partial class DownloadsView : UserControl
         urlPanel = new Panel();
         AppUi.Card(urlPanel);
         urlLabel = AppUi.Muted();
-        supportedSourcesButton = new Button { AccessibleAutomationId = "SupportedSourcesButton" };
+        supportedSourcesButton = new DashboardButton { AccessibleAutomationId = "SupportedSourcesButton" };
         AppUi.Secondary(supportedSourcesButton);
         supportedSourcesButton.Click += (_, _) => SupportedSourcesRequested?.Invoke(this, EventArgs.Empty);
         sourceSummary = AppUi.Muted();
@@ -141,8 +141,8 @@ internal sealed partial class DownloadsView : UserControl
         };
         AppUi.Input(urlInput);
         AppTypography.Bind(urlInput, 12.5f);
-        pasteButton = new Button { Height = 48, Width = 48, AccessibleAutomationId = "PasteButton" };
-        analyzeButton = new Button { Height = 48, Enabled = false, AccessibleAutomationId = "AnalyzeButton" };
+        pasteButton = new DashboardButton { Height = 48, Width = 48, AccessibleAutomationId = "PasteButton" };
+        analyzeButton = new DashboardButton { Height = 48, Enabled = false, AccessibleAutomationId = "AnalyzeButton" };
         AppUi.Secondary(pasteButton);
         AppUi.Primary(analyzeButton);
         pasteIcon = new AppVectorIcon(AppIconKind.Clipboard, 24, AppThemeTokens.TextPrimary)
@@ -183,13 +183,13 @@ internal sealed partial class DownloadsView : UserControl
         rangeEditor.ModeChanged += (_, _) => UpdateLayout();
         rangeHint = AppUi.Muted();
         rangeHint.AccessibleAutomationId = "VideoRangeKeyframeHint";
-        addButton = new Button { Enabled = false, AccessibleAutomationId = "AddToQueueButton" };
-        detailsButton = new Button { Enabled = false, AccessibleAutomationId = "DetailsButton" };
-        advancedButton = new Button { Enabled = false, AccessibleAutomationId = "AdvancedOptionsButton" };
+        addButton = new DashboardButton { Enabled = false, AccessibleAutomationId = "AddToQueueButton" };
+        detailsButton = new DashboardButton { Enabled = false, AccessibleAutomationId = "DetailsButton" };
+        advancedButton = new DashboardButton { Enabled = false, AccessibleAutomationId = "AdvancedOptionsButton" };
         AppUi.Primary(addButton);
         AppUi.Secondary(detailsButton);
         AppUi.Secondary(advancedButton);
-        clearPreviewButton = new Button { Text = "×", Visible = false, AccessibleAutomationId = "ClearAnalyzedPreviewButton" };
+        clearPreviewButton = new DashboardButton { Text = "×", Visible = false, AccessibleAutomationId = "ClearAnalyzedPreviewButton" };
         feedback = AppUi.Muted();
         analysisProgress = new ProgressBar { Minimum = 0, Maximum = 100, Value = 45, Visible = false };
         addButton.Click += AddClicked;
@@ -232,8 +232,8 @@ internal sealed partial class DownloadsView : UserControl
         storageWarning.Visible = false;
         admissionCountdown.AccessibleAutomationId = "QueueAdmissionCountdown";
         admissionCountdown.Visible = false;
-        pauseButton = new Button { AccessibleAutomationId = "QueuePauseButton" };
-        moreButton = new Button { Text = "…", Width = 44, AccessibleAutomationId = "QueueMenuButton" };
+        pauseButton = new DashboardButton { AccessibleAutomationId = "QueuePauseButton" };
+        moreButton = new DashboardButton { Text = "…", Width = 44, AccessibleAutomationId = "QueueMenuButton" };
         AppUi.Secondary(pauseButton);
         AppUi.Secondary(moreButton);
         pauseButton.Click += (_, _) => services.Queue.SetPaused(!services.Queue.IsPaused);

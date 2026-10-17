@@ -30,7 +30,7 @@ internal sealed class SpeedChart : Control
         try
         {
             var values = Samples.Snapshot(); var left = 42; var width = Math.Max(1, Width - left - 8); var height = Math.Max(1, Height - 24);
-            using var grid = new SKPaint { Color = AppUi.GetColor(AppThemeTokens.Border), StrokeWidth = 1, IsAntialias = true, Style = SKPaintStyle.Stroke };
+            using var grid = new SKPaint { Color = AppUi.GetColor(AppThemeTokens.Border).WithAlpha(110), StrokeWidth = 1, IsAntialias = true, Style = SKPaintStyle.Stroke };
             for (var i = 0; i <= 4; i++) e.Canvas.DrawLine(left, 4 + height * i / 4f, width + left, 4 + height * i / 4f, grid);
             for (var i = 0; i <= 4; i++) e.Canvas.DrawLine(left + width * i / 4f, 4, left + width * i / 4f, height + 4, grid);
             void Text(string text, int x, int y, int w, int h, ModernFormsNext.ContentAlignment align)
@@ -135,13 +135,15 @@ internal sealed class DashboardWidgets : Panel
     }
     private void LayoutWidgets()
     {
+        // Hidden dashboard chrome must not recreate a scroll extent after recovery.
+        if (Width <= 0) { Height = 0; return; }
         var p = AppearancePresentation.Current.ModernDashboardShell;
         var chartVisible = p.SpeedChart && p.Widgets == DashboardWidgetsMode.All;
         var processesVisible = p.ActiveProcesses && p.Widgets == DashboardWidgetsMode.All;
         statistics.Visible = p.Statistics; speed.Visible = chartVisible; processes.Visible = processesVisible;
         var n = (p.Statistics ? 1 : 0) + (chartVisible ? 1 : 0) + (processesVisible ? 1 : 0); var stacked = Width < 860 || AppTypography.Scale > 1.25;
         if (n == 0) { Height = 0; return; }
-        var h = AppTypography.TextHeight(140); Height = stacked ? h * n + 10 * (n - 1) : h;
+        var h = AppTypography.TextHeight(146); Height = stacked ? h * n + 10 * (n - 1) : h;
         var w = stacked ? Width : (Width - 12 * (n - 1)) / n; var index = 0; var x = 0;
         var visible = new[] { statistics, speed, processes }.Where(c => c.Visible).ToArray();
         foreach (var panel in visible)
@@ -159,7 +161,8 @@ internal sealed class DashboardWidgets : Panel
         foreach(var dot in statistics.Controls.Where(c => c.Name.StartsWith("StatDot"))) { var i=int.Parse(dot.Name[7..]); dot.SetBounds(14,line+17+i*line,6,6); }
         timing.SetBounds(sw / 2, line * 3 + 10, Math.Max(1, sw / 2 - 14), line);
         disk.SetBounds(sw / 2, line + 10, Math.Max(1, sw / 2 - 14), line * 3); diskBar.SetBounds(sw / 2, h - 20, Math.Max(1, sw / 2 - 14), 5);
-        speedTitle.SetBounds(14, 8, cw - 28, line); speedValue.SetBounds(14, line + 10, cw - 28, line); chart.SetBounds(12, line * 2 + 14, cw - 24, Math.Max(20, h - line * 2 - 24));
+        speedTitle.SetBounds(14, 8, cw - 116, line); speedValue.SetBounds(cw - 100, 8, 86, line); speedValue.TextAlign = ContentAlignment.MiddleRight;
+        chart.SetBounds(12, line + 14, cw - 24, Math.Max(20, h - line - 24));
         processTitle.SetBounds(14, 8, pw - 28, line); processBody.SetBounds(14, line + 10, pw - 28, h - line - 18);
     }
     protected override void Dispose(bool disposing) { if (disposing && !disposed) { disposed = true; timer.Tick -= Tick; timer.Dispose(); } base.Dispose(disposing); }

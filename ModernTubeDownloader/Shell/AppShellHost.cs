@@ -166,10 +166,14 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
     private readonly Button updates = new() { AccessibleAutomationId = "DashboardUpdates" };
     private readonly Label identity = AppUi.Muted();
     private readonly Panel statusDot = new() { Width = 8, Height = 8 };
+    private readonly Panel sectionRule = new(), activeMarker = new();
     public override AppInterfaceMode Mode => AppInterfaceMode.ModernDashboard;
     public ModernDashboardAppShell(LocalizationService text, Action<AppPageId> navigate, Action toggleTheme, Action checkUpdates) : base(text, navigate, true)
     {
         statusDot.Style.Border.Radius = 4; statusDot.Style.Border.Width = 0; Footer.Controls.Add(statusDot);
+        AppUi.BindBackground(sectionRule, AppThemeTokens.Border); DashboardVisual.Flat(sectionRule);
+        AppUi.BindBackground(activeMarker, AppThemeTokens.Accent); DashboardVisual.Flat(activeMarker); activeMarker.Style.Border.Radius = 2;
+        Sidebar.Controls.AddRange([sectionRule, activeMarker]);
         Sidebar.AutoScroll = true;
         Footer.Height = 32; Status.Padding = new Padding(10, 5, 10, 0);
         identity.Dock = DockStyle.Left; identity.Width = 290; identity.Padding = new Padding(12, 5, 4, 0);
@@ -185,6 +189,7 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
     {
         base.Select(page);
         foreach (var button in Buttons.Values) { DashboardVisual.Flat(button); AppTypography.Bind(button, 10.5f); button.StyleFocused.Border.Width = 1; button.StyleFocused.Border.Color = AppUi.GetColor(AppThemeTokens.Accent); }
+        if (activeMarker is not null && Buttons.TryGetValue(page, out var selected)) activeMarker.SetBounds(0, selected.Top + 4, 4, selected.Height - 8);
     }
     public override void SetStatus(string status, string token) { base.SetStatus(status, token); AppUi.BindBackground(statusDot, token); }
     public override void Refresh()
@@ -204,11 +209,14 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         var bottom = Math.Max(y + 20, Sidebar.Height - 2 * (row + 6) - 14);
         SetButton(AppPageId.Help, compact, 10, bottom, Sidebar.Width - 20, row);
         SetButton(AppPageId.About, compact, 10, bottom + row + 6, Sidebar.Width - 20, row);
+        sectionRule.SetBounds(18, Buttons[AppPageId.Settings].Top - 16, Sidebar.Width - 36, 1);
         Footer.Height = AppTypography.TextHeight(32); identity.Width = Math.Min(AppTypography.TextHeight(360), Root.Width / 2);
         statusDot.SetBounds(identity.Width + 8, (Footer.Height - 8) / 2, 8, 8);
         Status.Padding = new Padding(26, 5, 8, 0);
         theme.Text = Text["Dashboard.Theme"]; updates.Text = Text["Updates.Check"];
         Select(Selected);
         DashboardVisual.Flat(updates);
+        AppTypography.Bind(identity, 9); AppTypography.Bind(Status, 9); AppTypography.Bind(updates, 9);
+        AppUi.BindForeground(updates, AppThemeTokens.Info);
     }
 }

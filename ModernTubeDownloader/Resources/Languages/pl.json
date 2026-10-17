@@ -920,6 +920,7 @@
   "Dashboard.Activity": "Ostatnie zadania narzędzi",
   "Dashboard.QuickActions": "Szybkie akcje",
   "Dashboard.BatchSource": "Pobieranie filmów z listy w pliku",
+  "Dashboard.BatchWorkers": "Równoległe analizy",
   "Dashboard.BatchHint": "Wybierz plik TXT, CSV lub JSON, zweryfikuj wpisy i dodaj je do kolejki pobierania.",
   "Dashboard.ActiveScheduled": "Aktywne i zaplanowane",
   "Dashboard.BatchImport": "Importuj z pliku",

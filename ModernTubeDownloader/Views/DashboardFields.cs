@@ -8,14 +8,14 @@ internal sealed class DashboardFields : Panel
 {
     private readonly List<(Label Key, Label Value)> rows = [];
     private readonly ToolTip tips = new();
-    public DashboardFields() { AppUi.BindBackground(this, AppThemeTokens.Surface); SizeChanged += (_, _) => LayoutFields(); }
+    public DashboardFields() { Style.BackgroundColor = SkiaSharp.SKColors.Transparent; DashboardVisual.Flat(this); SizeChanged += (_, _) => LayoutFields(); }
     public void SetRows(params (string Key, string? Value)[] values)
     {
         var visible = values.Where(v => !string.IsNullOrWhiteSpace(v.Value)).ToArray();
         while (rows.Count < visible.Length)
         {
             var key = AppUi.Muted(); var value = AppUi.Muted(); AppUi.BindForeground(value);
-            AppTypography.Bind(key, 9); AppTypography.Bind(value, 9.5f); value.Multiline = true; value.AutoEllipsis = true;
+            AppTypography.Bind(key, 9); AppTypography.Bind(value, 9.5f); key.Multiline = value.Multiline = true; value.AutoEllipsis = true;
             rows.Add((key, value)); Controls.AddRange([key, value]);
         }
         for (var i = 0; i < rows.Count; i++)
@@ -28,13 +28,14 @@ internal sealed class DashboardFields : Panel
     }
     private void LayoutFields()
     {
+        if (Width <= 0) { Height = 0; return; }
         var y = 0; var keyWidth = Math.Min(116, Width * 2 / 5); var line = AppTypography.TextHeight(22);
         foreach (var row in rows.Where(r => r.Key.Visible))
         {
-            var length = Math.Max(12, (Width - keyWidth) / Math.Max(7, (int)(7 * AppTypography.Scale)));
-            var count = Math.Clamp((row.Value.Text.Length + length - 1) / length, 1, 2);
-            row.Key.SetBounds(0, y, keyWidth - 8, line); row.Value.SetBounds(keyWidth, y, Math.Max(1, Width - keyWidth), line * count);
-            y += row.Value.Height + AppTypography.TextHeight(6);
+            var valueWidth = Math.Max(1, Width - keyWidth);
+            var height = Math.Max(line, Math.Max(DashboardVisual.LabelHeight(row.Key, keyWidth - 8, 3), DashboardVisual.LabelHeight(row.Value, valueWidth, 3)));
+            row.Key.SetBounds(0, y, keyWidth - 8, height); row.Value.SetBounds(keyWidth, y, valueWidth, height);
+            y += height + AppTypography.TextHeight(4);
         }
         Height = y;
     }

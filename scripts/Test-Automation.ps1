@@ -55,8 +55,10 @@ param(
     [ValidateSet('Dark', 'Light')][string]$Theme = 'Dark',
     [ValidateRange(80, 200)][int]$AppTextScale = 100,
     [ValidateSet('Classic', 'ModernDashboard')][string]$InterfaceMode = 'Classic',
-    [ValidateRange(0, 4000)][int]$WindowWidth = 0,
+    [ValidateRange(0, 8192)][int]$WindowWidth = 0,
     [ValidateRange(0, 3000)][int]$WindowHeight = 0,
+    [int]$WindowLeft = 0,
+    [int]$WindowTop = 0,
     [ValidateRange(0, 500)][int]$PlaylistCount = 12
 )
 
@@ -172,6 +174,14 @@ function Wait-MainWindow([System.Diagnostics.Process]$process) {
     throw "Application PID=$($process.Id) did not expose a main window."
 }
 
+function Confirm-OwnedWindowSize([string]$phase) {
+    Start-Sleep -Milliseconds 250
+    $actual = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationProcess.MainWindowHandle)
+    $dpi = [MtdAutomationWindowCloser]::GetDpiForWindow($script:automationProcess.MainWindowHandle)
+    Write-Output "Native window geometry ($phase): requested=${WindowWidth}x${WindowHeight}; actual=$($actual[0])x$($actual[1]); HWND DPI=$dpi; app text scale=$AppTextScale%."
+    if ($actual[0] -ne $WindowWidth -or $actual[1] -ne $WindowHeight) { throw "Owned window did not retain the requested physical size after 250 ms ($phase)." }
+}
+
 function Capture-OwnedBitmap($graphics, [bool]$dialog = $false) {
     # Capture only this test's HWND; foreground desktop pixels are not evidence of the app.
     $dc = $graphics.GetHdc()
@@ -204,17 +214,24 @@ public static class MtdAutomationWindowCloser {
     [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     private struct NativeRect { public int Left; public int Top; public int Right; public int Bottom; }
     private struct NativePoint { public int X; public int Y; }
-    public static int[] OwnWindowSize(int processId, IntPtr hwnd) {
+    private static T InPhysicalCoordinates<T>(Func<T> action) {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4)); // Per-monitor-aware v2, only on this helper thread.
+        if (previous == IntPtr.Zero) throw new InvalidOperationException("Cannot enter the physical-coordinate DPI context.");
+        try { return action(); }
+        finally { SetThreadDpiAwarenessContext(previous); }
+    }
+    public static int[] OwnWindowSize(int processId, IntPtr hwnd) => InPhysicalCoordinates(() => {
         GetWindowThreadProcessId(hwnd, out uint owner);
         if (owner != processId || !IsWindowVisible(hwnd) || !GetWindowRect(hwnd, out NativeRect rect))
             throw new InvalidOperationException("Cannot measure the owned capture HWND.");
         int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
         if (width <= 0 || height <= 0) throw new InvalidOperationException("Owned capture HWND has invalid dimensions.");
         return new[] { width, height };
-    }
+    });
     private struct GuiThreadInfo {
         public uint Size, Flags;
         public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
@@ -247,7 +264,7 @@ public static class MtdAutomationWindowCloser {
         GetWindowThreadProcessId(popup, out uint owner);
         return owner == processId && IsWindowVisible(popup) && PrintWindow(popup, dc, 2);
     }
-    public static bool CaptureOwnWindow(int processId, IntPtr mainWindow, bool details, IntPtr dc) {
+    public static bool CaptureOwnWindow(int processId, IntPtr mainWindow, bool details, IntPtr dc) => InPhysicalCoordinates(() => {
         IntPtr target = mainWindow;
         if (details) {
             target = IntPtr.Zero;
@@ -260,8 +277,9 @@ public static class MtdAutomationWindowCloser {
                 target = hwnd; return false;
             }, IntPtr.Zero);
         }
-        return target != IntPtr.Zero && PrintWindow(target, dc, 2);
-    }
+        GetWindowThreadProcessId(target, out uint targetOwner);
+        return target != IntPtr.Zero && targetOwner == processId && IsWindowVisible(target) && PrintWindow(target, dc, 2);
+    });
     public static bool CloseDetails(int processId, IntPtr mainWindow) {
         IntPtr details = IntPtr.Zero;
         EnumWindows((hwnd, data) => {
@@ -325,8 +343,10 @@ public static class MtdAutomationWindowCloser {
         long packed = (ushort)point.X | ((long)(ushort)point.Y << 16);
         return PostMessage(window, message, buttonDown ? (IntPtr)1 : IntPtr.Zero, (IntPtr)packed);
     }
-    public static bool PlaceWindow(IntPtr window, int width, int height) => SetWindowPos(window, IntPtr.Zero, 0, 0, width, height, 0x0004);
-    public static bool ResizeWindow(IntPtr window, int width, int height) => SetWindowPos(window, IntPtr.Zero, 0, 0, width, height, 0x0006);
+    public static bool PlaceWindow(IntPtr window, int width, int height, int left, int top) =>
+        InPhysicalCoordinates(() => SetWindowPos(window, IntPtr.Zero, left, top, width, height, 0x0004));
+    public static bool ResizeWindow(IntPtr window, int width, int height) =>
+        InPhysicalCoordinates(() => SetWindowPos(window, IntPtr.Zero, 0, 0, width, height, 0x0006));
     private static Thread mouseFlood;
     private static volatile bool floodRunning;
     public static void StartMouseFlood(IntPtr window, int screenX, int screenY, int width, int height) {
@@ -534,10 +554,11 @@ try {
     Wait-Bridge $script:automationProcess.Id $true
     Wait-MainWindow $script:automationProcess
     if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
-        $placed = if ($DashboardSmoke) { [MtdAutomationWindowCloser]::PlaceWindow($script:automationProcess.MainWindowHandle, $WindowWidth, $WindowHeight) } else { [MtdAutomationWindowCloser]::ResizeWindow($script:automationProcess.MainWindowHandle, $WindowWidth, $WindowHeight) }
+        $placed = [MtdAutomationWindowCloser]::PlaceWindow($script:automationProcess.MainWindowHandle, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)
         if (-not $placed) {
             throw 'Could not resize the application window.'
         }
+        Confirm-OwnedWindowSize 'initial placement'
     }
     if ($DashboardSmoke) { Write-Output "Native window DPI: $([MtdAutomationWindowCloser]::GetDpiForWindow($script:automationProcess.MainWindowHandle)); app text scale: $AppTextScale%." }
     $roots = Invoke-AutomationCli -CliArguments @('roots', '--pid', "$($script:automationProcess.Id)")
@@ -549,12 +570,48 @@ try {
             if (-not $CaptureVisual) { return }
             Start-Sleep -Milliseconds 250
             $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationProcess.MainWindowHandle)
+            Write-Output "Native capture ${name}: requested=${WindowWidth}x${WindowHeight}; actual=$($size[0])x$($size[1]); HWND DPI=$([MtdAutomationWindowCloser]::GetDpiForWindow($script:automationProcess.MainWindowHandle))."
+            if ($WindowWidth -gt 0 -and $WindowHeight -gt 0 -and ($size[0] -ne $WindowWidth -or $size[1] -ne $WindowHeight)) { throw "Dashboard capture $name does not match the requested physical window size." }
             Add-Type -AssemblyName System.Drawing
             $bitmap = [Drawing.Bitmap]::new($size[0], $size[1]); $graphics = [Drawing.Graphics]::FromImage($bitmap)
             try { Capture-OwnedBitmap $graphics; $bitmap.Save((Join-Path $dataRoot ($name + '.png'))) }
             finally { $graphics.Dispose(); $bitmap.Dispose() }
             $snapshot = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
             $snapshot | ConvertTo-Json -Depth 60 | Set-Content -LiteralPath (Join-Path $dataRoot ($name + '-tree.json')) -Encoding utf8
+        }
+        function Wait-DashboardQueuePaused([bool]$expected) {
+            $expectedLabel = if ($expected) { $queueLabels.'Queue.Resume' } else { $queueLabels.'Queue.Pause' }
+            $pauseClock = [Diagnostics.Stopwatch]::StartNew()
+            do {
+                $pauseNode = Find-Node 'QueuePauseButton' $mainRoot
+                # Do not deny the application's atomic settings replacement while observing its save.
+                $pauseStream = [IO.File]::Open((Join-Path $dataRoot 'settings.json'), [IO.FileMode]::Open, [IO.FileAccess]::Read,
+                    ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+                $pauseReader = [IO.StreamReader]::new($pauseStream)
+                try { $savedSettings = $pauseReader.ReadToEnd() | ConvertFrom-Json }
+                finally { $pauseReader.Dispose() }
+                if ($pauseNode.name -eq $expectedLabel -and $savedSettings.QueuePaused -is [bool] -and $savedSettings.QueuePaused -eq $expected) { return }
+                Start-Sleep -Milliseconds 100
+            } while ($pauseClock.Elapsed.TotalSeconds -lt 15)
+            throw "Dashboard queue pause state was not reflected in UI and settings: expected=$expected; label=$($pauseNode.name); persisted=$($savedSettings.QueuePaused)."
+        }
+        function Close-DashboardProcess {
+            if (-not $script:automationProcess.CloseMainWindow()) { throw 'Dashboard close request failed.' }
+            if (-not $script:automationProcess.WaitForExit(2000)) {
+                $closing = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
+                $choice = @($closing.value | Where-Object rootId -ne $mainRoot) | Select-Object -First 1
+                if (-not $choice) { throw 'Dashboard work-aware close confirmation missing.' }
+                $shutdownExit = Find-Node 'ShutdownExit' $choice.rootId
+                try { Invoke-NodeAction $shutdownExit $choice.rootId 'Invoke' | Out-Null }
+                catch {
+                    if ($_.Exception.Message -notmatch '^Automation CLI exit 5: action\b' -or
+                        $_.Exception.Message -notmatch '"error"\s*:\s*"OutcomeUnknown"') { throw }
+                    Write-Output 'Dashboard ShutdownExit returned OutcomeUnknown at the shutdown transport boundary; exit within 15 seconds, exit code 0 and bridge removal are still required.'
+                }
+                if (-not $script:automationProcess.WaitForExit(15000)) { throw 'Dashboard did not close cleanly.' }
+            }
+            if ($script:automationProcess.ExitCode -ne 0) { throw "Dashboard exited with code $($script:automationProcess.ExitCode)." }
+            Wait-Bridge $script:automationProcess.Id $false
         }
         if ($ClassicUiRecovery) {
             [void](Find-Node 'NavDownloads' $mainRoot)
@@ -586,7 +643,15 @@ try {
             if ($prepared.Count -ne 1) { throw 'Dashboard QuickQueue did not prepare exactly one canonical queue item.' }
             $id = ([guid]$prepared[0].id).ToString('N')
             Invoke-NodeAction (Find-Node ('QueueItem-' + $id) $mainRoot) $mainRoot 'Select' | Out-Null
-            Write-Output 'Dashboard QuickQueue/selection PASS using the isolated FakeTool source, not a real source download.'
+            $queueLabels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
+            Wait-DashboardQueuePaused $true
+            foreach ($paused in @($false, $true)) {
+                Invoke-NodeAction (Find-Node 'QueuePauseButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-DashboardQueuePaused $paused
+            }
+            $afterPause = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)
+            if ($afterPause.Count -ne 1 -or ([guid]$afterPause[0].id).ToString('N') -ne $id) { throw 'Queue pause/resume changed the canonical QuickQueue item identity.' }
+            Write-Output 'Dashboard QuickQueue/selection and queue admission Resume/Pause UI/settings PASS using the isolated FakeTool source; real transfer pause/resume is not qualified.'
         }
         Capture-Dashboard 'dashboard-downloads'
         foreach ($page in @('Live','Other','Batch','History','Settings','Help','About')) {
@@ -618,17 +683,31 @@ try {
         if ($queueBeforeSwitch -ne $queueAfterSwitch) { throw 'Shell switches changed the persisted queue.' }
         $script:automationProcess.Refresh(); Write-Output "Indicative private bytes before/after switches: $memoryBefore / $($script:automationProcess.PrivateMemorySize64); not a GC-normalized leak proof."
         Invoke-NodeAction (Find-Node 'NavDownloads' $mainRoot) $mainRoot 'Invoke' | Out-Null
-        if (-not $script:automationProcess.CloseMainWindow()) { throw 'Dashboard close request failed.' }
-        if (-not $script:automationProcess.WaitForExit(2000)) {
-            $closing = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
-            $choice = @($closing.value | Where-Object rootId -ne $mainRoot) | Select-Object -First 1
-            if (-not $choice) { throw 'Dashboard work-aware close confirmation missing.' }
-            Invoke-NodeAction (Find-Node 'ShutdownExit' $choice.rootId) $choice.rootId 'Invoke' | Out-Null
-            if (-not $script:automationProcess.WaitForExit(15000)) { throw 'Dashboard did not close cleanly.' }
-        }
+        Close-DashboardProcess
         $profile = Get-Content -LiteralPath (Join-Path $dataRoot 'appearance.json') -Raw | ConvertFrom-Json
         if ($profile.interfaceMode -ne 1 -or $profile.schemaVersion -ne 2) { throw 'Dashboard interface preference was not persisted.' }
-        Write-Output "Dashboard native smoke PASS: all routes; $passes Classic/Modern switches; $Language/$Theme/$AppTextScale%; profile=$dataRoot"
+        if (Get-Process -Name ModernTubeDownloader -ErrorAction SilentlyContinue) { throw 'Another application instance is present before the owned-profile restart. No process was stopped.' }
+        # Preserve the owned profile and arguments; do not seed or rewrite preferences for this launch.
+        $script:automationProcess.Dispose(); $script:automationProcess = $null
+        $script:automationProcess = Start-Process -FilePath $app -ArgumentList $automationArguments -PassThru -WindowStyle Hidden
+        Wait-Bridge $script:automationProcess.Id $true
+        Wait-MainWindow $script:automationProcess
+        if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
+            if (-not [MtdAutomationWindowCloser]::PlaceWindow($script:automationProcess.MainWindowHandle, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)) { throw 'Could not resize the restarted dashboard window.' }
+            Confirm-OwnedWindowSize 'same-profile restart'
+        }
+        $instances = @(Get-Process -Name ModernTubeDownloader -ErrorAction SilentlyContinue)
+        if ($instances.Count -ne 1 -or $instances[0].Id -ne $script:automationProcess.Id) { throw 'Owned-profile restart did not leave exactly one owned application instance.' }
+        $roots = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
+        $mainRoot = $roots.value[0].rootId
+        Wait-Node 'NavBatch' $mainRoot 'Enabled' | Out-Null
+        $profile = Get-Content -LiteralPath (Join-Path $dataRoot 'appearance.json') -Raw | ConvertFrom-Json
+        if ($profile.interfaceMode -ne 1 -or $profile.schemaVersion -ne 2) { throw 'Owned-profile restart did not retain the Modern interface preference.' }
+        if (-not $DashboardFixture -and -not $DashboardEmptyFixture) { Wait-DashboardQueuePaused $true }
+        Capture-Dashboard 'dashboard-restarted'
+        Close-DashboardProcess
+        if (Get-Process -Name ModernTubeDownloader -ErrorAction SilentlyContinue) { throw 'An application instance remains after the owned-profile restart smoke. No unrelated process was stopped.' }
+        Write-Output "Dashboard native smoke PASS: all routes; $passes Classic/Modern switches; same-profile Modern restart with one owned instance and clean shutdown; $Language/$Theme/$AppTextScale%; profile=$dataRoot"
         return
     }
     if ($TraySmoke) {
@@ -850,13 +929,24 @@ try {
         $batchRoot = @($batchRoots.value | Where-Object rootId -ne $mainRoot) | Select-Object -First 1
         if ($InterfaceMode -eq 'ModernDashboard') { $batchRoot = @{ rootId = $mainRoot }; [void](Find-Node 'BatchView' $mainRoot) }
         if (-not $batchRoot) { throw 'Batch window root missing.' }
+        if ($InterfaceMode -eq 'ModernDashboard') {
+            # The same advanced controls are now behind the visible options action.
+            Invoke-NodeAction (Find-Node 'BatchOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            foreach ($id in @('BatchQuality', 'BatchContainer', 'BatchWorkers', 'BatchClearSelection')) { Wait-Node $id $mainRoot | Out-Null }
+            Invoke-NodeAction (Find-Node 'BatchOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Wait-Node 'BatchWorkers' $mainRoot 'NodeNotExposed' | Out-Null
+        }
         Invoke-NodeAction (Find-Node 'BatchFilePath' $batchRoot.rootId) $batchRoot.rootId 'SetValue' $batchFile | Out-Null
         Invoke-NodeAction (Find-Node 'BatchImport' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
         Wait-Node 'BatchEntryStatus3' $batchRoot.rootId | Out-Null
         if ($RealBatchSmoke) { foreach ($ordinal in @(1,2)) { Invoke-NodeAction (Find-Node "BatchSelect$ordinal" $batchRoot.rootId) $batchRoot.rootId 'Toggle' | Out-Null } }
         Invoke-NodeAction (Find-Node 'BatchAnalyze' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
         Wait-Node 'BatchAnalyze' $batchRoot.rootId 'Enabled' | Out-Null
-        if ($RealBatchSmoke) { Invoke-NodeAction (Find-Node 'BatchClearSelection' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null }
+        if ($RealBatchSmoke) {
+            if ($InterfaceMode -eq 'ModernDashboard') { Invoke-NodeAction (Find-Node 'BatchOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null }
+            Invoke-NodeAction (Find-Node 'BatchClearSelection' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+            if ($InterfaceMode -eq 'ModernDashboard') { Invoke-NodeAction (Find-Node 'BatchOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null }
+        }
         $batchTree = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$batchRoot.rootId,'--depth','12')
         if (($batchTree | ConvertTo-Json -Depth 40) -match '\[Batch\.') { throw 'Unlocalized batch text.' }
         Invoke-NodeAction (Find-Node 'BatchSelect1' $batchRoot.rootId) $batchRoot.rootId 'Toggle' | Out-Null
@@ -864,6 +954,11 @@ try {
         Wait-Node 'BatchAdd' $batchRoot.rootId 'Enabled' | Out-Null
         if ($CaptureVisual) {
             $bounds = if ($InterfaceMode -eq 'ModernDashboard') { (Find-Node 'MainWindow' $mainRoot).bounds } else { (Find-Node 'BatchWindow' $batchRoot.rootId).bounds }
+            if ($InterfaceMode -eq 'ModernDashboard') {
+                Start-Sleep -Milliseconds 250
+                $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationProcess.MainWindowHandle)
+                $bounds = @{ width=$size[0]; height=$size[1] }
+            }
             Add-Type -AssemblyName System.Drawing
             $picture = [Drawing.Bitmap]::new([int]$bounds.width,[int]$bounds.height); $drawing = [Drawing.Graphics]::FromImage($picture)
             try { Capture-OwnedBitmap $drawing ($InterfaceMode -ne 'ModernDashboard'); $capture = Join-Path $dataRoot 'batch-native.png'; $picture.Save($capture); Write-Output "Batch native capture: $capture" }
@@ -1386,7 +1481,12 @@ try {
         }
         function Save-LiveVisual([string]$phase, [string]$rootId = $mainRoot, [string]$windowId = 'MainWindow') {
             if (-not $CaptureVisual) { return }
-            $bounds = (Find-Node $windowId $rootId).bounds
+            if ($windowId -eq 'MainWindow') {
+                Start-Sleep -Milliseconds 250
+                $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationProcess.MainWindowHandle)
+                $bounds = @{ width=$size[0]; height=$size[1] }
+            }
+            else { $bounds = (Find-Node $windowId $rootId).bounds }
             Add-Type -AssemblyName System.Drawing
             $picture = [System.Drawing.Bitmap]::new([int]$bounds.width, [int]$bounds.height)
             $drawing = [System.Drawing.Graphics]::FromImage($picture)
@@ -1421,18 +1521,35 @@ try {
         Save-LiveVisual 'analyzed'
         Invoke-NodeAction (Find-Node 'LiveStartButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
         $activeLive = $RealLiveSmoke -or $SampleUrl -match '/live/active'
+        # The existing FakeTool wait behavior keeps a real canonical session in Recording
+        # long enough to capture and exercise Stop & Save; natural completion can be immediate.
+        $heldFakeLive = $CaptureVisual -and -not $RealLiveSmoke -and $SampleUrl -match '/live/active\?behavior=wait(?:&|$)'
         $store = Join-Path $dataRoot 'live-sessions.json'
         $deadline = [System.Diagnostics.Stopwatch]::StartNew()
+        $capturedFakeRecording = $false
         do {
             Start-Sleep -Milliseconds 100
             if (Test-Path -LiteralPath $store) {
                 $items = @(Read-LiveState $store)
-                if ($items.Count -eq 1 -and $items[0].state -eq $(if ($activeLive) { if ($RealLiveSmoke) { 3 } else { 6 } } else { 1 })) { break }
+                if ($CaptureVisual -and $activeLive -and -not $RealLiveSmoke -and -not $capturedFakeRecording -and $items.Count -eq 1 -and $items[0].state -eq 3) {
+                    if ($heldFakeLive) {
+                        # Let the existing one-second presentation timers observe the controlled session.
+                        Start-Sleep -Milliseconds 1500
+                        $beforeCapture = @(Read-LiveState $store)
+                        if ($beforeCapture.Count -ne 1 -or $beforeCapture[0].state -ne 3) { throw 'Held LIVE left Recording before capture.' }
+                    }
+                    Save-LiveVisual 'recording'
+                    $afterCapture = @(Read-LiveState $store)
+                    if ($afterCapture.Count -eq 1 -and $afterCapture[0].state -eq 3) { $capturedFakeRecording = $true }
+                }
+                if ($items.Count -eq 1 -and $items[0].state -eq $(if ($activeLive) { if ($RealLiveSmoke -or $heldFakeLive) { 3 } else { 6 } } else { 1 })) { break }
             }
         } while ($deadline.Elapsed.TotalSeconds -lt 25)
-        if ($RealLiveSmoke -and $items.Count -eq 1 -and $items[0].state -eq 3) {
-            Save-LiveVisual 'recording'
-            Start-Sleep -Seconds $LiveCaptureSeconds
+        if ($CaptureVisual -and $activeLive -and -not $RealLiveSmoke -and -not $capturedFakeRecording) {
+            throw 'The recording capture did not retain the Recording state before and after PrintWindow.'
+        }
+        if (($RealLiveSmoke -or $heldFakeLive) -and $items.Count -eq 1 -and $items[0].state -eq 3) {
+            if ($RealLiveSmoke) { Save-LiveVisual 'recording'; Start-Sleep -Seconds $LiveCaptureSeconds }
             $stopId = 'LiveStopSaveButton-' + ([Guid]$items[0].sessionId).ToString('N')
             Invoke-NodeAction (Find-Node $stopId $mainRoot) $mainRoot 'Invoke' | Out-Null
             $deadline.Restart()

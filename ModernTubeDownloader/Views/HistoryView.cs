@@ -161,6 +161,7 @@ internal sealed partial class HistoryView : UserControl
         var width = Math.Max(dashboard ? 320 : 520, list.DisplayRectangle.Width - 4);
         foreach (var card in cards)
             card.Width = width;
+        if (dashboard) LayoutDashboardTableHeading(width);
     }
 
     private void ApplyLocalization()
