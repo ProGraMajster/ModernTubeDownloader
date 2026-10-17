@@ -14,6 +14,7 @@ public static class AppThemeTokens
     public const string Background = "App.Background";
     public const string Surface = "App.Surface";
     public const string SurfaceSecondary = "App.SurfaceSecondary";
+    public const string RowSelected = "App.RowSelected";
     public const string SurfaceHover = "App.SurfaceHover";
     public const string Border = "App.Border";
     public const string TextPrimary = "App.TextPrimary";
@@ -47,6 +48,9 @@ public sealed class AppAppearanceService : IDisposable
     private bool initialized;
     private readonly AppearanceProfileStore? profiles;
     public AppearanceProfile Profile { get; private set; } = new();
+    private bool classicRecovery;
+    public AppInterfaceMode InterfaceMode => classicRecovery ? AppInterfaceMode.Classic : Profile.InterfaceMode;
+    public void ForceClassicForSession() { classicRecovery = true; if (initialized) ApplyCurrent(false); }
 
     public AppAppearanceService(SettingsService settings, IAppLogger logger, string? profileFile = null)
     {
@@ -136,7 +140,7 @@ public sealed class AppAppearanceService : IDisposable
 
     private void Apply(ThemeVariant variant, bool animated)
     {
-        var definition = variant == ThemeVariant.Dark ? CreateDarkTheme() : CreateLightTheme();
+        var definition = InterfaceMode == AppInterfaceMode.ModernDashboard ? CreateDashboardTheme(variant) : variant == ThemeVariant.Dark ? CreateDarkTheme() : CreateLightTheme();
         if (Profile.Global.Theme == AppearanceTheme.Custom)
         {
             var mapping = new Dictionary<string, string[]> {
@@ -235,6 +239,21 @@ public sealed class AppAppearanceService : IDisposable
             navigationHover: "#202B3C",
             navigationSelected: "#293A63");
 
+    private static ThemeDefinition CreateDashboardTheme(ThemeVariant variant)
+    {
+        var dark = variant == ThemeVariant.Dark;
+        var theme = CreateTheme(dark ? DarkThemeId : LightThemeId, "Modern Dashboard", dark ? BuiltInThemes.DarkThemeId : BuiltInThemes.LightThemeId,
+            variant, dark ? "#0D161E" : "#F2F5F8", dark ? "#141F28" : "#FAFBFD", dark ? "#1B2A36" : "#E9EFF5",
+            dark ? "#263A4B" : "#DCE8F4", dark ? "#293A49" : "#CBD7E3", dark ? "#F2F6FA" : "#172637",
+            dark ? "#AEB9C7" : "#4F6378", dark ? "#91A1B5" : "#53677B", "#076DE2", "#0872E4", "#0965C7",
+            dark ? "#38D996" : "#087E52", dark ? "#FFB548" : "#926000", dark ? "#FF5D6C" : "#BA2438", dark ? "#48A6FF" : "#0965C7",
+            dark ? "#0F1925" : "#E7EEF6", dark ? "#203249" : "#D8E5F3", dark ? "#173E6C" : "#CFE3FC");
+        Set(theme, AppThemeTokens.AccentText, "#FFFFFF"); Set(theme, ThemeTokens.Colors.PrimaryText.Name, "#FFFFFF");
+        Set(theme, "Legacy.ForegroundColorOnAccent", dark ? "#F2F6FA" : "#172637");
+        Set(theme, "Legacy.AccentColor2", "#076DE2");
+        return theme;
+    }
+
     private static ThemeDefinition CreateTheme(
         string id,
         string name,
@@ -315,6 +334,7 @@ public sealed class AppAppearanceService : IDisposable
         Set(theme, AppThemeTokens.Navigation, navigation);
         Set(theme, AppThemeTokens.NavigationHover, navigationHover);
         Set(theme, AppThemeTokens.NavigationSelected, navigationSelected);
+        Set(theme, AppThemeTokens.RowSelected, variant == ThemeVariant.Dark ? "#172B42" : "#DDEBFA");
         Set(theme, AppThemeTokens.NavigationSelectedText, variant == ThemeVariant.Dark ? "#FFFFFF" : textPrimary);
 
         theme.Corners["Card"] = 16;

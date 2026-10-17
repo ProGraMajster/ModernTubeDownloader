@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using ModernFormsNext;
 using ModernFormsNext.Animations;
+using ModernFormsNext.Drawing;
 using SkiaSharp;
 
 namespace ModernTubeDownloader.Theming;
@@ -18,16 +19,32 @@ internal static class AppUi
     public static void BindBackground(Control control, string token = AppThemeTokens.Background)
     {
         var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
-        state.BackgroundToken = token;
+        state.BackgroundToken = token; state.Gradient = null;
         state.Refresh();
     }
 
+    public static void BindGradient(Control control, string first, string second)
+    {
+        var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
+        state.Gradient = (first, second); state.Refresh();
+    }
+    public static void ClearGradient(Control control)
+    {
+        if (!ThemeBindings.TryGetValue(control, out var state) || state.Gradient is null) return;
+        state.Gradient = null; control.BackgroundBrush = null; state.Refresh();
+    }
     public static void BindForeground(Control control, string token = AppThemeTokens.TextPrimary)
     {
         AppTypography.BindDefault(control);
         var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
         state.ForegroundToken = token;
         state.Refresh();
+    }
+
+    public static void BindBorder(Control control, string token)
+    {
+        var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
+        state.BorderToken = token; state.Refresh();
     }
 
     public static void BindInteractiveSurface(Control control, string normalToken, string hoverToken)
@@ -150,7 +167,7 @@ internal static class AppUi
 
     public static Label Heading(string text, float size = 22f)
     {
-        var label = new Label
+        var label = new DashboardLabel
         {
             Text = text,
             AutoEllipsis = false
@@ -163,7 +180,7 @@ internal static class AppUi
 
     public static Label Muted(string text = "")
     {
-        var label = new Label
+        var label = new DashboardLabel
         {
             Text = text,
             AutoEllipsis = false,
@@ -195,6 +212,9 @@ internal static class AppUi
 
     private sealed class ThemeBindingState
     {
+        public (string First, string Second)? Gradient;
+        private LinearGradientBrush? gradientBrush;
+        private (SKColor, SKColor)? gradientColors;
         private readonly WeakReference<Control> target;
         private readonly EventHandler<ThemeChangedEventArgs> handler;
 
@@ -203,10 +223,18 @@ internal static class AppUi
             target = new WeakReference<Control>(control);
             handler = ThemeChanged;
             ThemeManager.Current.ThemeChanged += handler;
+            control.Disposed += TargetDisposed;
+        }
+
+        private void TargetDisposed(object? sender, EventArgs e)
+        {
+            ThemeManager.Current.ThemeChanged -= handler;
+            if (sender is Control control) control.Disposed -= TargetDisposed;
         }
 
         public string? BackgroundToken { get; set; }
         public string? ForegroundToken { get; set; }
+        public string? BorderToken { get; set; }
         public ButtonVariant? ButtonVariant { get; set; }
         public bool IsComboBox { get; set; }
         public bool IsCard { get; set; }
@@ -217,6 +245,7 @@ internal static class AppUi
             if (!target.TryGetTarget(out var control))
                 return;
             if (IsCard) control.Style.Border.Radius = AppearancePresentation.Current.Global.CornerRadius;
+            if (BorderToken is not null) { control.Style.Border.Width = 1; control.Style.Border.Color = GetColor(BorderToken); }
             if (control is Button effectsButton)
             {
                 if (effectsButton.Ripple is { } ripple) ripple.Enabled = AppearancePresentation.Current.Global.Animations;
@@ -243,6 +272,16 @@ internal static class AppUi
                 ApplySurfaceState(control.StyleFocused, surface.Hover);
                 ApplySurfaceState(control.StylePressed, surface.Hover);
                 ApplySurfaceState(control.StyleDisabled, surface.Normal);
+            }
+            if (Gradient is { } gradient)
+            {
+                var first = GetColor(gradient.First); var second = GetColor(gradient.Second);
+                if (gradientColors != (first, second))
+                {
+                    gradientColors = (first, second); gradientBrush = new LinearGradientBrush();
+                    gradientBrush.GradientStops.Add(new GradientStop(first, 0)); gradientBrush.GradientStops.Add(new GradientStop(second, 1));
+                }
+                control.BackgroundBrush = gradientBrush;
             }
             control.Invalidate();
         }

@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][int]$ProcessId,
     [Parameter(Mandatory)][string]$DataRoot,
     [string]$ExpectedVersion = '1.2.0',
-    [switch]$CheckNoUpdate
+    [switch]$CheckNoUpdate,
+    [switch]$CheckBothInterfaces
 )
 # Run in Windows PowerShell: the OS UIA client uses the .NET Framework assemblies.
 # This is an external client of the production accessibility provider, not a Debug bridge.
@@ -100,6 +101,17 @@ do {
 } while ($timer.Elapsed.TotalSeconds -lt 15)
 if ($profile.Typography.AppTextScale -ne 125) { throw 'Published text scaling was not persisted.' }
 Invoke-Element 'AppearanceTextReset'
+if ($CheckBothInterfaces) {
+    Invoke-Element 'InterfaceModernDashboard'
+    [void](Find-Element 'NavBatch')
+    foreach ($page in @('Downloads','Live','Other','Batch','History','Settings','Help','About')) { Invoke-Element ('Nav' + $page) }
+    Invoke-Element 'NavSettings'
+    Invoke-Element 'SettingsCategoryPersonalization'
+    Invoke-Element 'InterfaceClassic'
+    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'NavBatch')
+    if ($root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)) { throw 'Published Classic switch retained Modern chrome.' }
+    Write-Output 'Published UIA: both interfaces and all Modern routes PASS; one production process.'
+}
 Invoke-Element 'NavDownloads'
 $owned.Refresh()
 if ($owned.HasExited) { throw 'Published app exited during UI smoke.' }

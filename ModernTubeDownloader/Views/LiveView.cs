@@ -11,7 +11,7 @@ namespace ModernTubeDownloader.Views;
 
 internal sealed record LiveNavigationRequest(string SourceUrl, VideoMetadata? Metadata, MediaAvailabilityKind Kind);
 
-internal sealed class LiveView : UserControl
+internal sealed partial class LiveView : UserControl
 {
     private readonly AppServices services;
     private readonly LocalizationService text;
@@ -20,7 +20,7 @@ internal sealed class LiveView : UserControl
     private readonly Label statistics = AppUi.Muted();
     private readonly Panel analysis = new();
     private readonly TextBox url = new() { AccessibleAutomationId = "LiveUrlInput" };
-    private readonly Button analyze = new() { AccessibleAutomationId = "LiveAnalyzeButton" };
+    private readonly Button analyze = new DashboardButton() { AccessibleAutomationId = "LiveAnalyzeButton" };
     private readonly Label title = AppUi.Heading(string.Empty, 14);
     private readonly Label message = AppUi.Muted();
     private readonly ComboBox quality = new() { AccessibleAutomationId = "LiveQualitySelector" };
@@ -76,12 +76,14 @@ internal sealed class LiveView : UserControl
     { url.Text = sourceUrl; await AnalyzeAsync(sourceUrl); }
     public void Present(LiveNavigationRequest request)
     {
+        dashboardSubmitted = false;
         url.Text = request.SourceUrl; metadata = request.Metadata; availability = request.Kind;
         editingId = null; PopulateAnalysis();
     }
 
     private async Task AnalyzeAsync(string sourceUrl)
     {
+        dashboardSubmitted = false;
         analysisCancellation?.Cancel(); analysisCancellation?.Dispose();
         analysisCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         var current = analysisCancellation;
@@ -150,6 +152,7 @@ internal sealed class LiveView : UserControl
             else services.Live.Add(url.Text, metadata, selected.Value.Id, policy, availability == MediaAvailabilityKind.Upcoming);
             message.Text = text[availability == MediaAvailabilityKind.Upcoming ? "Live.WaitingQueued" : "Live.RecordingQueued"];
             editingId = null; start.Enabled = false;
+            if (dashboard) { dashboardSubmitted = true; LayoutPage(); }
         }
         catch (Exception ex)
         { services.Logger.Error("Could not add or edit a LIVE session.", ex); message.Text = text["Downloads.AlreadyQueued"]; }
@@ -157,6 +160,7 @@ internal sealed class LiveView : UserControl
 
     private void Edit(LiveSession session)
     {
+        dashboardSubmitted = false;
         editingId = session.Id; availability = MediaAvailabilityKind.Upcoming; metadata = null;
         url.Text = session.SourceUrl; PopulateAnalysis(); editingId = session.Id;
         title.Text = session.Title;
@@ -188,7 +192,8 @@ internal sealed class LiveView : UserControl
         {
             if (!cards.TryGetValue(session.Id, out var card))
             {
-                card = new LiveSessionCard(services, Edit); cards.Add(session.Id, card);
+                card = new LiveSessionCard(services, Edit); card.SelectionRequested += (_, value) => SelectSession(value); cards.Add(session.Id, card);
+                card.SetDashboard(dashboard);
 #if DEBUG
                 card.RegisterDetailsForAutomation = RegisterDetailsForAutomation;
 #endif
@@ -202,6 +207,8 @@ internal sealed class LiveView : UserControl
     }
     private void LayoutPage()
     {
+        if (dashboard) { LayoutDashboard(); return; }
+        heading.Visible = statistics.Visible = true;
         var width = Math.Max(480, scroll.ClientSize.Width - 56);
         var origin = scroll.DisplayRectangle.Location;
         heading.SetBounds(origin.X + 28, origin.Y + 16, width, AppTypography.TextHeight(38));
@@ -266,7 +273,7 @@ internal sealed class LiveView : UserControl
     }
 }
 
-internal sealed class LiveSessionCard : Panel
+internal sealed partial class LiveSessionCard : Panel
 {
     internal const int CardHeight = 226;
     private readonly AppServices services;
@@ -274,15 +281,16 @@ internal sealed class LiveSessionCard : Panel
     private readonly Label title = AppUi.Heading(string.Empty, 13);
     private readonly Label state = AppUi.Muted();
     private readonly Label facts = AppUi.Muted();
-    private readonly Button primary = new();
-    private readonly Button secondary = new();
-    private readonly Button details = new();
-    private readonly Button folder = new();
+    private readonly Button primary = new DashboardButton();
+    private readonly Button secondary = new DashboardButton();
+    private readonly Button details = new DashboardButton();
+    private readonly Button folder = new DashboardButton();
     private LiveSession? current;
     private readonly PictureBox thumbnail = new() { SizeMode = PictureBoxSizeMode.Zoom };
     private string? imageUrl;
     private readonly CancellationTokenSource imageLifetime = new();
     private bool imageDisposed;
+    private bool dashboardSelectionWired;
 #if DEBUG
     internal Func<Form, IDisposable?>? RegisterDetailsForAutomation { get; set; }
 #endif
@@ -296,6 +304,9 @@ internal sealed class LiveSessionCard : Panel
         primary.Click += (_, _) => Act(); secondary.Click += (_, _) => Secondary(); details.Click += async (_, _) => await ShowDetailsAsync();
         folder.Click += (_, _) => { if (current?.Parts.LastOrDefault() is { } path && Directory.Exists(Path.GetDirectoryName(path)))
             Process.Start(new ProcessStartInfo("explorer.exe", Path.GetDirectoryName(path)!) { UseShellExecute = true }); };
+        Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
+        title.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
+        thumbnail.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
         SizeChanged += (_, _) => LayoutCard(); LayoutCard();
         AppTypography.RegisterLayout(this, () => { LayoutCard(); if (current is not null) UpdateSession(current); });
     }
@@ -320,7 +331,7 @@ internal sealed class LiveSessionCard : Panel
         facts.Text = string.Join(" • ", pieces) + Environment.NewLine + timingText +
             (countdown is { } next ? text.Get("Live.NextCheck", Math.Max(0, (int)(next - DateTimeOffset.UtcNow).TotalSeconds)) : session.FailureMessageKey is { } failureKey ? text[failureKey] : text[$"Quality.{session.QualityPresetId}"]);
         AppUi.BindBackground(this, appearance.EmphasizeActive && session.IsActive ? AppThemeTokens.NavigationSelected : AppThemeTokens.Surface);
-        if (appearance.ThumbnailSize != AppearanceSize.None && imageUrl != session.ThumbnailUrl) { imageUrl = session.ThumbnailUrl; _ = LoadImageAsync(imageUrl); }
+        if ((dashboard || appearance.ThumbnailSize != AppearanceSize.None) && imageUrl != session.ThumbnailUrl) { imageUrl = session.ThumbnailUrl; _ = LoadImageAsync(imageUrl); }
         primary.Visible = session.IsActive || session.CanResume || session.State == LiveSessionState.WaitingForLive;
         primary.Text = text[session.IsActive ? "Live.StopAndSave" : session.State == LiveSessionState.WaitingForLive ? "Live.Edit" : "Live.Resume"];
         primary.AccessibleAutomationId = (session.IsActive ? "LiveStopSaveButton-" : session.State == LiveSessionState.WaitingForLive ? "LiveEditButton-" : "LiveResumeButton-") + session.Id.ToString("N");
@@ -334,7 +345,7 @@ internal sealed class LiveSessionCard : Panel
     }
     private async Task LoadImageAsync(string? expected)
     {
-        try { var image = await services.Thumbnails.GetAsync(expected, imageLifetime.Token); if (!imageDisposed && imageUrl == expected) thumbnail.Image = image; }
+        try { var image = await services.Thumbnails.GetAsync(expected, imageLifetime.Token); if (!imageDisposed && imageUrl == expected) { thumbnail.Image = image; if (dashboard) LayoutCard(); } }
         catch (OperationCanceledException) { }
         catch (Exception ex) { services.Logger.Error("LIVE thumbnail unavailable.", ex); }
     }
@@ -385,6 +396,17 @@ internal sealed class LiveSessionCard : Panel
     }
     private void LayoutCard()
     {
+        if (dashboard)
+        {
+            LayoutDashboardCard();
+            if (!dashboardSelectionWired && dashboardChannel is not null && dashboardTiming is not null && dashboardState is not null)
+            {
+                dashboardSelectionWired = true;
+                foreach (var child in new Control[] { dashboardChannel, dashboardTiming, dashboardState })
+                    child.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
+            }
+            return;
+        }
         var appearance = AppearancePresentation.Current.Live;
         var compactWaiting = appearance.CompactWaiting && current?.State == LiveSessionState.WaitingForLive;
         var gap = appearance.CardDensity == AppearanceDensity.Compact ? 4 : appearance.CardDensity == AppearanceDensity.Comfortable ? 16 : 8;

@@ -10,6 +10,9 @@ public static class AppTypography
 {
     private sealed record Binding(float Size, FontStyle Style);
     private static readonly ConditionalWeakTable<Control, Binding> bindings = new();
+    private static readonly ConditionalWeakTable<Control, int?[]> classicStateSizes = new();
+    private sealed record Presentation(bool Dashboard);
+    private static readonly ConditionalWeakTable<Control, Presentation> presentationRoots = new();
     private static readonly List<WeakReference<Control>> targets = [];
     private static readonly Dictionary<int, Action> layouts = [];
     private sealed record RowFrame(int Top, int Height, int AppliedTop, int AppliedHeight);
@@ -23,18 +26,55 @@ public static class AppTypography
     public static Font Font(AppTextToken token) => Font(LogicalSize(token), token is AppTextToken.BodyStrong or AppTextToken.Subtitle or AppTextToken.Title or AppTextToken.Hero ? FontStyle.Bold : FontStyle.Regular);
     public static void Bind(Control control, float size, FontStyle style = FontStyle.Regular)
     {
-        if (!bindings.TryGetValue(control, out _)) { targets.Add(new(control)); control.Disposed += Remove; }
+        if (!bindings.TryGetValue(control, out _)) { targets.Add(new(control)); control.Disposed += Remove; control.ParentChanged += Reapply; }
         bindings.Remove(control); bindings.Add(control, new(size, style)); Apply(control, new(size, style));
     }
     public static void Bind(Control control, AppTextToken token) => Bind(control, LogicalSize(token), token is AppTextToken.BodyStrong or AppTextToken.Subtitle or AppTextToken.Title or AppTextToken.Hero ? FontStyle.Bold : FontStyle.Regular);
     public static void BindDefault(Control control)
     { if (!bindings.TryGetValue(control, out _)) Bind(control, 10.5f); }
-    private static void Remove(object? sender, EventArgs e) { if (sender is Control control) bindings.Remove(control); }
+    private static void Reapply(object? sender, EventArgs e) { if (sender is Control c && bindings.TryGetValue(c, out var binding)) Apply(c, binding); }
+    private static void Remove(object? sender, EventArgs e) { if (sender is Control control) { control.ParentChanged -= Reapply; bindings.Remove(control); } }
     private static void Apply(Control control, Binding binding)
     {
-        control.Font = Font(binding.Size, binding.Style);
-        foreach (var style in new[] { control.Style, control.StyleHover, control.StyleFocused, control.StylePressed, control.StyleDisabled }) style.TextFont = control.Font;
+        var factor = 1f;
+        for (Control? root = control; root is not null; root = root.Parent)
+            if (presentationRoots.TryGetValue(root, out var presentation)) { factor = presentation.Dashboard ? 1.42f : 1; break; }
+        var styles = new[] { control.Style, control.StyleHover, control.StyleFocused, control.StylePressed, control.StyleDisabled };
+        var dashboard = IsDashboard(control);
+        if (dashboard) classicStateSizes.GetValue(control, _ => styles.Select(s => s.FontSize).ToArray());
+        control.Font = Font(binding.Size * factor, binding.Style);
+        classicStateSizes.TryGetValue(control, out var savedSizes);
+        for (var index = 0; index < styles.Length; index++)
+        {
+            styles[index].TextFont = control.Font;
+            if (dashboard) styles[index].FontSize = (int)Math.Round(binding.Size * factor * Scale);
+            else if (index > 0 && savedSizes is not null) styles[index].FontSize = savedSizes[index];
+        }
+        if (!dashboard) classicStateSizes.Remove(control);
         control.Invalidate();
+    }
+    internal static bool IsDashboard(Control control)
+    {
+        for (Control? root = control; root is not null; root = root.Parent)
+            if (presentationRoots.TryGetValue(root, out var p)) return p.Dashboard;
+        return false;
+    }
+    internal static Action CaptureRecipes(Control root)
+    {
+        var recipes = new List<(Control Target, Binding Recipe)>();
+        void Visit(Control c) { if (bindings.TryGetValue(c, out var recipe)) recipes.Add((c, recipe)); foreach (var child in c.Controls) Visit(child); }
+        Visit(root);
+        return () => { foreach (var (target, recipe) in recipes) if (bindings.TryGetValue(target, out _)) Bind(target, recipe.Size, recipe.Style); };
+    }
+    internal static void SetDashboardPresentation(Control root, bool dashboard)
+    {
+        presentationRoots.Remove(root); presentationRoots.Add(root, new(dashboard));
+        RefreshPresentation(root);
+    }
+    private static void RefreshPresentation(Control root)
+    {
+        if (bindings.TryGetValue(root, out var binding)) Apply(root, binding);
+        foreach (var child in root.Controls) RefreshPresentation(child);
     }
     public static void SetScale(int percent)
     {

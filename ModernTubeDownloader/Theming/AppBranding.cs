@@ -10,7 +10,11 @@ internal static class AppBranding
     private static readonly Lazy<SKBitmap> NativeIcon = new(LoadIcon);
     private static readonly Lazy<SKBitmap> TitleBarIcon = new(LoadTitleBarIcon);
 
+    public static string Version => typeof(AppBranding).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "";
+
     public static SKBitmap Icon => NativeIcon.Value;
+    public static string SourceCommit => typeof(AppBranding).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
+        .OfType<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(attribute => attribute.Key == "SourceCommit")?.Value ?? "—";
 
     public static string ExportNotificationIcon(string dataDirectory)
     {

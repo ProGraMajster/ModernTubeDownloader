@@ -47,6 +47,7 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
             throw new ExternalProcessException($"Could not start {request.FileName}: {ex.Message}", null, ex);
         }
 
+        using var activity = ProcessActivity.Track(process.Id, request.FileName);
         var stdoutTask = ReadLinesAsync(process.StandardOutput, standardOutput, request.StandardOutputLine);
         var stderrTask = ReadLinesAsync(process.StandardError, standardError, request.StandardErrorLine);
         using var cancellationRegistration = cancellationToken.Register(() => TryKillProcessTree(process));
