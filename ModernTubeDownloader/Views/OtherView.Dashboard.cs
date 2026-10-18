@@ -83,7 +83,7 @@ internal sealed partial class OtherView
 
     private void LayoutDashboard()
     {
-        AutoScroll = true; var origin = DisplayRectangle.Location; var width = Math.Max(560, ClientSize.Width - 36);
+        AutoScroll = true; var origin = DisplayRectangle.Location; var width = Math.Max(1, DisplayRectangle.Width - 36);
         heading.SetBounds(18 + origin.X, 20 + origin.Y, width, AppTypography.TextHeight(48));
         subtitle.SetBounds(heading.Left, heading.Bottom + 4, width, AppTypography.TextHeight(28));
         var inline = width >= AppTypography.TextHeight(960); var left = inline ? width * 2 / 3 - 12 : width;
@@ -114,13 +114,21 @@ internal sealed partial class OtherView
                 }
                 moduleWorkflows.Add(card, workflow); card.Controls.Add(workflow);
             }
-            workflow.Visible = true; workflow.SetBounds(24, module.Description.Bottom + 20, card.Width - 48, AppTypography.TextHeight(68));
-            var stepWidth = (workflow.Width - 32) / 3;
+            workflow.Visible = true; workflow.SetBounds(24, module.Description.Bottom + 20, card.Width - 48, 1);
+            var stepColumns = workflow.Width >= AppTypography.TextHeight(570) ? 3 : 1;
+            var stepWidth = (workflow.Width - 24 - (stepColumns - 1) * 12) / stepColumns;
+            var stepHeight = 0;
+            foreach (var step in workflow.Controls.Cast<Label>())
+            {
+                step.Text = $"{workflow.Controls.IndexOf(step) + 1}. {services.Localization[(string)step.Tag!]}";
+                stepHeight = Math.Max(stepHeight, DashboardVisual.LabelHeight(step, stepWidth, 3));
+            }
             for (var stepIndex = 0; stepIndex < workflow.Controls.Count; stepIndex++)
             {
-                var step = workflow.Controls[stepIndex]; step.Text = $"{stepIndex + 1}. {services.Localization[(string)step.Tag!]}";
-                step.SetBounds(12 + stepIndex * (stepWidth + 4), 12, stepWidth - 8, workflow.Height - 24);
+                workflow.Controls[stepIndex].SetBounds(12 + stepIndex % stepColumns * (stepWidth + 12),
+                    12 + stepIndex / stepColumns * (stepHeight + 10), stepWidth, stepHeight);
             }
+            workflow.Height = workflow.Controls.Max(step => step.Bottom) + 12;
             module.Open.Text = services.Localization["Dashboard.OpenBatch"];
             DashboardVisual.Button(module.Open, true); DashboardVisual.Icon(module.Open, AppIconKind.Clipboard);
             var actionWidth = Math.Min(card.Width - 48, DashboardVisual.ActionWidth(module.Open, true));
@@ -130,22 +138,31 @@ internal sealed partial class OtherView
         }
         tools.Height = Math.Max(AppTypography.TextHeight(220), toolHeight);
         links!.SetBounds(tools.Left, tools.Bottom + 12, left, 1);
-        var linkColumns = Math.Clamp(left / AppTypography.TextHeight(250), 1, 3);
+        var linkColumns = Math.Clamp(left / AppTypography.TextHeight(330), 1, 2);
         var itemWidth = (left - (linkColumns - 1) * 12) / linkColumns;
-        var tileHeight = AppTypography.TextHeight(154);
+        var tileHeight = AppTypography.TextHeight(112);
         for (var i = 0; i < linkActions.Count; i++)
         {
             var button = linkActions[i]; button.AccessibleName = services.Localization["Nav." + button.Tag]; button.Text = "";
             button.SetBounds((i % linkColumns) * (itemWidth + 12), (i / linkColumns) * (tileHeight + 12), itemWidth, tileHeight); DashboardVisual.Button(button);
             button.Controls[0].SetBounds(18, 18, 28, 28);
-            button.Controls[1].Text = button.AccessibleName; button.Controls[1].SetBounds(18, 56, itemWidth - 36, AppTypography.TextHeight(28));
-            button.Controls[2].Text = services.Localization["Dashboard.Route" + button.Tag]; button.Controls[2].SetBounds(18, button.Controls[1].Bottom + 4, itemWidth - 36, AppTypography.TextHeight(48));
+            button.Controls[1].Text = button.AccessibleName; button.Controls[1].SetBounds(62, 14, itemWidth - 80, AppTypography.TextHeight(28));
+            button.Controls[2].Text = services.Localization["Dashboard.Route" + button.Tag];
+            button.Controls[2].SetBounds(62, button.Controls[1].Bottom + 4, itemWidth - 80,
+                DashboardVisual.LabelHeight((Label)button.Controls[2], itemWidth - 80, 3));
         }
         links.Height = linkActions.Max(button => button.Bottom);
         var rightX = inline ? tools.Right + 12 : heading.Left; var rightWidth = inline ? width - left - 12 : width;
         recent.SetBounds(rightX, inline ? tools.Top : links.Bottom + 16, rightWidth, recent.Height); DashboardStyle.Card(recent);
-        foreach (var child in recent.Controls) child.Width = Math.Max(1, rightWidth - 48);
-        foreach (var button in recent.Controls.OfType<Button>()) DashboardVisual.Button(button);
+        var recentTop = 16;
+        foreach (var child in recent.Controls)
+        {
+            var childWidth = Math.Max(1, rightWidth - 48);
+            if (child is Button button) { DashboardVisual.Button(button); button.AutoEllipsis = true; button.AccessibleName = button.Text; }
+            var childHeight = child is Label label ? DashboardVisual.LabelHeight(label, childWidth, 4) : AppTypography.TextHeight(38);
+            child.SetBounds(24, recentTop, childWidth, childHeight); recentTop = child.Bottom + 10;
+        }
+        recent.Height = recentTop + 10;
         if (quick is null) return;
         quick.SetBounds(rightX, recent.Bottom + 16, rightWidth, 1);
         quickTitle!.Text = services.Localization["Dashboard.QuickActions"]; quickTitle.SetBounds(16, 14, rightWidth - 32, AppTypography.TextHeight(30));

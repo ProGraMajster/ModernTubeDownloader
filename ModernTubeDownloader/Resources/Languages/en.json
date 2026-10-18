@@ -888,6 +888,7 @@
   "Dashboard.HelpBody": "Paste a supported media URL and analyze it or add it to the queue. LIVE recordings have their own page. Batch Import prepares TXT, CSV and JSON lists using the same queue.\n\nChoose the interface in Settings → Personalization. Start with --classic-ui to recover access using Classic.",
   "Dashboard.Repository": "Repository and documentation",
   "Dashboard.Statistics": "Statistics",
+  "Dashboard.ImportResults": "Parsing results",
   "Dashboard.LiveStatistics": "LIVE statistics",
   "Dashboard.Counts": "Downloading     {0}\nQueued              {1}\nCompleted       {2}\nErrors                  {3}",
   "Dashboard.LiveCounts": "Recording          {0}\nScheduled          {1}\nCompleted         {2}\nRecorded      {3}",

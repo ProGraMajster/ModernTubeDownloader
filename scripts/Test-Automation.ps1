@@ -19,9 +19,12 @@ param(
     [switch]$ScrollProbe,
     [switch]$CaptureVisual,
     [switch]$DashboardSmoke,
+    [switch]$DashboardLayoutSmoke,
+    [switch]$DashboardTransferSmoke,
     [switch]$DashboardSwitchStress,
     [switch]$DashboardFixture,
     [switch]$DashboardVisualFixture,
+    [ValidateRange(5, 1000)][int]$DashboardFixtureCount = 100,
     [switch]$DashboardEmptyFixture,
     [switch]$ClassicUiRecovery,
     [switch]$QualityDropdownSmoke,
@@ -66,6 +69,9 @@ $ErrorActionPreference = 'Stop'
 if ($ClassicUiRecovery) { $DashboardSmoke = $true }
 if ($DashboardVisualFixture) { $DashboardFixture = $true; $DashboardSmoke = $true }
 if ($DashboardEmptyFixture) { $DashboardSmoke = $true }
+if ($DashboardLayoutSmoke) { $DashboardSmoke = $true }
+$previousFakeDownloadDelay = $env:MTD_FAKE_DOWNLOAD_DELAY_MS
+if ($DashboardTransferSmoke) { $DashboardSmoke = $true; $env:MTD_FAKE_DOWNLOAD_DELAY_MS = '10000' }
 if ($DashboardSmoke) { $InterfaceMode = 'ModernDashboard' }
 if (Get-Process -Name ModernTubeDownloader -ErrorAction SilentlyContinue) {
     throw 'Close the existing MTD instance (including other QA sessions) before starting an isolated smoke. No process was stopped.'
@@ -425,7 +431,7 @@ if ($DashboardEmptyFixture) { '[]' | Set-Content -LiteralPath (Join-Path $dataRo
 if ($QueueScrollRepro -or $CrashStress -or $DashboardFixture) {
     $seededQueue = @()
     $seededHistory = @()
-    $fixtureCount = if ($DashboardFixture) { 100 } else { 15 }
+    $fixtureCount = if ($DashboardFixture) { $DashboardFixtureCount } else { 15 }
     for ($index = 1; $index -le $fixtureCount; $index++) {
         $itemId = [Guid]::NewGuid()
         $seededQueue += @{
@@ -550,7 +556,8 @@ try {
         $seededQueue | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Encoding utf8
     }
     $automationArguments = @('--automation'); if ($ClassicUiRecovery) { $automationArguments += '--classic-ui' }
-    $script:automationProcess = Start-Process -FilePath $app -ArgumentList $automationArguments -PassThru -WindowStyle Hidden
+    $script:automationProcess = Start-Process -FilePath $app -ArgumentList $automationArguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $dataRoot 'automation-stderr.log')
+    Write-Output "Owned automation profile: $dataRoot"
     Wait-Bridge $script:automationProcess.Id $true
     Wait-MainWindow $script:automationProcess
     if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
@@ -578,6 +585,25 @@ try {
             finally { $graphics.Dispose(); $bitmap.Dispose() }
             $snapshot = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
             $snapshot | ConvertTo-Json -Depth 60 | Set-Content -LiteralPath (Join-Path $dataRoot ($name + '-tree.json')) -Encoding utf8
+            foreach ($pane in @($snapshot.nodes | Where-Object { $_.node.automationId -eq 'DashboardInspector' })) {
+                if ($pane.node.scrollInfo.horizontal.isScrollable) { throw "Horizontal inspector overflow in $name (including empty state)." }
+            }
+            if ($DashboardLayoutSmoke -and $name -match '^(inspector-|analysis-)') {
+                foreach ($pane in @($snapshot.nodes | Where-Object { $_.node.automationId -eq 'DashboardInspector' })) {
+                    if ($pane.node.scrollInfo.horizontal.isScrollable) { throw "Horizontal inspector overflow in $name." }
+                    $right = $pane.node.scrollInfo.viewportBounds.right
+                    foreach ($field in @($snapshot.nodes | Where-Object { $_.node.automationId -match '^Inspector(Quality|Container|RangeMode|RangeStart|RangeEnd|ApplyOptions)$' })) {
+                        if ($field.node.bounds.x + $field.node.bounds.width -gt $right) { throw "Clipped inspector field $($field.node.automationId) in $name." }
+                    }
+                }
+                Write-Output "Native geometry PASS ${name}: inspector has no horizontal overflow; exposed option fields fit its viewport."
+                foreach ($field in @($snapshot.nodes | Where-Object { $_.node.automationId -match '^VideoRange(Mode|Start|End)$' })) {
+                    $parent = @($snapshot.nodes | Where-Object { $_.node.runtimeId -eq $field.node.parentRuntimeId }) | Select-Object -First 1
+                    if (-not $parent -or $parent.node.bounds.height -le 0 -or $field.node.bounds.y + $field.node.bounds.height -gt $parent.node.bounds.y + $parent.node.bounds.height) {
+                        throw "Analysis range field $($field.node.automationId) is clipped by its parent in $name."
+                    }
+                }
+            }
         }
         function Wait-DashboardQueuePaused([bool]$expected) {
             $expectedLabel = if ($expected) { $queueLabels.'Queue.Resume' } else { $queueLabels.'Queue.Pause' }
@@ -629,7 +655,7 @@ try {
         if ($DashboardFixture) {
             Invoke-NodeAction (Find-Node ('QueueItem-' + $seededQueue[0].Id.ToString('N')) $mainRoot) $mainRoot 'Select' | Out-Null
             $paged = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
-            if (@($paged.nodes | Where-Object { $_.node.automationId -like 'QueueItem-*' }).Count -ne 40) { throw 'Dashboard queue did not bound 100 entries to 40 rows.' }
+            if (@($paged.nodes | Where-Object { $_.node.automationId -like 'QueueItem-*' }).Count -ne [Math]::Min(40, $DashboardFixtureCount)) { throw 'Dashboard queue did not honor its 40-row page limit.' }
         }
         if (-not $DashboardFixture -and -not $DashboardEmptyFixture) {
             Invoke-NodeAction (Find-Node 'DownloadUrlInput' $mainRoot) $mainRoot 'SetValue' $SampleUrl | Out-Null
@@ -645,15 +671,86 @@ try {
             Invoke-NodeAction (Find-Node ('QueueItem-' + $id) $mainRoot) $mainRoot 'Select' | Out-Null
             $queueLabels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
             Wait-DashboardQueuePaused $true
-            foreach ($paused in @($false, $true)) {
+            $pauseStates = if ($DashboardLayoutSmoke) { @() } else { @($false, $true) }
+            foreach ($paused in $pauseStates) {
                 Invoke-NodeAction (Find-Node 'QueuePauseButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
                 Wait-DashboardQueuePaused $paused
+                if ($DashboardTransferSmoke -and -not $paused) {
+                    $transferClock = [Diagnostics.Stopwatch]::StartNew()
+                    do {
+                        $transferNode = Find-Node ('QueueStatus-' + $id) $mainRoot
+                        if ($transferNode.name -like ($queueLabels.'Status.DownloadingVideo' + '*') -or $transferNode.name -like ($queueLabels.'Status.DownloadingAudio' + '*')) { break }
+                        Start-Sleep -Milliseconds 100
+                    } while ($transferClock.Elapsed.TotalSeconds -lt 15)
+                    if ($transferNode.name -notlike ($queueLabels.'Status.DownloadingVideo' + '*') -and $transferNode.name -notlike ($queueLabels.'Status.DownloadingAudio' + '*')) { throw 'Controlled FakeTool transfer did not enter the real download pipeline.' }
+                    Start-Sleep -Milliseconds 2200
+                    Capture-Dashboard 'controlled-active-transfer'
+                    Write-Output 'Active transfer capture uses the real queue/process/progress path with isolated FakeTool output; no Internet media was downloaded.'
+                }
             }
             $afterPause = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)
             if ($afterPause.Count -ne 1 -or ([guid]$afterPause[0].id).ToString('N') -ne $id) { throw 'Queue pause/resume changed the canonical QuickQueue item identity.' }
-            Write-Output 'Dashboard QuickQueue/selection and queue admission Resume/Pause UI/settings PASS using the isolated FakeTool source; real transfer pause/resume is not qualified.'
+            if ($DashboardLayoutSmoke) { Write-Output 'Layout fixture: canonical QuickQueue item retained Queued for editable options; admission remains paused.' }
+            else { Write-Output 'Dashboard QuickQueue/selection and queue admission Resume/Pause UI/settings PASS using the isolated FakeTool source; real transfer pause/resume is not qualified.' }
         }
         Capture-Dashboard 'dashboard-downloads'
+        if ($DashboardFixture -and $DashboardFixtureCount -gt 40) {
+            Invoke-NodeAction (Find-Node 'DashboardNextPage' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            [void](Find-Node ('QueueItem-' + $seededQueue[40].Id.ToString('N')) $mainRoot)
+            Capture-Dashboard 'queue-page2'
+            Invoke-NodeAction (Find-Node 'DashboardPreviousPage' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            [void](Find-Node ('QueueItem-' + $seededQueue[0].Id.ToString('N')) $mainRoot)
+            Write-Output 'Native queue pagination: next/previous pages contain their expected canonical identities.'
+        }
+        if ($DashboardLayoutSmoke) {
+            function Select-RangeMode([string]$automationId, [bool]$custom) {
+                $node = Find-Node $automationId $mainRoot
+                $state = Invoke-AutomationCli -CliArguments @('inspect','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--session',$node.handle.sessionId,'--node',$node.handle.runtimeId)
+                $index = if ($custom) { 1 } else { 0 }
+                $choice = Invoke-AutomationCli -CliArguments @('inspect','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--session',$node.handle.sessionId,'--node',$state.value.childRuntimeIds[$index])
+                Invoke-NodeAction $choice.value $mainRoot 'Select' | Out-Null
+            }
+            $pageTree = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
+            $toggle = @($pageTree.nodes | Where-Object { $_.node.automationId -eq 'DashboardToggleInspector' }) | Select-Object -First 1
+            if ($toggle) { Invoke-NodeAction $toggle.node $mainRoot 'Invoke' | Out-Null }
+            Invoke-NodeAction (Find-Node 'InspectorOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Capture-Dashboard 'inspector-options-full'
+            Select-RangeMode 'InspectorRangeMode' $true
+            Invoke-NodeAction (Find-Node 'InspectorRangeStart' $mainRoot) $mainRoot 'SetValue' '00:00:02' | Out-Null
+            Invoke-NodeAction (Find-Node 'InspectorRangeEnd' $mainRoot) $mainRoot 'SetValue' '00:00:10' | Out-Null
+            Capture-Dashboard 'inspector-options-custom'
+            Invoke-NodeAction (Find-Node 'InspectorApplyOptions' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
+            Invoke-NodeAction (Find-Node 'InspectorApplyOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Capture-Dashboard 'inspector-options-actions'
+            $savedOptions = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)[0]
+            if ($savedOptions.requestedRange.mode -ne 1 -or $savedOptions.requestedRange.start -ne '00:00:02' -or $savedOptions.requestedRange.end -ne '00:00:10') { throw 'Inspector did not persist the custom range into the canonical queue.' }
+            Invoke-NodeAction (Find-Node 'CaptionTheme' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Capture-Dashboard 'inspector-theme-changed'
+            Invoke-NodeAction (Find-Node 'CaptionTheme' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Select-RangeMode 'InspectorRangeMode' $false
+            Invoke-NodeAction (Find-Node 'InspectorApplyOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Invoke-NodeAction (Find-Node 'InspectorDetails' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Capture-Dashboard 'inspector-details-restored'
+            Write-Output 'Inspector custom range Apply persisted in canonical queue; theme roundtrip and Details/Options roundtrip exercised.'
+            Invoke-NodeAction (Find-Node 'AnalyzeButton' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
+            Invoke-NodeAction (Find-Node 'AnalyzeButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            $menuRoots = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
+            $invoked = $false
+            foreach ($root in $menuRoots.value) {
+                $menuTree = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$root.rootId,'--depth','12')
+                $entry = @($menuTree.nodes | Where-Object { $_.node.name -eq $queueLabels.'Common.Analyze' -and $_.node.supportedActions -match 'Invoke' }) | Select-Object -First 1
+                if ($entry) { Invoke-NodeAction $entry.node $root.rootId 'Invoke' | Out-Null; $invoked = $true; break }
+            }
+            if (-not $invoked) { throw 'Analyze menu command missing.' }
+            Wait-Node 'AddToQueueButton' $mainRoot 'Enabled' | Out-Null
+            Capture-Dashboard 'analysis-full'
+            Select-RangeMode 'VideoRangeMode' $true
+            Capture-Dashboard 'analysis-custom'
+            Select-RangeMode 'VideoRangeMode' $false
+            Capture-Dashboard 'analysis-full-restored'
+            Invoke-NodeAction (Find-Node 'ClearAnalyzedPreviewButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Capture-Dashboard 'analysis-cleared'
+        }
         foreach ($page in @('Live','Other','Batch','History','Settings','Help','About')) {
             Invoke-NodeAction (Find-Node ('Nav' + $page) $mainRoot) $mainRoot 'Invoke' | Out-Null
             Start-Sleep -Milliseconds 250
@@ -689,7 +786,7 @@ try {
         if (Get-Process -Name ModernTubeDownloader -ErrorAction SilentlyContinue) { throw 'Another application instance is present before the owned-profile restart. No process was stopped.' }
         # Preserve the owned profile and arguments; do not seed or rewrite preferences for this launch.
         $script:automationProcess.Dispose(); $script:automationProcess = $null
-        $script:automationProcess = Start-Process -FilePath $app -ArgumentList $automationArguments -PassThru -WindowStyle Hidden
+        $script:automationProcess = Start-Process -FilePath $app -ArgumentList $automationArguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $dataRoot 'restart-stderr.log')
         Wait-Bridge $script:automationProcess.Id $true
         Wait-MainWindow $script:automationProcess
         if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
@@ -2045,6 +2142,7 @@ try {
     }
 }
 finally {
+    $env:MTD_FAKE_DOWNLOAD_DELAY_MS = $previousFakeDownloadDelay
     $env:MODERNTUBEDOWNLOADER_QA_ALL_SETTINGS = $previousAllSettings
     $env:MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL = $previousSkipProtocol
     $env:MODERNTUBEDOWNLOADER_DATA_ROOT = $previousDataRoot

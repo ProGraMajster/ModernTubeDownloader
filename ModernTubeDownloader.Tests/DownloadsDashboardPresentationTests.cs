@@ -13,6 +13,175 @@ namespace ModernTubeDownloader.Tests;
 public sealed class DownloadsDashboardPresentationTests
 {
     [Theory]
+    [InlineData(100)] [InlineData(150)] [InlineData(200)]
+    public async Task EmptyInspectorReflowsWhenItsHiddenPageIsFirstShown(int scale)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-empty-inspector-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize(); AppTypography.SetScale(scale);
+                var root = new Panel(); var page = new Panel { Visible = false, Width = 1200, Height = 700 }; root.Controls.Add(page);
+                var inspector = new DashboardInspector(services); page.Controls.Add(inspector);
+                AppTypography.SetDashboardPresentation(root, true); host.Show(root, 1280, 720);
+                inspector.SetBounds(800, 60, 560, 580); inspector.SetBounds(900, 60, 300, 580);
+                page.Visible = true; host.ProcessPendingWork();
+                Assert.False(Assert.IsType<AccessibleScrollInfo>(inspector.AccessibilityObject.ScrollInfo).Horizontal.IsScrollable);
+                Assert.All(inspector.Controls.Where(c => !c.Visible), c => Assert.Equal(System.Drawing.Rectangle.Empty, c.Bounds));
+            }
+            await services.ShutdownAsync();
+        }
+        finally { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData(100)]
+    [InlineData(150)]
+    [InlineData(200)]
+    public async Task StartingDirectlyInModernKeepsTheAnalysisRangeVisible(int scale)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-modern-start-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize(); AppTypography.SetScale(scale);
+                var view = new DownloadsView(services, useDashboard: true);
+                AppTypography.SetDashboardPresentation(view, true); host.Show(view, 1280, 900); view.SetDashboard(true);
+#pragma warning disable xUnit1031 // Keep the TestHost on its owning thread.
+                view.AcceptExternalUrlAsync("https://example.test/watch/sample123", true).GetAwaiter().GetResult();
+#pragma warning restore xUnit1031
+                foreach (var custom in new[] { false, true, false })
+                {
+                    var mode = Find<ComboBox>(view, "VideoRangeMode"); mode.SelectedIndex = custom ? 1 : 0; host.ProcessPendingWork();
+                    var range = Assert.IsType<MediaRangeEditor>(mode.Parent);
+                    Assert.True(range.ResponsiveLayout); Assert.True(range.Visible); Assert.True(range.Height >= mode.Height);
+                    Assert.All(range.Controls.Where(c => c.Visible), c => { Assert.True(c.Height > 0); Assert.True(c.Bottom <= range.Height); Assert.True(c.Right <= range.ClientSize.Width); });
+                    Assert.All(range.Controls.OfType<Label>().Where(c => c.Visible), c => Assert.True(c.Width >= DashboardVisual.TextWidth(c, c.Text), c.Text));
+                    var add = Find<Button>(view, "AddToQueueButton");
+                    Assert.True(add.Width >= DashboardVisual.ActionWidth(add), "Analysis action text must fit its current rendered style and padding.");
+                    Assert.True(Find<Button>(view, "AddToQueueButton").Top >= range.Bottom);
+                }
+            }
+            await services.ShutdownAsync();
+        }
+        finally { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData(100, 1280)]
+    [InlineData(150, 1469)]
+    [InlineData(200, 1800)]
+    public async Task AnalysisCardTracksVisibleRangeContentAndRestoresClassic(int scale, int width)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-analysis-geometry-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize(); AppTypography.SetScale(scale);
+                var view = new DownloadsView(services); host.Show(view, width, 900); host.ProcessPendingWork();
+#pragma warning disable xUnit1031 // Native test host lifetime stays on its UI thread.
+                view.AcceptExternalUrlAsync("https://example.test/watch/sample123", true).GetAwaiter().GetResult();
+#pragma warning restore xUnit1031
+                host.ProcessPendingWork();
+                var preview = Find<Panel>(view, "PreviewCard");
+                var classic = preview.Controls.ToDictionary(c => c, c => c.Bounds);
+                var classicHeight = preview.Height;
+                AppTypography.SetDashboardPresentation(view, true); view.SetDashboard(true); host.ProcessPendingWork();
+                var fullHeight = preview.Height;
+                foreach (var custom in new[] { true, false, true, false })
+                {
+                    Find<ComboBox>(view, "VideoRangeMode").SelectedIndex = custom ? 1 : 0; host.ProcessPendingWork();
+                    var range = (MediaRangeEditor)Find<ComboBox>(view, "VideoRangeMode").Parent!;
+                    Assert.True(range.Height >= Find<ComboBox>(view, "VideoRangeMode").Height);
+                    Assert.InRange(range.Height - range.Controls.Where(c => c.Visible).Max(c => c.Bottom), 0, 4);
+                    Assert.All(preview.Controls.Where(c => !c.Visible), c => Assert.Equal(System.Drawing.Rectangle.Empty, c.Bounds));
+                    Assert.All(preview.Controls.Where(c => c.Visible), c => { Assert.InRange(c.Left, 8, preview.Width); Assert.True(c.Right <= preview.Width - 8); Assert.True(c.Bottom <= preview.Height - 8); });
+                    Assert.Equal(custom, Find<Label>(view, "VideoRangeKeyframeHint").Visible);
+                    var last = preview.Controls.Where(c => c.Visible).Max(c => c.Bottom);
+                    Assert.InRange(preview.Height - last, 8, 18);
+                    Assert.False(Assert.IsType<AccessibleScrollInfo>(view.AccessibilityObject.ScrollInfo).Horizontal.IsScrollable);
+                    if (!custom) Assert.Equal(fullHeight, preview.Height);
+                }
+                DashboardVisual.RestoreTree(view); AppTypography.SetDashboardPresentation(view, false); view.SetDashboard(false); host.ProcessPendingWork();
+                Assert.Equal(classicHeight, preview.Height);
+                Assert.All(classic, pair => Assert.Equal(pair.Value, pair.Key.Bounds));
+            }
+            await services.ShutdownAsync();
+        }
+        finally { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData(100, 300)]
+    [InlineData(150, 380)]
+    [InlineData(200, 440)]
+    public async Task InspectorReflowsAfterItsVerticalRailAppearsAndRangeUsesVisibleContent(int scale, int width)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-inspector-geometry-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize(); AppTypography.SetScale(scale);
+                var inspector = new DashboardInspector(services);
+                AppTypography.SetDashboardPresentation(inspector, true);
+                inspector.ShowQueue(new ModernTubeDownloader.Models.DownloadQueueItem
+                {
+                    Title = "Długi tytuł Łódź 日本語", Channel = "Test channel", SourceUrl = "https://example.test/video",
+                    Status = ModernTubeDownloader.Models.DownloadStatus.Queued,
+                    RawMetadataJson = "{\"id\":\"test\",\"title\":\"Długi tytuł Łódź 日本語\",\"duration\":120}"
+                });
+                host.Show(inspector, width, 450); host.ProcessPendingWork();
+                foreach (var custom in new[] { false, true, false })
+                {
+                    Find<Button>(inspector, "InspectorOptions").PerformClick();
+                    Find<ComboBox>(inspector, "InspectorRangeMode").SelectedIndex = custom ? 1 : 0;
+                    host.ProcessPendingWork();
+                    var scroll = Assert.IsType<AccessibleScrollInfo>(inspector.AccessibilityObject.ScrollInfo);
+                    Assert.False(scroll.Horizontal.IsScrollable, "Inspector Options acquired horizontal scrolling after the vertical rail appeared.");
+                    foreach (var id in new[] { "InspectorQuality", "InspectorContainer", "InspectorRangeMode", "InspectorRangeStart", "InspectorRangeEnd", "InspectorApplyOptions" })
+                    {
+                        var control = Find<Control>(inspector, id);
+                        if (control.Visible) Assert.InRange(control.Right, 1, control.Parent!.ClientSize.Width);
+                    }
+                    var range = (MediaRangeEditor)Find<ComboBox>(inspector, "InspectorRangeMode").Parent!;
+                    var last = range.Controls.Where(c => c.Visible).Max(c => c.Bottom);
+                    Assert.InRange(range.Height - last, 0, 4);
+                    Assert.All(range.Controls.Where(c => !c.Visible), c => Assert.Equal(System.Drawing.Rectangle.Empty, c.Bounds));
+                    Find<Button>(inspector, "InspectorDetails").PerformClick(); host.ProcessPendingWork();
+                    Assert.False(Assert.IsType<AccessibleScrollInfo>(inspector.AccessibilityObject.ScrollInfo).Horizontal.IsScrollable);
+                    host.Resize(width + 200, 700); host.ProcessPendingWork(); host.Resize(width, 450); host.ProcessPendingWork();
+                }
+                inspector.Clear(); host.ProcessPendingWork();
+                Assert.All(inspector.Controls.Where(c => !c.Visible), c => Assert.Equal(System.Drawing.Rectangle.Empty, c.Bounds));
+                Assert.False(Assert.IsType<AccessibleScrollInfo>(inspector.AccessibilityObject.ScrollInfo).Horizontal.IsScrollable);
+            }
+            await services.ShutdownAsync();
+        }
+        finally { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    private static T Find<T>(Control root, string id) where T : Control
+    {
+        if (root.AccessibleAutomationId == id) return (T)root;
+        foreach (var child in root.Controls) { var result = FindOrNull<T>(child, id); if (result is not null) return result; }
+        throw new InvalidOperationException(id);
+    }
+    private static T? FindOrNull<T>(Control root, string id) where T : Control
+    {
+        if (root.AccessibleAutomationId == id) return (T)root;
+        foreach (var child in root.Controls) { var result = FindOrNull<T>(child, id); if (result is not null) return result; }
+        return null;
+    }
+
+    [Theory]
     [InlineData(100)]
     [InlineData(150)]
     [InlineData(200)]

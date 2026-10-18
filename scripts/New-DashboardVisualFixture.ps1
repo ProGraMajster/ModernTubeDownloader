@@ -10,7 +10,7 @@ Add-Type -AssemblyName System.Drawing
 $cache = Join-Path $root 'thumbnails'
 New-Item -ItemType Directory -Force -Path $cache | Out-Null
 # Original geometric QA illustrations. No reference media or production assets are copied.
-for ($i = 0; $i -lt 6; $i++) {
+for ($i = 0; $i -lt [Math]::Min(6, $Queue.Count); $i++) {
     $url = "https://example.test/dashboard/fixture-$i.png"
     $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($url)))
     $bitmap = [Drawing.Bitmap]::new(960, 540)
@@ -36,7 +36,10 @@ for ($i = 0; $i -lt 6; $i++) {
     foreach ($entry in @($Queue[$i], $History[$i])) { $entry.ThumbnailUrl = $url }
     $Queue[$i].DurationSeconds = @(754,497,3735,902,660,190)[$i]
 }
-$Queue[5].Title = 'Synthetic QA — bardzo długi tytuł filmu, Łódź, 日本語の長いタイトル, Unicode and a long descriptive suffix for overflow verification'
-$Queue[5].ThumbnailUrl = $null
+$longIndex = [Math]::Min(5, $Queue.Count - 1)
+$Queue[$longIndex].Title = 'Synthetic QA — bardzo długi tytuł filmu, Łódź, 日本語の長いタイトル, Unicode and a long descriptive suffix for overflow verification'
+$Queue[$longIndex].ThumbnailUrl = $null
+$History[$longIndex].Title = $Queue[$longIndex].Title
+$History[$longIndex].ThumbnailUrl = $null
 $History[2].Status = 'Failed'
 $History[3].WasPartial = $true

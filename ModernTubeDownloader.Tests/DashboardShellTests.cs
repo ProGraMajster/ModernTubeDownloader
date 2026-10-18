@@ -128,6 +128,39 @@ public sealed class DashboardShellTests
         finally { AppTypography.SetScale(100); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
     [Fact]
+    public void SpeedHistoryKeepsTheNewestSampleAtNowBeforeAndAfterWrapping()
+    {
+        var samples = new SpeedSamples(120);
+        samples.Add(12); Assert.Equal(1, samples.HorizontalFraction(0));
+        samples.Add(24); Assert.Equal(119d / 120, samples.HorizontalFraction(0), 10); Assert.Equal(1, samples.HorizontalFraction(1));
+        for (var i = 0; i < 200; i++) samples.Add(i);
+        Assert.Equal(1d / 120, samples.HorizontalFraction(0), 10); Assert.Equal(1, samples.HorizontalFraction(119));
+        Assert.Throws<ArgumentOutOfRangeException>(() => samples.HorizontalFraction(120));
+    }
+    [Fact]
+    public void FocusedQueueRowSelectsWithSpaceAndEnterThroughTheNormalInputPipeline()
+    {
+        using var host = ModernFormsTestHost.Create();
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-row-keyboard-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = AppPaths.Create(directory); paths.EnsureCreated();
+            using var thumbnails = new ThumbnailCacheService(paths, new NullAppLogger(), () => false);
+            var row = new QueueItemCard(thumbnails, new("pl")) { Width = 960 }; row.SetDashboard(true);
+            var item = new DownloadQueueItem { Title = "Keyboard selection", SourceUrl = "https://example.test/video", Status = DownloadStatus.Queued };
+            row.UpdateItem(item, false); var selections = new List<Guid>();
+            row.ActionRequested += (_, args) => { if (args.Action == QueueItemAction.Select) selections.Add(args.ItemId); };
+            host.Show(row, 960, 200); Assert.True(host.Input.Focus(row));
+            host.Input.PressKey(Keys.Space); host.Input.PressKey(Keys.Enter);
+            Assert.Equal(new[] { item.Id, item.Id }, selections);
+            var button = row.Controls.OfType<Button>().First(c => c.Visible && c.Enabled);
+            Assert.True(host.Input.Focus(button)); host.Input.PressKey(Keys.Space);
+            Assert.Equal(2, selections.Count); // A child action must not also select its parent.
+            row.SetDashboard(false); Assert.False(row.TabStop);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+    [Fact]
     public void SpeedHistoryAndProcessActivityAreBoundedAndSanitized()
     {
         var samples = new SpeedSamples(120); for (var i = 0; i < 10000; i++) samples.Add(i);

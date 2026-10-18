@@ -92,7 +92,7 @@ internal sealed partial class HistoryView
     private void LayoutDashboard()
     {
         if (inspector is null) return;
-        AutoScroll = true; var origin = DisplayRectangle.Location; var width = Math.Max(560, ClientSize.Width - 36);
+        AutoScroll = true; var origin = DisplayRectangle.Location; var width = Math.Max(0, DisplayRectangle.Width - 36);
         var line = AppTypography.TextHeight(42);
         inspector.Visible = AppearancePresentation.Current.ModernDashboardShell.Inspector != DashboardInspectorMode.Hidden;
         var inline = inspector.Visible && width >= AppTypography.TextHeight(1050);
@@ -203,7 +203,7 @@ internal sealed partial class HistoryEntryCard
         if (value)
         {
             AppUi.BindBackground(this, selected ? AppThemeTokens.RowSelected : AppThemeTokens.Surface);
-            AppTypography.Bind(title, 10.5f); AppTypography.Bind(facts, 9.5f);
+            AppTypography.Bind(title, DashboardVisual.ItemTitle); AppTypography.Bind(facts, DashboardVisual.Metadata);
         }
         else
         {
@@ -241,7 +241,7 @@ internal sealed partial class HistoryEntryCard
         var statusHeight = HistoryTable.LineHeight(cells[3]);
         var textHeight = titleHeight + 3 + factsHeight + (compact ? statusHeight + 6 : 0);
         Height = Math.Max(AppTypography.TextHeight(72), textHeight + 20); Margin = new Padding(0, 0, 0, 1);
-        placeholder.SetBounds(12, (Height - 52) / 2, 92, 52); thumbnail.Bounds = placeholder.Bounds;
+        placeholder.SetBounds(12, (Height - 58) / 2, 104, 58); thumbnail.Bounds = placeholder.Bounds;
         if (placeholderIcon is null)
         {
             placeholderIcon = new AppVectorIcon(AppIconKind.History, 24) { AccessibilityView = AccessibilityView.Hidden, AccessibleAutomationId = "HistoryThumbnailPlaceholder" };
@@ -289,7 +289,7 @@ internal sealed partial class HistoryEntryCard
 
 internal static class HistoryTable
 {
-    internal const int TitleLeft = 116;
+    internal const int TitleLeft = 128;
     internal static bool IsCompact(int width) => width < AppTypography.TextHeight(820);
     internal static int MeasuredWidth(Label label)
     {

@@ -105,6 +105,12 @@ if ($CheckBothInterfaces) {
     Invoke-Element 'InterfaceModernDashboard'
     [void](Find-Element 'NavBatch')
     foreach ($page in @('Downloads','Live','Other','Batch','History','Settings','Help','About')) { Invoke-Element ('Nav' + $page) }
+    Invoke-Element 'NavDownloads'
+    $urlInput = Find-Element 'DownloadUrlInput'
+    $urlInput.SetFocus()
+    if (-not $urlInput.Current.HasKeyboardFocus) { throw 'Published Modern URL input did not acquire keyboard focus through Windows UIA.' }
+    $queueAction = Find-Element 'DashboardQuickQueue'
+    if ([string]::IsNullOrWhiteSpace($queueAction.Current.Name)) { throw 'Published primary queue action has no accessible name.' }
     Invoke-Element 'NavSettings'
     Invoke-Element 'SettingsCategoryPersonalization'
     Invoke-Element 'InterfaceClassic'

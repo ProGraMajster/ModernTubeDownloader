@@ -23,6 +23,15 @@ internal sealed partial class QueueItemCard
     private Label? duration, dashboardAuthor;
     private AppVectorIcon? actionGlyph, menuGlyph, statusGlyph;
     private readonly ToolTip dashboardTips = new();
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (dashboard && Focused && !e.Handled && e.Modifiers == Keys.None && e.KeyCode is Keys.Space or Keys.Enter)
+        {
+            SelectCard(this, EventArgs.Empty);
+            e.Handled = e.SuppressKeyPress = true;
+        }
+    }
     public void SetDashboard(bool value)
     {
         dashboard = value; TabStop = value; SetControlBehavior(ControlBehaviors.Selectable, value);
@@ -44,8 +53,10 @@ internal sealed partial class QueueItemCard
         if (actionGlyph is not null) actionGlyph.Visible = menuGlyph!.Visible = value;
         if (statusGlyph is not null) statusGlyph.Visible = value;
         if (!value && currentItem is not null) ConfigureActions(currentItem);
+        if (!value) transfer.Visible = true;
         if (duration is not null) duration.Visible = value;
-        AppTypography.Bind(title, value ? 10.5f : 13.5f, value ? FontStyle.Regular : FontStyle.Bold);
+        AppTypography.Bind(title, value ? DashboardVisual.ItemTitle : 13.5f, value ? FontStyle.Regular : FontStyle.Bold);
+        title.Multiline = value;
         AppTypography.Bind(subtitle, value ? 9.5f : 10.5f); AppTypography.Bind(status, value ? 9.5f : 10.5f, value ? FontStyle.Regular : FontStyle.Bold);
         AppTypography.Bind(transfer, value ? 9 : 10.25f);
         AppTypography.SetDashboardPresentation(this, value);
@@ -54,26 +65,29 @@ internal sealed partial class QueueItemCard
     private void LayoutDashboardRow()
     {
         var p = AppearancePresentation.Current.ModernDashboardShell;
-        var scale = AppTypography.Scale; var narrow = Width < 860 || scale > 1.25;
-        var imageWidth = AppearancePresentation.ImageWidth(p.Thumbnail, 124);
-        var h = (p.QueueDensity switch { AppearanceDensity.Compact => 84, AppearanceDensity.Comfortable => 112, _ => 96 });
+        var narrow = Width < AppTypography.TextHeight(860);
+        var imageWidth = AppearancePresentation.ImageWidth(p.Thumbnail, 140);
+        var h = (p.QueueDensity switch { AppearanceDensity.Compact => 88, AppearanceDensity.Comfortable => 116, _ => 100 });
         var line = AppTypography.TextHeight(22);
-        Height = narrow ? Math.Max(AppTypography.TextHeight(h), line * 5 + 34) : AppTypography.TextHeight(h); Margin = new Padding(0, 0, 0, 1);
+        Margin = new Padding(0, 0, 0, 1);
         Padding = new Padding(8); thumbnail.Visible = imageWidth > 0;
         thumbnail.SetBounds(8, 8, imageWidth, imageWidth * 9 / 16); thumbnailPlaceholder.Padding = new Padding(16);
         if (duration is not null) { var badgeWidth = Math.Min(imageWidth, AppTypography.TextHeight(64)); var badgeHeight = AppTypography.TextHeight(22); duration.SetBounds(thumbnail.Right - badgeWidth, thumbnail.Bottom - badgeHeight, badgeWidth, badgeHeight); duration.BringToFront(); duration.Visible = imageWidth > 0 && duration.Text.Length > 0; }
         positionBadge.SetBounds(12, AppTypography.Scale > 1.25 && imageWidth > 0 ? thumbnail.Bottom + 8 : 12, AppTypography.TextHeight(28), AppTypography.TextHeight(24));
         var left = imageWidth == 0 ? positionBadge.Visible ? positionBadge.Right + 14 : 12 : imageWidth + 26; var right = Width - 98;
-        var progressWidth = narrow ? right - left : Math.Clamp(Width * 32 / 100, 180, 330);
+        var progressWidth = narrow ? right - left : Math.Clamp(Width * 29 / 100, 210, 310);
         var progressLeft = narrow ? left : right - progressWidth - 10;
         var textWidth = Math.Max(100, (narrow ? right : progressLeft - 12) - left);
-        title.SetBounds(left, 8, textWidth, line); title.AutoEllipsis = true;
-        dashboardAuthor!.SetBounds(left, title.Bottom + (narrow ? 2 : 4), textWidth, line);
-        subtitle.SetBounds(left, dashboardAuthor.Bottom + (narrow ? 2 : 3), textWidth, line); subtitle.AutoEllipsis = true;
-        progress.SetBounds(progressLeft, narrow ? subtitle.Bottom + 4 : 32, Math.Max(50, progressWidth), 6);
+        title.SetBounds(left, 8, textWidth, DashboardVisual.LabelHeight(title, textWidth, 2)); title.AutoEllipsis = true;
+        dashboardAuthor!.Visible = !string.IsNullOrWhiteSpace(dashboardAuthor.Text);
+        dashboardAuthor.SetBounds(left, title.Bottom + (narrow ? 2 : 4), textWidth, dashboardAuthor.Visible ? line : 0);
+        subtitle.SetBounds(left, (dashboardAuthor.Visible ? dashboardAuthor.Bottom : title.Bottom) + (narrow ? 2 : 3), textWidth, line); subtitle.AutoEllipsis = true;
+        progress.SetBounds(progressLeft, narrow ? subtitle.Bottom + 6 : 28, Math.Max(50, progressWidth), 6);
         status.SetBounds(progressLeft + 22, progress.Bottom + (narrow ? 4 : 7), Math.Max(50, progressWidth - 22), line);
         statusGlyph?.SetBounds(progressLeft, status.Top + 2, 16, 16);
         transfer.SetBounds(progressLeft, status.Bottom, Math.Max(50, progressWidth), line); transfer.TextAlign = ContentAlignment.TopLeft;
+        transfer.Visible = !string.IsNullOrWhiteSpace(transfer.Text);
+        Height = Math.Max(AppTypography.TextHeight(h), Math.Max(thumbnail.Bottom, Math.Max(subtitle.Bottom, transfer.Visible ? transfer.Bottom : status.Bottom)) + 10);
         primaryAction.SetBounds(Width - 84, (Height - 36) / 2, 36, 36); secondaryAction.SetBounds(Width - 84, Height - 34, 36, 28);
         moreAction.SetBounds(Width - 42, (Height - 36) / 2, 34, 36);
         secondaryAction.Visible = false;
@@ -81,6 +95,8 @@ internal sealed partial class QueueItemCard
         progress.Visible = currentItem?.Status is not DownloadStatus.Completed and not DownloadStatus.Failed and not DownloadStatus.Cancelled and not DownloadStatus.Interrupted; progress.Padding = new Padding(0); progress.Style.Border.Width = 0; AppUi.BindBackground(progress, AppThemeTokens.SurfaceSecondary);
         DashboardVisual.Flat(this, !selected); Style.Border.Radius = selected ? 6 : 0;
         if (selected) { Style.Border.Width = 1; Style.Border.Color = AppUi.GetColor(AppThemeTokens.Accent).WithAlpha(130); }
+        StyleFocused.Border.Width = 1; StyleFocused.Border.Color = AppUi.GetColor(AppThemeTokens.Accent);
+        StyleHover.BackgroundColor = AppUi.GetColor(selected ? AppThemeTokens.RowSelected : AppThemeTokens.SurfaceHover);
         DashboardVisual.Button(primaryAction); DashboardVisual.Button(moreAction);
     }
     private void UpdateDashboardRow(DownloadQueueItem item)
@@ -111,13 +127,15 @@ internal sealed partial class QueueItemCard
         if (item.StatusMessageKey == "Queue.Detail.StoragePaused") status.Text = text[item.StatusMessageKey];
         else if (item.Status != DownloadStatus.Waiting) status.Text = text["Status." + item.Status] +
             (item.Status == DownloadStatus.Completed && item.HasPostProcessingWarnings ? " · " + text["Queue.CompletedWithWarnings"] : "");
-        statusGlyph?.SetKind(item.Status switch { DownloadStatus.Completed => AppIconKind.Check, DownloadStatus.Failed or DownloadStatus.Partial => AppIconKind.Info, DownloadStatus.Cancelled or DownloadStatus.Interrupted => AppIconKind.Close, _ => AppIconKind.History });
+        var transferring = item.Status is DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio;
+        if (transferring) status.Text += $" · {item.ProgressPercent:0}%";
+        statusGlyph?.SetKind(item.StatusMessageKey == "Queue.Detail.StoragePaused" ? AppIconKind.Pause : item.Status switch { DownloadStatus.Completed => AppIconKind.Check, DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio => AppIconKind.Download, DownloadStatus.Merging or DownloadStatus.Finalizing => AppIconKind.Settings, DownloadStatus.Failed or DownloadStatus.Partial => AppIconKind.Info, DownloadStatus.Cancelled or DownloadStatus.Interrupted => AppIconKind.Close, _ => AppIconKind.History });
         statusGlyph?.SetColorToken(item.Status switch { DownloadStatus.Completed => AppThemeTokens.Success, DownloadStatus.Failed or DownloadStatus.Partial => AppThemeTokens.Error, _ => AppThemeTokens.TextSecondary });
         var transferParts = new List<string>();
-        if (p.ShowSize && item.DownloadedBytes is { } bytes) transferParts.Add(DashboardStyle.Bytes(bytes));
+        if (p.ShowSize && item.DownloadedBytes is { } bytes) transferParts.Add(DashboardStyle.Bytes(bytes) + (item.TotalBytes is { } totalBytes ? " / " + DashboardStyle.Bytes(totalBytes) : ""));
         if (p.ShowSpeed && item.SpeedBytesPerSecond is { } speed) transferParts.Add(DashboardStyle.Bytes((long)speed) + "/s");
         if (p.ShowEta && item.Eta is { } eta) transferParts.Add(text.Get("Queue.Eta", eta.ToString(@"hh\:mm\:ss")));
-        transfer.Text = string.Join(" · ", transferParts); transfer.AutoEllipsis = true; dashboardTips.SetToolTip(transfer, transfer.Text);
+        transfer.Text = transferring ? string.Join(" · ", transferParts) : ""; transfer.AutoEllipsis = true; dashboardTips.SetToolTip(transfer, transfer.Text);
         progress.FillToken = item.RetryDelaySeconds > 0 || item.StatusMessageKey == "Queue.Detail.StoragePaused" ? AppThemeTokens.Warning : AppThemeTokens.Accent;
         LayoutDashboardRow();
     }

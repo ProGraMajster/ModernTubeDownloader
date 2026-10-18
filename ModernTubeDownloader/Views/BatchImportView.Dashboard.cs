@@ -28,6 +28,7 @@ internal sealed partial class BatchImportView
         if (dashboard == value) return;
         if (value) { restoreDashboardTypography = AppTypography.CaptureRecipes(this); restoreDashboardLabels = DashboardVisual.CaptureLabels(this); }
         dashboard = value;
+        range.ResponsiveLayout = value;
         AppTypography.SetDashboardPresentation(this, value);
         if (value && sourceCard is null) CreateDashboardChrome();
         if (value) foreach (var card in new[] { sourceCard!, resultCard!, dashboardOptions! }) DashboardStyle.Card(card);
@@ -94,7 +95,7 @@ internal sealed partial class BatchImportView
         if (!dashboard || counters is null) return;
         var t = services.Localization;
         heading.Text = t["Dashboard.Batch"]; sourceTitle!.Text = t["Dashboard.BatchSource"]; sourceHint!.Text = t["Dashboard.BatchHint"];
-        resultTitle!.Text = t["Dashboard.Statistics"];
+        resultTitle!.Text = t["Dashboard.ImportResults"];
         dashboardOptionsButton!.Text = t["Dashboard.OptionsShort"];
         foreach (var label in dashboardHeadings) label.Text = label.Tag is "#" or "URL" ? (string)label.Tag : t[(string)label.Tag!];
         foreach (var label in dashboardOptionLabels) label.Text = t[(string)label.Tag!];
@@ -126,7 +127,7 @@ internal sealed partial class BatchImportView
     private void LayoutDashboard()
     {
         if (sourceCard is null) return;
-        var origin = body.DisplayRectangle.Location; var width = Math.Max(480, body.ClientSize.Width - 36);
+        var origin = body.DisplayRectangle.Location; var width = Math.Max(1, body.DisplayRectangle.Width - 36);
         var line = AppTypography.TextHeight(36); var gap = 10;
         var inline = width >= AppTypography.TextHeight(900);
         heading.SetBounds(18 + origin.X, 16 + origin.Y, width, AppTypography.TextHeight(44));
@@ -134,7 +135,8 @@ internal sealed partial class BatchImportView
         sourceCard.SetBounds(18 + origin.X, heading.Bottom + 12, left, 220);
         sourceTitle!.SetBounds(16, 12, left - 32, AppTypography.TextHeight(28));
         sourceIcon!.SetBounds(18, sourceTitle.Bottom + 10, 38, 38);
-        sourceHint!.SetBounds(68, sourceTitle.Bottom + 8, left - 84, AppTypography.TextHeight(44));
+        sourceHint!.SetBounds(68, sourceTitle.Bottom + 8, left - 84,
+            Math.Max(38, DashboardVisual.LabelHeight(sourceHint, left - 84, 2)));
         path.SetBounds(16, sourceHint.Bottom + 10, left - 32, line);
         DashboardVisual.SetPadding(path, new Padding(10, 0, 10, 0));
         var sourceBottom = LayoutDashboardActions(SourceActions.Select(k => buttons[k]), left - 32, path.Bottom + 10, 16, line);
@@ -216,7 +218,7 @@ internal sealed partial class BatchImportView
             dashboardOptionLabels[i].SetBounds(x, y, fieldWidth, captionHeight);
             fields[i].SetBounds(x, y + captionHeight + 2, fieldWidth, line); x += fieldWidth + 12;
         }
-        range.SetBounds(14, y + captionHeight + line + 14, width, AppTypography.TextHeight(range.IsCustom ? 84 : 38));
+        range.SetBounds(14, y + captionHeight + line + 14, width, range.Height);
         var actionHeight = LayoutDashboardActions(SelectionActions.Select(k => buttons[k]), width, 0, 0, line);
         dashboardSelectionActions!.SetBounds(14, range.Bottom + 10, width, actionHeight);
         dashboardOptions.Height = dashboardSelectionActions.Bottom + 14;
@@ -241,6 +243,7 @@ internal sealed partial class BatchImportView
         dashboardTips.SetToolTip(state, detail); state.AccessibleName = detail;
         dashboardTips.SetToolTip(title, title.Text); dashboardTips.SetToolTip(url, entry.Url); dashboardTips.SetToolTip(qualityLabel, qualityText);
         foreach (var label in new[] { title, url, state, qualityLabel }) { label.AutoEllipsis = true; AppTypography.Bind(label, 9.5f); }
+        AppTypography.Bind(title, DashboardVisual.ItemTitle); title.Multiline = true;
         var actions = c.Skip(4).Take(4).Cast<Button>().ToArray();
         for (var i = 0; i < actions.Length; i++)
         {
@@ -275,7 +278,7 @@ internal sealed partial class BatchImportView
     private void LayoutDashboardHeader()
     {
         if (dashboardHeader is null) return;
-        var columns = DashboardColumns(Math.Max(480, rows.DisplayRectangle.Width - 6)); var line = dashboardHeader.Height;
+        var columns = DashboardColumns(Math.Max(1, rows.DisplayRectangle.Width - 6)); var line = dashboardHeader.Height;
         var positions = new[] { columns.Selection, columns.Url, columns.Title, columns.Status, columns.Quality, columns.Actions, columns.Right };
         for (var i = 0; i < dashboardHeadings.Length; i++)
         {
@@ -288,13 +291,16 @@ internal sealed partial class BatchImportView
     private void LayoutDashboardRow(Control panel)
     {
         if (panel.Tag is not DashboardBatchRow row) return;
-        panel.Width = Math.Max(480, rows.DisplayRectangle.Width - 6);
+        panel.Width = Math.Max(1, rows.DisplayRectangle.Width - 6);
         var columns = DashboardColumns(panel.Width); var line = AppTypography.TextHeight(24); var action = AppTypography.TextHeight(32);
         var qualityStyle = row.Quality.CurrentStyle;
         var qualityWidth = columns.Compact ? Math.Max(1, (columns.Right - columns.Url - 12) / 2) : columns.Actions - columns.Quality - 12;
         var measuredQuality = TextMeasurer.MeasureText(row.Quality.Text, qualityStyle.GetFont(), qualityStyle.GetFontSize(),
             new System.Drawing.Size(qualityWidth, int.MaxValue), qualityStyle.GetFontStyle());
-        var cellHeight = Math.Max(AppTypography.TextHeight(42), (int)Math.Ceiling(measuredQuality.Height) + 4);
+        var titleWidth = columns.Compact ? columns.Right - columns.Url - (row.Thumbnail is null ? 0 : 76) :
+            columns.Status - columns.Title - (row.Thumbnail is null ? 0 : 48) - 12;
+        var titleHeight = DashboardVisual.LabelHeight(row.Title, titleWidth, 2);
+        var cellHeight = Math.Max(titleHeight, Math.Max(AppTypography.TextHeight(42), (int)Math.Ceiling(measuredQuality.Height) + 4));
         var height = Math.Max(action + 14, cellHeight + 12); var contentLeft = columns.Url;
         row.Selection.SetBounds(10, 7, columns.Url - 18, Math.Max(action, line));
         if (!columns.Compact)
@@ -311,7 +317,7 @@ internal sealed partial class BatchImportView
         {
             var imageWidth = row.Thumbnail is null ? 0 : 76;
             row.Thumbnail?.SetBounds(contentLeft, 8, 68, 44);
-            row.Title.SetBounds(contentLeft + imageWidth, 7, columns.Right - contentLeft - imageWidth, line);
+            row.Title.SetBounds(contentLeft + imageWidth, 7, columns.Right - contentLeft - imageWidth, titleHeight);
             row.Url.SetBounds(contentLeft + imageWidth, row.Title.Bottom + 2, columns.Right - contentLeft - imageWidth, line);
             var factsTop = row.Url.Bottom + 6; var factsWidth = (columns.Right - contentLeft - 12) / 2;
             row.Status.SetBounds(contentLeft, factsTop, factsWidth, line); row.Quality.SetBounds(contentLeft + factsWidth + 12, factsTop, factsWidth, Math.Max(line * 2, cellHeight));

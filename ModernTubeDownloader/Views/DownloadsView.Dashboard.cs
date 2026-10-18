@@ -10,6 +10,7 @@ internal sealed partial class DownloadsView
     private bool dashboard;
     private bool dashboardDrawer;
     private int dashboardPage;
+    private System.Drawing.Rectangle classicAnalysisProgressBounds;
     private const int DashboardPageSize = 40;
     private Panel? dashboardQueue;
     private FlowLayoutPanel? dashboardChips;
@@ -24,7 +25,10 @@ internal sealed partial class DownloadsView
 
     public void SetDashboard(bool value)
     {
+        if (rangeEditor.ResponsiveLayout != value) rangeEditor.ResponsiveLayout = value;
+        rangeHint.Multiline = value;
         if (dashboard == value) { if (value) UpdateLayout(); return; }
+        if (value) classicAnalysisProgressBounds = analysisProgress.Bounds;
         dashboard = value;
         analyzeButton.Click -= AnalyzeClicked; analyzeButton.Click -= DashboardAddMenu;
         if (value) analyzeButton.Click += DashboardAddMenu; else analyzeButton.Click += AnalyzeClicked;
@@ -46,11 +50,13 @@ internal sealed partial class DownloadsView
         urlLabel.Visible = !value; pageTitle.Visible = pageSubtitle.Visible = !value;
         if (!value)
         {
+            AppUi.Card(previewPanel); clearPreviewButton.Text = "×";
             foreach (var control in new Control?[] { dashboardQueue, dashboardChips, dashboardAdd, dashboardInspector, dashboardWidgets, dashboardStatus, dashboardStatusDot, dashboardStart, dashboardClear, dashboardDetails, dashboardPrevious, dashboardNext, dashboardPaging, dashboardLink })
                 control?.SetBounds(0, 0, 0, 0);
             AppUi.BindBackground(queueHost); AppUi.BindBackground(queueToolbar); AppUi.Card(queueEmpty, true); AppTypography.Bind(queueTitle, 16.5f, FontStyle.Bold);
         }
         BuildQueueCards(); ApplyLocalization(); UpdateLayout();
+        if (!value) analysisProgress.Bounds = classicAnalysisProgressBounds;
     }
     public void SetDashboardStatus(string value, string token) { if (dashboardStatus is not null) { dashboardStatus.Text = value; pasteToolTip.SetToolTip(dashboardStatus, value); AppUi.BindBackground(dashboardStatusDot!, token); } }
     private void EnsureDashboard()
@@ -139,10 +145,10 @@ internal sealed partial class DownloadsView
         if (dashboardQueue is null) return;
         AutoScroll = true;
         var origin = DisplayRectangle.Location; const int margin = 18; const int gap = 14;
-        var width = Math.Max(560, ClientSize.Width - margin * 2 - (AppTypography.Scale > 1.25 ? 18 : 0));
+        var width = Math.Max(0, DisplayRectangle.Width - margin * 2);
         var p = AppearancePresentation.Current.ModernDashboardShell;
         var inline = p.Inspector != DashboardInspectorMode.Hidden && width >= AppTypography.TextHeight(1080);
-        var inspectorWidth = inline ? Math.Clamp(width * 23 / 100, 290, AppTypography.TextHeight(310)) : 0;
+        var inspectorWidth = inline ? Math.Clamp(width / 4, 310, AppTypography.TextHeight(340)) : 0;
         var queueWidth = inline ? width - inspectorWidth - gap : width;
         var inputWidth = inline ? Math.Min(width, queueWidth + 36) : width;
         var row = AppTypography.TextHeight(46); var wideToolbar = queueWidth >= AppTypography.TextHeight(860);
@@ -166,31 +172,55 @@ internal sealed partial class DownloadsView
         previewPanel.Visible = previewVisible && previewState != PreviewState.PlaylistAnalyzed;
         playlistPreview.Visible = previewState == PreviewState.PlaylistAnalyzed;
         var top = dashboardChips.Bottom + 24;
-        // Analysis uses the same complete editor, temporarily expanded above the queue.
-        if (previewVisible)
+        if (playlistPreview.Visible)
         {
-            var previewHeight = AppTypography.TextHeight(GetPreviewHeight(false));
-            previewPanel.SetBounds(margin + origin.X, top, width, previewHeight); playlistPreview.SetBounds(previewPanel.Left, top, width, previewHeight);
-            var infoLeft = Math.Min(220, width / 4); var infoWidth = width - infoLeft - 28;
-            previewPlaceholder.SetBounds(14, 18, infoLeft - 30, (infoLeft - 30) * 9 / 16); previewImage.Bounds = previewPlaceholder.Bounds;
-            previewTitle.SetBounds(infoLeft, 10, infoWidth - 32, AppTypography.TextHeight(34)); previewFacts.SetBounds(infoLeft, previewTitle.Bottom + 4, infoWidth, AppTypography.TextHeight(32));
+            playlistPreview.SetBounds(margin + origin.X, top, width, AppTypography.TextHeight(GetPreviewHeight(false)));
+            top = playlistPreview.Bottom + gap;
+        }
+        else if (previewPanel.Visible)
+        {
+            // Measure the visible editor instead of borrowing Classic's fixed card height.
+            previewPanel.SetBounds(margin + origin.X, top, width, previewPanel.Height);
+            DashboardStyle.Card(previewPanel);
+            var imageWidth = Math.Min(176, width / 5); var infoLeft = imageWidth + 32; var infoWidth = Math.Max(0, width - infoLeft - 16);
+            previewPlaceholder.SetBounds(16, 16, imageWidth, imageWidth * 9 / 16); previewImage.Bounds = previewPlaceholder.Bounds;
+            previewIcon.SetBounds((imageWidth - previewIcon.Width) / 2, (previewPlaceholder.Height - previewIcon.Height) / 2, previewIcon.Width, previewIcon.Height);
+            sourceSummary.SetBounds(16, previewPlaceholder.Bottom + 8, imageWidth, DashboardVisual.LabelHeight(sourceSummary, imageWidth, 3));
+            previewTitle.SetBounds(infoLeft, 14, Math.Max(0, infoWidth - 38), DashboardVisual.LabelHeight(previewTitle, Math.Max(1, infoWidth - 38), 3));
+            previewFacts.SetBounds(infoLeft, previewTitle.Bottom + 4, infoWidth, DashboardVisual.LabelHeight(previewFacts, infoWidth, 2));
+            var bottom = previewFacts.Bottom;
             if (previewState == PreviewState.Analyzed)
             {
-                qualityLabel.SetBounds(infoLeft, previewFacts.Bottom + 4, infoWidth / 2 - 8, AppTypography.TextHeight(22)); containerLabel.SetBounds(infoLeft + infoWidth / 2, qualityLabel.Top, infoWidth / 2, qualityLabel.Height);
-                quality.SetBounds(infoLeft, qualityLabel.Bottom, infoWidth / 2 - 8, AppTypography.TextHeight(34)); container.SetBounds(containerLabel.Left, quality.Top, infoWidth / 2, quality.Height);
-                rangeEditor.SetBounds(infoLeft, quality.Bottom + 8, infoWidth, AppTypography.TextHeight(rangeEditor.IsCustom ? 80 : 34));
-                detailsButton.SetBounds(infoLeft, rangeEditor.Bottom + 8, Math.Max(90, infoWidth / 3 - 8), AppTypography.TextHeight(34));
-                advancedButton.SetBounds(detailsButton.Right + 8, detailsButton.Top, detailsButton.Width, detailsButton.Height); addButton.SetBounds(advancedButton.Right + 8, detailsButton.Top, detailsButton.Width, detailsButton.Height);
-                if (AppTypography.Scale > 1.25)
+                var paired = infoWidth >= AppTypography.TextHeight(480); var fieldWidth = paired ? (infoWidth - 12) / 2 : infoWidth;
+                var labelHeight = AppTypography.TextHeight(24); var fieldHeight = AppTypography.TextHeight(34);
+                qualityLabel.SetBounds(infoLeft, bottom + 10, fieldWidth, labelHeight); quality.SetBounds(infoLeft, qualityLabel.Bottom, fieldWidth, fieldHeight);
+                containerLabel.SetBounds(paired ? quality.Right + 12 : infoLeft, paired ? qualityLabel.Top : quality.Bottom + 8, fieldWidth, labelHeight);
+                container.SetBounds(containerLabel.Left, containerLabel.Bottom, fieldWidth, fieldHeight);
+                rangeEditor.SetBounds(infoLeft, container.Bottom + 10, infoWidth, rangeEditor.Height);
+                rangeHint.Visible = rangeEditor.IsCustom; rangeHint.Multiline = true;
+                if (rangeHint.Visible) rangeHint.SetBounds(infoLeft, rangeEditor.Bottom + 6, infoWidth, DashboardVisual.LabelHeight(rangeHint, infoWidth, 3));
+                else rangeHint.SetBounds(0, 0, 0, 0);
+                var actionTop = (rangeHint.Visible ? rangeHint.Bottom : rangeEditor.Bottom) + 10;
+                foreach (var button in new[] { detailsButton, advancedButton, addButton }) DashboardVisual.Button(button, button == addButton);
+                var actionWidth = new[] { detailsButton, advancedButton, addButton }.Max(b => DashboardVisual.ActionWidth(b));
+                var stack = actionWidth * 3 + 16 > infoWidth;
+                var x = infoLeft;
+                foreach (var button in new[] { detailsButton, advancedButton, addButton })
                 {
-                    detailsButton.Width = advancedButton.Width = addButton.Width = infoWidth;
-                    advancedButton.Left = addButton.Left = infoLeft; advancedButton.Top = detailsButton.Bottom + 8; addButton.Top = advancedButton.Bottom + 8;
+                    button.SetBounds(x, actionTop, stack ? infoWidth : actionWidth, fieldHeight);
+                    DashboardVisual.Button(button, button == addButton);
+                    if (stack) actionTop = button.Bottom + 8; else x = button.Right + 8;
                 }
-                feedback.SetBounds(infoLeft, Math.Max(detailsButton.Bottom, addButton.Bottom) + 6, infoWidth, AppTypography.TextHeight(28)); previewPanel.Height = Math.Max(previewPanel.Height, feedback.Bottom + 12);
+                bottom = addButton.Bottom;
             }
-            else { feedback.SetBounds(infoLeft, previewFacts.Bottom + 8, infoWidth, AppTypography.TextHeight(38)); analysisProgress.SetBounds(infoLeft, feedback.Bottom + 6, infoWidth, 6); }
-            clearPreviewButton.SetBounds(width - 42, 8, 30, 30);
-            top = Math.Max(previewPanel.Visible ? previewPanel.Bottom : 0, playlistPreview.Visible ? playlistPreview.Bottom : 0) + gap;
+            feedback.Visible = !string.IsNullOrWhiteSpace(feedback.Text) && previewState is PreviewState.Analyzed or PreviewState.Failed;
+            if (feedback.Visible) { feedback.SetBounds(infoLeft, bottom + 6, infoWidth, DashboardVisual.LabelHeight(feedback, infoWidth, 3)); bottom = feedback.Bottom; }
+            analysisProgress.Visible = previewState == PreviewState.Analyzing;
+            if (analysisProgress.Visible) { analysisProgress.SetBounds(infoLeft, bottom + 10, infoWidth, 6); bottom = analysisProgress.Bottom; }
+            clearPreviewButton.SetBounds(width - 42, 8, 30, 30); DashboardVisual.Button(clearPreviewButton); clearPreviewButton.Text = ""; DashboardVisual.Icon(clearPreviewButton, AppIconKind.Close, true);
+            foreach (var child in previewPanel.Controls.Where(c => !c.Visible)) child.SetBounds(0, 0, 0, 0);
+            previewPanel.Height = Math.Max(bottom, sourceSummary.Visible ? sourceSummary.Bottom : previewPlaceholder.Bottom) + 16;
+            top = previewPanel.Bottom + gap;
         }
         // MFN's default scroll canvas includes hidden children. A previous wider Classic
         // layout must not leave inactive preview/header rectangles outside this viewport.

@@ -16,6 +16,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private readonly Button retry = new DashboardButton() { AccessibleAutomationId = "HistoryRetry" };
     private readonly Button details = new DashboardButton(), options = new DashboardButton(), copy = new DashboardButton(), openFile = new DashboardButton(), openFolder = new DashboardButton(), apply = new DashboardButton(), advanced = new DashboardButton();
     private readonly AppVectorIcon copyGlyph = new(AppIconKind.Clipboard, 18);
+    private readonly AppVectorIcon emptyIcon = new(AppIconKind.Info, 32, AppThemeTokens.TextSecondary) { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
     private readonly PictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom };
     private readonly Label title = AppUi.Heading("", 12), author = AppUi.Muted(), link = AppUi.Muted(), facts = AppUi.Muted(), hint = AppUi.Muted();
     private readonly Panel editor = new();
@@ -31,6 +32,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private SponsorBlockOptions sponsors = new();
     private VideoMetadata? metadata;
     private bool disposed, showOptions, queued, hasSelection, thumbnailFailed;
+    private bool arranging;
     private string factText = "";
     public DashboardInspector(AppServices services)
     {
@@ -43,8 +45,9 @@ internal sealed class DashboardInspector : AppScrollPanel
         copyGlyph.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden; copyGlyph.Click += (_, _) => copy.PerformClick(); copy.Controls.Add(copyGlyph); AppTypography.Bind(options, 9.5f);
         AppUi.Primary(apply); AppUi.Input(quality); AppUi.Input(container); AppUi.Surface(editor);
         range = new(services.Localization, "Inspector") { CompactLayout = true };
+        range.ModeChanged += (_, _) => LayoutInspector();
         editor.Controls.AddRange([qualityLabel, quality, containerLabel, container, range, advanced, apply, hint]);
-        Controls.AddRange([details, options, image, title, author, link, copy, facts, fields, editor, openFile, openFolder, retry]);
+        Controls.AddRange([details, options, image, title, author, link, copy, facts, fields, editor, openFile, openFolder, retry, emptyIcon]);
         details.Click += (_, _) => { showOptions = false; LayoutInspector(); }; options.Click += (_, _) => { showOptions = true; LayoutInspector(); };
         copy.Click += async (_, _) =>
         {
@@ -173,24 +176,54 @@ internal sealed class DashboardInspector : AppScrollPanel
         var t = services.Localization; details.Text = t["Common.Details"]; options.Text = t["Dashboard.OptionsShort"];
         copy.Text = ""; copy.AccessibleName = t["Dashboard.CopyUrl"]; tips.SetToolTip(copy, copy.AccessibleName); openFile.Text = t["Common.OpenFile"]; openFolder.Text = t["Common.OpenFolder"];
         qualityLabel.Text = t["Downloads.Quality"]; containerLabel.Text = t["Downloads.Container"];
+        quality.AccessibleName = qualityLabel.Text; container.AccessibleName = containerLabel.Text;
         retry.Text = t["Common.Retry"]; apply.Text = t["Dashboard.ApplyOptions"]; advanced.Text = t["Advanced.MoreOptions"]; facts.Text = factText;
         quality.Enabled = container.Enabled = range.Enabled = advanced.Enabled = apply.Enabled = queued && metadata is not null;
     }
-    private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(RefreshText);
+    private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() => { RefreshText(); LayoutInspector(); });
+    protected override void OnLayout(LayoutEventArgs e)
+    {
+        base.OnLayout(e);
+        // The scroll rail can appear without SizeChanged. Reflow against its new viewport.
+        if (range is not null) LayoutInspector();
+    }
     private void LayoutInspector()
+    {
+        if (arranging) return;
+        arranging = true;
+        try
+        {
+            // Showing Options may introduce a rail during this arrangement. Settle both
+            // width and extent now, rather than waiting for an unrelated outer resize.
+            for (var pass = 0; pass < 3; pass++)
+            {
+                var viewportWidth = DisplayRectangle.Width;
+                SuspendLayout();
+                try { ArrangeInspector(); }
+                finally { ResumeLayout(true); }
+                if (DisplayRectangle.Width == viewportWidth) break;
+            }
+        }
+        finally { arranging = false; }
+    }
+    private void ArrangeInspector()
     {
         foreach (var control in new Control[] { image, author, link, copy, facts, openFile, openFolder }) control.Visible = hasSelection;
         // DisplayRectangle is the actual viewport after the native scroll rail.
-        var viewport = DisplayRectangle; var o = viewport.Location; var width = Math.Max(180, viewport.Width - 24); var line = AppTypography.TextHeight(34);
+        var viewport = DisplayRectangle; var o = viewport.Location; var width = Math.Max(0, viewport.Width - 24); var line = AppTypography.TextHeight(34);
         retry.Visible = historyMode && hasSelection;
         details.SetBounds(12 + o.X, 10 + o.Y, width / 2, line); options.SetBounds(details.Right + 4, details.Top, width / 2 - 4, line);
         DashboardVisual.Tab(details, !showOptions); DashboardVisual.Tab(options, showOptions);
+        emptyIcon.Visible = !hasSelection;
         if (!hasSelection)
         {
-            title.SetBounds(12 + o.X, details.Bottom + 40, width, AppTypography.TextHeight(100)); editor.Visible = fields.Visible = false;
-            foreach (var hidden in new Control[] { image, author, link, copy, facts, fields, editor, openFile, openFolder, retry }) hidden.SetBounds(0, 0, 0, 0);
+            emptyIcon.SetBounds(12 + o.X + (width - 32) / 2, details.Bottom + 44, 32, 32);
+            title.TextAlign = ContentAlignment.MiddleCenter;
+            title.SetBounds(24 + o.X, emptyIcon.Bottom + 16, Math.Max(0, width - 24), DashboardVisual.LabelHeight(title, Math.Max(1, width - 24), 3)); editor.Visible = fields.Visible = false;
+            foreach (var hidden in new Control[] { options, image, author, link, copy, facts, fields, editor, openFile, openFolder, retry }) hidden.SetBounds(0, 0, 0, 0);
             return;
         }
+        emptyIcon.SetBounds(0, 0, 0, 0); title.TextAlign = ContentAlignment.TopLeft;
         image.Visible = !string.IsNullOrWhiteSpace(thumbnailUrl) && !thumbnailFailed;
         image.SetBounds(12 + o.X, details.Bottom + 14, width, image.Visible ? width * 9 / 16 : 0);
         title.SetBounds(12 + o.X, image.Bottom + 12, width, DashboardVisual.LabelHeight(title, width, 3));
@@ -201,12 +234,12 @@ internal sealed class DashboardInspector : AppScrollPanel
         var editing = showOptions && queueId is not null;
         editor.Visible = editing; facts.Visible = false; fields.Visible = !editing;
         fields.SetBounds(12 + o.X, copy.Bottom + 10, width, fields.Height);
-        editor.SetBounds(12 + o.X, copy.Bottom + 14, width, AppTypography.TextHeight(390));
+        editor.SetBounds(12 + o.X, copy.Bottom + 14, width, editor.Height);
         qualityLabel.SetBounds(0, 0, width, AppTypography.TextHeight(24)); quality.SetBounds(0, qualityLabel.Bottom, width, line);
         containerLabel.SetBounds(0, quality.Bottom + 10, width, AppTypography.TextHeight(24)); container.SetBounds(0, containerLabel.Bottom, width, line);
-        range.SetBounds(0, container.Bottom + 12, width, AppTypography.TextHeight(200));
+        range.SetBounds(0, container.Bottom + 12, width, range.Height);
         advanced.SetBounds(0, range.Bottom + 8, width, line); apply.SetBounds(0, advanced.Bottom + 8, width, line);
-        hint.SetBounds(0, apply.Bottom + 8, width, AppTypography.TextHeight(70)); editor.Height = hint.Bottom + 4;
+        hint.SetBounds(0, apply.Bottom + 8, width, DashboardVisual.LabelHeight(hint, width, 5)); editor.Height = hint.Bottom + 4;
         var paired = width >= AppTypography.TextHeight(240);
         openFile.SetBounds(12 + o.X, (editing ? editor.Bottom : fields.Bottom) + 12, paired ? (width - 8) / 2 : width, line);
         openFolder.SetBounds(paired ? openFile.Right + 8 : openFile.Left, paired ? openFile.Top : openFile.Bottom + 8, openFile.Width, line);
@@ -222,6 +255,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         facts.SetBounds(0, 0, 0, 0);
         if (!editing) editor.SetBounds(0, 0, 0, 0); else fields.SetBounds(0, 0, 0, 0);
         if (!historyMode) retry.SetBounds(0, 0, 0, 0);
+        if (!options.Visible) options.SetBounds(0, 0, 0, 0);
     }
     protected override void Dispose(bool disposing) { if (disposing && !disposed) { disposed = true; lifetime.Cancel(); lifetime.Dispose(); tips.Dispose(); services.Localization.LanguageChanged -= LanguageChanged; } base.Dispose(disposing); }
 }

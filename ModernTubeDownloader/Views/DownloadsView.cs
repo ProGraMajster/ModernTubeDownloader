@@ -282,7 +282,7 @@ internal sealed partial class DownloadsView : UserControl
         services.Tools.Changed += ToolStatusChanged;
         try
         {
-            if (useDashboard) { dashboard = true; EnsureDashboard(); }
+            if (useDashboard) { dashboard = true; rangeEditor.ResponsiveLayout = true; rangeHint.Multiline = true; EnsureDashboard(); }
             ApplyLocalization();
             SetPreviewState(PreviewState.Empty);
             BuildQueueCards();

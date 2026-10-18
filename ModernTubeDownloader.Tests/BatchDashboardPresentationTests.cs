@@ -67,6 +67,19 @@ public sealed class BatchDashboardPresentationTests
                 Assert.True(quality.Parent.Visible); Assert.Same(quality.Parent, apply.Parent!.Parent);
                 Assert.True(quality.Right <= quality.Parent.Width && quality.Bottom <= quality.Parent.Height);
                 Assert.True(apply.Right <= apply.Parent.Width && apply.Bottom <= apply.Parent.Height);
+                var mode = Find<ComboBox>(view, "BatchRangeMode");
+                var range = mode.Parent!; var fullHeight = range.Height;
+                mode.SelectedIndex = 1; host.ProcessPendingWork();
+                Assert.All(range.Controls.Where(c => c.Visible), c =>
+                {
+                    Assert.True(c.Right <= range.Width && c.Bottom <= range.Height);
+                    Assert.True(c.Height > 0 && c.Width > 0);
+                });
+                Assert.True(apply.Parent.Top >= range.Bottom);
+                mode.SelectedIndex = 0; host.ProcessPendingWork();
+                Assert.Equal(fullHeight, range.Height);
+                Assert.Equal(System.Drawing.Rectangle.Empty, Find<TextBox>(view, "BatchRangeStart").Bounds);
+                Assert.Equal(System.Drawing.Rectangle.Empty, Find<TextBox>(view, "BatchRangeEnd").Bounds);
                 Find<Button>(view, "BatchOptions").PerformClick(); host.ProcessPendingWork();
                 Assert.False(quality.Parent.Visible);
                 Assert.Equal(collapsedContentHeight, classicBody.DisplayRectangle.Height);

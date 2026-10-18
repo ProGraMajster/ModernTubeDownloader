@@ -24,6 +24,7 @@ public sealed class MainForm : Form
     private readonly AppShellHost shellHost;
     private readonly CaptionLabel caption = new();
     private readonly Button captionTheme = new();
+    private readonly ToolTip captionTips = new();
     private bool fallbackNotice;
     private readonly Panel content;
     private readonly BatchImportView batchView;
@@ -296,7 +297,10 @@ public sealed class MainForm : Form
         if (modern)
         {
             TitleBar.Text = ""; caption.Text = "ModernTubeDownloader   v" + AppBranding.Version;
-            captionTheme.Text = text["Dashboard.Theme"]; captionTheme.SetBounds(Math.Max(52, TitleBar.Width - 252), 8, 96, Math.Max(28, TitleBar.Height - 16));
+            captionTheme.Text = ""; captionTheme.AccessibleName = text["Dashboard.Theme"];
+            captionTips.SetToolTip(captionTheme, captionTheme.AccessibleName);
+            captionTheme.SetBounds(Math.Max(52, TitleBar.Width - 200), (TitleBar.Height - 34) / 2, 36, 34);
+            DashboardVisual.Button(captionTheme); DashboardVisual.Icon(captionTheme, AppIconKind.Sun, iconOnly: true);
             var captionLeft = TitleBar.Height + 8; caption.SetBounds(captionLeft, 0, Math.Max(180, captionTheme.Left - captionLeft - 14), TitleBar.Height);
         }
         else TitleBar.Text = Text;
@@ -690,7 +694,7 @@ public sealed class MainForm : Form
     {
         if (disposing)
         {
-            tray.Dispose();
+            captionTips.Dispose(); tray.Dispose();
             services.Queue.Changed -= StateChanged;
             services.Tools.Changed -= StateChanged;
             services.Live.Changed -= StateChanged; services.Updates.Changed -= StateChanged;

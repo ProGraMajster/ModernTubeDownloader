@@ -627,8 +627,10 @@ internal sealed class SettingsView : UserControl
         categories.WrapContents = true; categories.FlowDirection = FlowDirection.LeftToRight;
         if (dashboard)
         {
-            var searchInline = width >= AppTypography.TextHeight(850);
-            categorySearch.SetBounds(searchInline ? ClientSize.Width - 304 : page, searchInline ? 28 : header.Bottom + 8, searchInline ? 280 : width, AppTypography.TextHeight(36));
+            var searchWidth = Math.Max(AppTypography.TextHeight(240), DashboardVisual.TextWidth(categorySearch, categorySearch.Placeholder) + 36);
+            var searchInline = width - searchWidth - 16 >= AppTypography.TextHeight(600);
+            categorySearch.SetBounds(searchInline ? ClientSize.Width - page - searchWidth : page, searchInline ? 28 : header.Bottom + 8,
+                searchInline ? searchWidth : width, AppTypography.TextHeight(36));
             dashboardHeadingIcon.SetBounds(0, 6, 40, 40);
             pageTitle.Left = pageSubtitle.Left = 60;
             pageTitle.Width = pageSubtitle.Width = Math.Max(1, (searchInline ? categorySearch.Left - page - 16 : width) - 60);
@@ -645,9 +647,14 @@ internal sealed class SettingsView : UserControl
             categories.SetBounds(24, (searchInline ? header.Bottom : categorySearch.Bottom) + 12, categoryWidth, categoryRows * (AppTypography.TextHeight(40) + 8));
             scroll.SetBounds(0, categories.Bottom + 14, ClientSize.Width, Math.Max(120, ClientSize.Height - categories.Bottom - 26));
         }
-        var columnCount = dashboard && AppTypography.Scale <= 1.25 ? Math.Max(1, Math.Min(currentCategory == "General" ? 3 : 2, (scroll.ClientSize.Width - 36) / (currentCategory == "General" ? 370 : 556))) : 1;
+        var contentWidth = dashboard ? scroll.DisplayRectangle.Width : scroll.ClientSize.Width;
+        // Reparenting the shared page during a shell swap briefly gives the
+        // viewport zero width. Wait for its real allocation before laying out cards.
+        if (dashboard && contentWidth <= 60) return;
+        var columnCount = dashboard && AppTypography.Scale <= 1.25 ? Math.Max(1, Math.Min(currentCategory == "General" ? 3 : 2, (contentWidth - 36) / (currentCategory == "General" ? 370 : 556))) : 1;
         var grid = columnCount > 1;
-        var cardWidth = Math.Max(dashboard && currentCategory == "General" ? 340 : 540, grid ? (scroll.ClientSize.Width - 48 - (columnCount - 1) * 12) / columnCount : scroll.ClientSize.Width - 60);
+        var cardWidth = dashboard ? Math.Max(1, grid ? (contentWidth - 48 - (columnCount - 1) * 12) / columnCount : contentWidth - 60) :
+            Math.Max(540, scroll.ClientSize.Width - 60);
         notificationCard.LayoutForWidth(cardWidth);
         startupCard.LayoutForWidth(cardWidth);
         updatesCard.LayoutForWidth(cardWidth);

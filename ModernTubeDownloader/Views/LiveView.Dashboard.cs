@@ -50,7 +50,7 @@ internal sealed partial class LiveView
     private void LayoutDashboard()
     {
         if (inspector is null) return;
-        var origin = scroll.DisplayRectangle.Location; var width = Math.Max(560, scroll.ClientSize.Width - 36);
+        var origin = scroll.DisplayRectangle.Location; var width = Math.Max(0, scroll.DisplayRectangle.Width - 36);
         var inspectorEnabled = AppearancePresentation.Current.ModernDashboardShell.Inspector != DashboardInspectorMode.Hidden;
         var line = AppTypography.TextHeight(44); var inline = inspectorEnabled && width >= AppTypography.TextHeight(1050);
         var right = inline ? Math.Clamp(width * 25 / 100, 300, AppTypography.TextHeight(330)) : 0;
@@ -100,7 +100,7 @@ internal sealed partial class LiveView
             next = section.Panel.Bottom + 12;
         }
         inspector.Visible = inspectorEnabled;
-        var inspectorHeight = inline ? Math.Max(AppTypography.TextHeight(580), ClientSize.Height - top + origin.Y - 18) : AppTypography.TextHeight(500);
+        var inspectorHeight = inline ? Math.Max(AppTypography.TextHeight(300), scroll.ClientSize.Height - top + origin.Y - 18) : AppTypography.TextHeight(500);
         if (inspectorEnabled)
             inspector.SetBounds(inline ? 18 + origin.X + center + 12 : 18 + origin.X, inline ? top : next, inline ? right : width, inspectorHeight);
         else inspector.SetBounds(0, 0, 0, 0);
@@ -114,6 +114,7 @@ internal sealed partial class LiveView
         var selected = selectedSession is { } id ? services.Live.Find(id) : null;
         selected ??= services.Live.Snapshot().FirstOrDefault();
         if (selected is not null) SelectSession(selected);
+        else inspector.Clear();
     }
 }
 
@@ -129,7 +130,7 @@ internal sealed partial class LiveSessionCard
     public void SetDashboard(bool value)
     {
         dashboard = value;
-        AppTypography.Bind(title, value ? 11 : 13, FontStyle.Bold);
+        AppTypography.Bind(title, value ? DashboardVisual.ItemTitle : 13, FontStyle.Bold);
         AppTypography.Bind(facts, value ? 9.25f : 10.5f); AppTypography.Bind(state, value ? 9.5f : 10.5f);
         AppTypography.SetDashboardPresentation(this, value);
         if (!value)

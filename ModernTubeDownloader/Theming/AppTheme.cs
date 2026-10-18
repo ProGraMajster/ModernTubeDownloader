@@ -243,8 +243,8 @@ public sealed class AppAppearanceService : IDisposable
     {
         var dark = variant == ThemeVariant.Dark;
         var theme = CreateTheme(dark ? DarkThemeId : LightThemeId, "Modern Dashboard", dark ? BuiltInThemes.DarkThemeId : BuiltInThemes.LightThemeId,
-            variant, dark ? "#0D161E" : "#F2F5F8", dark ? "#141F28" : "#FAFBFD", dark ? "#1B2A36" : "#E9EFF5",
-            dark ? "#263A4B" : "#DCE8F4", dark ? "#293A49" : "#CBD7E3", dark ? "#F2F6FA" : "#172637",
+            variant, dark ? "#0E161D" : "#F2F5F8", dark ? "#141D24" : "#FAFBFD", dark ? "#1B2731" : "#E9EFF5",
+            dark ? "#263744" : "#DCE8F4", dark ? "#293844" : "#CBD7E3", dark ? "#F2F6FA" : "#172637",
             dark ? "#AEB9C7" : "#4F6378", dark ? "#91A1B5" : "#53677B", "#076DE2", "#0872E4", "#0965C7",
             dark ? "#38D996" : "#087E52", dark ? "#FFB548" : "#926000", dark ? "#FF5D6C" : "#BA2438", dark ? "#48A6FF" : "#0965C7",
             dark ? "#0F1925" : "#E7EEF6", dark ? "#203249" : "#D8E5F3", dark ? "#173E6C" : "#CFE3FC");

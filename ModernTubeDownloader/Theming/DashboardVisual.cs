@@ -14,7 +14,14 @@ internal static class DashboardVisual
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Control, PaddingRecipe> originalPadding = new();
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Button, AppVectorIcon> icons = new();
     public const int Margin = 20, Gap = 12, Radius = 10, Input = 46, Action = 36, Row = 98;
+    public const float ItemTitle = 11.5f, Metadata = 9.5f, Caption = 9;
     public static int Text(int value) => AppTypography.TextHeight(value);
+    public static int TextWidth(Control control, string text)
+    {
+        var style = control.CurrentStyle;
+        return (int)Math.Ceiling(TextMeasurer.MeasureText(text, style.GetFont(), style.GetFontSize(),
+            new Size(int.MaxValue, int.MaxValue), style.GetFontStyle()).Width);
+    }
     public static int LabelHeight(Label label, int width, int maxLines)
     {
         var style = label.CurrentStyle;

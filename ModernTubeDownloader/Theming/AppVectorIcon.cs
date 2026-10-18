@@ -12,7 +12,7 @@ internal enum AppIconKind
     Queue,
     Live,
     History,
-    Settings, Help, Info, Link, Search, Play, Close, More, Retry, Folder, Plus, Pause, Trash, ChevronDown, Check
+    Settings, Help, Info, Link, Search, Play, Close, More, Retry, Folder, Plus, Pause, Trash, ChevronDown, Check, Sun
 }
 
 internal sealed class AppVectorIcon : UserControl
@@ -65,6 +65,15 @@ internal sealed class AppVectorIcon : UserControl
     {
         switch (kind)
         {
+            case AppIconKind.Sun:
+                AddCircle(8 * scale, 8 * scale, 8 * scale, scale);
+                for (var ray = 0; ray < 8; ray++)
+                {
+                    var angle = ray * MathF.PI / 4;
+                    AddLine((12 + MathF.Cos(angle) * 8) * scale, (12 + MathF.Sin(angle) * 8) * scale,
+                        (12 + MathF.Cos(angle) * 10) * scale, (12 + MathF.Sin(angle) * 10) * scale, scale);
+                }
+                break;
             case AppIconKind.Check:
                 AddCircle(2*scale,2*scale,20*scale,scale); AddPath(scale, [OpenFigure((7,12),(10,15),(17,8))]); break;
             case AppIconKind.Plus:
