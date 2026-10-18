@@ -238,6 +238,17 @@ public static class MtdAutomationWindowCloser {
         if (width <= 0 || height <= 0) throw new InvalidOperationException("Owned capture HWND has invalid dimensions.");
         return new[] { width, height };
     });
+    public static bool ClickOwnedCaptionTheme(int processId, IntPtr hwnd, int textScale) => InPhysicalCoordinates(() => {
+        GetWindowThreadProcessId(hwnd, out uint owner);
+        if (owner != processId || !IsWindowVisible(hwnd) || !GetWindowRect(hwnd, out NativeRect rect))
+            throw new InvalidOperationException("Cannot target the owned caption.");
+        // MainForm.LayoutCaption places the 36px button 200px from the titlebar's right.
+        // Managed non-client children are not exposed by the pinned MFN semantic root.
+        double dpi = GetDpiForWindow(hwnd) / 96.0;
+        int x = rect.Right - (int)Math.Round(183 * dpi);
+        int y = rect.Top + (int)Math.Round((1 + 24 * Math.Max(1, textScale / 100.0)) * dpi);
+        return SendMouse(hwnd, 0x0200, x, y, false) && SendMouse(hwnd, 0x0201, x, y, true) && SendMouse(hwnd, 0x0202, x, y, false);
+    });
     private struct GuiThreadInfo {
         public uint Size, Flags;
         public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
@@ -703,6 +714,20 @@ try {
             Write-Output 'Native queue pagination: next/previous pages contain their expected canonical identities.'
         }
         if ($DashboardLayoutSmoke) {
+            function Invoke-CaptionTheme {
+                $path = Join-Path $dataRoot 'appearance.json'
+                $before = (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).global.theme
+                $expected = if ($before -eq 2) { 1 } else { 2 }
+                if (-not [MtdAutomationWindowCloser]::ClickOwnedCaptionTheme($script:automationProcess.Id, $script:automationProcess.MainWindowHandle, $AppTextScale)) { throw 'Owned caption click failed.' }
+                $watch = [Diagnostics.Stopwatch]::StartNew()
+                do {
+                    $current = (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).global.theme
+                    if ($current -eq $expected) { break }
+                    Start-Sleep -Milliseconds 100
+                } while ($watch.Elapsed.TotalSeconds -lt 15)
+                if ($current -ne $expected) { throw 'Caption mouse input did not persist the expected theme.' }
+                Write-Output 'Caption theme changed through owned HWND mouse input; non-client caption UIA is not qualified.'
+            }
             function Select-RangeMode([string]$automationId, [bool]$custom) {
                 $node = Find-Node $automationId $mainRoot
                 $state = Invoke-AutomationCli -CliArguments @('inspect','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--session',$node.handle.sessionId,'--node',$node.handle.runtimeId)
@@ -724,9 +749,9 @@ try {
             Capture-Dashboard 'inspector-options-actions'
             $savedOptions = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)[0]
             if ($savedOptions.requestedRange.mode -ne 1 -or $savedOptions.requestedRange.start -ne '00:00:02' -or $savedOptions.requestedRange.end -ne '00:00:10') { throw 'Inspector did not persist the custom range into the canonical queue.' }
-            Invoke-NodeAction (Find-Node 'CaptionTheme' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Invoke-CaptionTheme
             Capture-Dashboard 'inspector-theme-changed'
-            Invoke-NodeAction (Find-Node 'CaptionTheme' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Invoke-CaptionTheme
             Select-RangeMode 'InspectorRangeMode' $false
             Invoke-NodeAction (Find-Node 'InspectorApplyOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
             Invoke-NodeAction (Find-Node 'InspectorDetails' $mainRoot) $mainRoot 'Invoke' | Out-Null
