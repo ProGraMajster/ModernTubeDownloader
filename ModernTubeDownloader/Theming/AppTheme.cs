@@ -159,7 +159,10 @@ public sealed class AppAppearanceService : IDisposable
         {
             Transition = new ThemeTransitionOptions
             {
-                Enabled = animated && Profile.Global.Animations,
+                // MFN color-transition frames repaint without invalidating TextBox's cached
+                // shaped text. Commit Modern themes atomically so existing inputs retain
+                // readable target colors; preserve Classic's established transition policy.
+                Enabled = animated && Profile.Global.Animations && InterfaceMode != AppInterfaceMode.ModernDashboard,
                 Duration = TimeSpan.FromMilliseconds(AppearancePresentation.AnimationMilliseconds(220)),
                 Easing = ThemeEasing.EaseInOut,
                 RespectReducedMotion = true

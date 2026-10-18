@@ -785,6 +785,26 @@ try {
         Invoke-NodeAction (Find-Node 'NavSettings' $mainRoot) $mainRoot 'Invoke' | Out-Null
         Invoke-NodeAction (Find-Node 'SettingsCategoryPersonalization' $mainRoot) $mainRoot 'Invoke' | Out-Null
         Capture-Dashboard 'dashboard-personalization'
+        if ($DashboardTransferSmoke) {
+            # Queue admission pause does not stop the running transfer. Observe its durable
+            # completion before testing that chrome changes leave a quiescent queue intact.
+            $completionClock = [Diagnostics.Stopwatch]::StartNew()
+            do {
+                $queueStream = [IO.File]::Open((Join-Path $dataRoot 'queue.json'), [IO.FileMode]::Open, [IO.FileAccess]::Read,
+                    ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+                $queueReader = [IO.StreamReader]::new($queueStream)
+                try { $completedQueue = @($queueReader.ReadToEnd() | ConvertFrom-Json) }
+                finally { $queueReader.Dispose() }
+                $completed = $completedQueue.Count -eq 1 -and ([guid]$completedQueue[0].id).ToString('N') -eq $id -and
+                    $completedQueue[0].status -eq 6 -and $completedQueue[0].progressPercent -eq 100 -and
+                    $completedQueue[0].finalFile -and (Test-Path -LiteralPath $completedQueue[0].finalFile)
+                if ($completed) { break }
+                Start-Sleep -Milliseconds 100
+            } while ($completionClock.Elapsed.TotalSeconds -lt 15)
+            if (-not $completed) { throw 'Controlled transfer did not persist completion and its final file before shell-switch verification.' }
+            Write-Output 'Controlled transfer durable completion/final file PASS before unchanged-queue shell-switch assertion.'
+        }
+        Copy-Item -LiteralPath (Join-Path $dataRoot 'queue.json') -Destination (Join-Path $dataRoot 'queue-before-switch.json')
         $queueBeforeSwitch = (Get-FileHash -LiteralPath (Join-Path $dataRoot 'queue.json') -Algorithm SHA256).Hash
         $script:automationProcess.Refresh(); $memoryBefore = $script:automationProcess.PrivateMemorySize64
         $passes = if ($DashboardSwitchStress) { 20 } else { 1 }
@@ -806,6 +826,7 @@ try {
         $runtimeLog = (Get-ChildItem -LiteralPath (Join-Path $dataRoot 'logs') -File | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
         if ([regex]::Matches($runtimeLog, 'Native tray icon registered\.').Count -ne 2) { throw 'Shell switches registered an extra tray icon (two owned QA processes expected).' }
         $queueAfterSwitch = (Get-FileHash -LiteralPath (Join-Path $dataRoot 'queue.json') -Algorithm SHA256).Hash
+        Copy-Item -LiteralPath (Join-Path $dataRoot 'queue.json') -Destination (Join-Path $dataRoot 'queue-after-switch.json')
         if ($queueBeforeSwitch -ne $queueAfterSwitch) { throw 'Shell switches changed the persisted queue.' }
         $script:automationProcess.Refresh(); Write-Output "Indicative private bytes before/after switches: $memoryBefore / $($script:automationProcess.PrivateMemorySize64); not a GC-normalized leak proof."
         Invoke-NodeAction (Find-Node 'NavDownloads' $mainRoot) $mainRoot 'Invoke' | Out-Null

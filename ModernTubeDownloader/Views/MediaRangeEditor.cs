@@ -26,10 +26,10 @@ internal sealed class MediaRangeEditor : Panel
         mode = new ComboBox { AccessibleAutomationId = automationPrefix + "RangeMode" };
         AppUi.Input(mode);
         fromLabel = AppUi.Muted();
-        from = new TextBox { AccessibleAutomationId = automationPrefix + "RangeStart", Placeholder = "hh:mm:ss" };
+        from = new AppThemeTextBox { AccessibleAutomationId = automationPrefix + "RangeStart", Placeholder = "hh:mm:ss" };
         AppUi.Input(from);
         toLabel = AppUi.Muted();
-        to = new TextBox { AccessibleAutomationId = automationPrefix + "RangeEnd", Placeholder = "hh:mm:ss" };
+        to = new AppThemeTextBox { AccessibleAutomationId = automationPrefix + "RangeEnd", Placeholder = "hh:mm:ss" };
         AppUi.Input(to);
         Controls.AddRange([label, mode, fromLabel, from, toLabel, to]);
         mode.SelectedIndexChanged += (_, _) => UpdateVisibility();
