@@ -173,7 +173,7 @@ public sealed class QueueProcessorTests : IAsyncLifetime
             harness.Executor.Complete(processor.ActiveItemIds.Single());
         }
         await WaitUntilAsync(() => processor.RemainingAdmissionDelay is not null, TimeSpan.FromSeconds(5));
-        Assert.InRange(processor.RemainingAdmissionDelay!.Value.TotalSeconds, 0.1, 3.1);
+        Assert.Equal(TimeSpan.FromSeconds(3), processor.RemainingAdmissionDelay);
         Assert.NotNull(processor.NextAdmissionAt);
 
         harness.Queue.SetPaused(true);
@@ -245,7 +245,10 @@ public sealed class QueueProcessorTests : IAsyncLifetime
 
     private sealed class LongPacingTiming : IDownloadTiming
     {
-        public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+        // This test observes the gate, not elapsed wall time. A busy runner could
+        // previously consume the 3-second window before the continuation inspected
+        // it, admit the next held worker and correctly hide a now slot-blocked gate.
+        public DateTimeOffset UtcNow { get; } = DateTimeOffset.UnixEpoch;
         public TimeSpan NextAdmissionDelay(int minimumSeconds, int maximumSeconds) => TimeSpan.FromSeconds(3);
         public TimeSpan RetryDelay(int failedAttempt, DownloadFailureCategory category) => TimeSpan.Zero;
         public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.Delay(delay, cancellationToken);
