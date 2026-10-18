@@ -6,6 +6,7 @@ Stability/performance patch; Classic UI and the existing download/LIVE ownership
 
 ### Fixed
 
+- Apply download/merge progress before phase completion instead of allowing delayed callbacks to overwrite interrupted/terminal job state.
 - Pause queue admission when the destination folder/drive becomes unavailable.
 - Protect queue persistence after disk-full/write failures and require a successful
   writable probe and current checkpoint before explicit Resume.

@@ -16,7 +16,8 @@ and download defaults are one, with saved preferences preserved. No Modern Dashb
 new scheduler, retry/auth policy change or MFN upgrade is included.
 MFN remains clean committed `8d8a7679779608b4edbee7dc687c13e3b1a611d9`, with no local patch.
 
-Release-local source qualification: Debug/Release 775/775 each, JS 92/92. Final release results,
+Release-local source qualification: Debug/Release 779/779 each, JS 92/92, including ordered
+worker-progress regression coverage. Final release results,
 native Batch/official ZIP checks and updater 1.2.0 → 1.2.1 evidence belong in the final report.
 Windows 11 23H2 physical testing, exhaustive DPI/devices/soak and clean-PC updater remain
 unqualified. MFN #204/#205, Experimental SponsorBlock Remove and LIVE FromStart limits remain.

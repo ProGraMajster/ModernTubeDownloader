@@ -96,6 +96,12 @@ public sealed class WorkflowIntegrationTests(ITestOutputHelper output) : IAsyncL
             Assert.NotEmpty(Directory.EnumerateFiles(services.Settings.Current.TemporaryDirectory, "*.m4a", SearchOption.AllDirectories));
             Assert.Empty(services.History.Snapshot());
         }
+        catch
+        {
+            output.WriteLine($"Merge admission failure: Status={item.Status}; Active={services.Processor.ActiveItemIds.Count}; " +
+                $"Storage={services.Queue.Storage.State.Kind}; Attempts={item.AttemptCount}; FailureCategory={item.FailureCategory}");
+            throw;
+        }
         finally { await services.ShutdownAsync(); }
     }
 
