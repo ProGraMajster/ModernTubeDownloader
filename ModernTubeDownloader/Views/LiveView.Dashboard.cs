@@ -99,22 +99,30 @@ internal sealed partial class LiveView
             section.Empty.SetBounds(14, 16, center - 28, AppTypography.TextHeight(36)); section.Empty.Visible = listHeight == 0;
             next = section.Panel.Bottom + 12;
         }
+        // The list owns only its rows. A stacked inspector must not enlarge the
+        // list background or reserve a full details form when nothing is selected.
+        var listBottom = inline ? Math.Max(next + 24, ClientSize.Height - AppTypography.TextHeight(164)) : next;
+        dashboardList!.SetBounds(18 + origin.X, top, center, inline ? Math.Max(AppTypography.TextHeight(240), listBottom - top) : listBottom - top);
+        dashboardList.SendToBack();
+        next = dashboardList.Bottom + 12;
         inspector.Visible = inspectorEnabled;
         var inspectorHeight = inline ? Math.Max(AppTypography.TextHeight(300), scroll.ClientSize.Height - top + origin.Y - 18) : AppTypography.TextHeight(500);
         if (inspectorEnabled)
             inspector.SetBounds(inline ? 18 + origin.X + center + 12 : 18 + origin.X, inline ? top : next, inline ? right : width, inspectorHeight);
         else inspector.SetBounds(0, 0, 0, 0);
+        var selected = selectedSession is { } id ? services.Live.Find(id) : null;
+        selected ??= services.Live.Snapshot().FirstOrDefault();
+        if (selected is not null) SelectSession(selected);
+        else
+        {
+            inspector.Clear();
+            if (inspectorEnabled && !inline) inspector.Height = inspector.EmptyContentHeight;
+        }
         if (!inline && inspector.Visible) next = inspector.Bottom + 12;
-        var listBottom = Math.Max(next + 24, ClientSize.Height - AppTypography.TextHeight(164));
-        dashboardList!.SetBounds(18 + origin.X, top, center, Math.Max(AppTypography.TextHeight(240), listBottom - top)); dashboardList.SendToBack();
         widgets!.Visible = AppearancePresentation.Current.ModernDashboardShell.Widgets != DashboardWidgetsMode.Hidden;
         if (widgets.Visible)
             widgets.SetBounds(18 + origin.X, Math.Max(next, dashboardList.Bottom + 12), inline ? center : width, widgets.Height);
         else widgets.SetBounds(0, 0, 0, 0);
-        var selected = selectedSession is { } id ? services.Live.Find(id) : null;
-        selected ??= services.Live.Snapshot().FirstOrDefault();
-        if (selected is not null) SelectSession(selected);
-        else inspector.Clear();
     }
 }
 

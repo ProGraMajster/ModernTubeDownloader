@@ -34,6 +34,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private bool disposed, showOptions, queued, hasSelection, thumbnailFailed;
     private bool arranging;
     private string factText = "";
+    internal int EmptyContentHeight => title.Bottom - DisplayRectangle.Y + 12;
     public DashboardInspector(AppServices services)
     {
         this.services = services; details.AccessibleAutomationId = "InspectorDetails"; options.AccessibleAutomationId = "InspectorOptions"; apply.AccessibleAutomationId = "InspectorApplyOptions";

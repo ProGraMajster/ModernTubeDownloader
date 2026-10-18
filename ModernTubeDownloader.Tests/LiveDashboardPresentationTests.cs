@@ -14,6 +14,41 @@ namespace ModernTubeDownloader.Tests;
 public sealed class LiveDashboardPresentationTests
 {
     [Theory]
+    [InlineData(100, 900)] [InlineData(150, 1536)] [InlineData(200, 1920)]
+    public async Task EmptyStackedInspectorFitsItsContentAndDoesNotCoverTheSessionList(int scale, int width)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-live-empty-layout-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize(); AppTypography.SetScale(scale);
+                var view = new LiveView(services); AppTypography.SetDashboardPresentation(view, true);
+                view.SetDashboard(true); host.Show(view, width, 1080); host.ProcessPendingWork();
+                var inspector = Find<DashboardInspector>(view, "DashboardInspector");
+                var widgets = Find<DashboardWidgets>(view, "LiveDashboardWidgets");
+                var list = Find<FlowLayoutPanel>(view, "LiveActiveList");
+                Assert.True(inspector.Top >= list.Parent!.Bottom + 12);
+                var contentBottom = inspector.Controls.Where(control => control.Visible).Max(control => control.Bottom);
+                Assert.InRange(inspector.Height - contentBottom, 0, 24);
+                Assert.True(inspector.Height < AppTypography.TextHeight(250));
+                Assert.Equal(inspector.Bottom + 12, widgets.Top);
+                Assert.False(Assert.IsType<AccessibleScrollInfo>(inspector.AccessibilityObject.ScrollInfo).Horizontal.IsScrollable);
+                DashboardVisual.RestoreTree(view); view.SetDashboard(false);
+                Assert.Equal(System.Drawing.Rectangle.Empty, inspector.Bounds);
+                Assert.Equal(System.Drawing.Rectangle.Empty, widgets.Bounds);
+            }
+            await services.ShutdownAsync();
+        }
+        finally
+        {
+            AppTypography.SetScale(100); AppearancePresentation.Current = new();
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
     [InlineData(100)]
     [InlineData(200)]
     public async Task PolishReconnectTimingIsMeasuredInsteadOfClippedToTwoLines(int scale)
