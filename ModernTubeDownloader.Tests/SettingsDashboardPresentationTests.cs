@@ -41,6 +41,13 @@ public sealed class SettingsDashboardPresentationTests
                 var first = Find<Button>(view, "AppearancePresetDefault");
                 var commands = first.Parent!;
                 Assert.Equal(9, commands.Controls.Count);
+                var personalization = Assert.IsType<PersonalizationSettingsPanel>(commands.Parent);
+                var allocated = commands.Controls.Select(button => button.Bounds).ToArray();
+                foreach (var unallocated in new[] { 0, 40, 48 })
+                {
+                    personalization.LayoutForWidth(unallocated);
+                    Assert.Equal(allocated, commands.Controls.Select(button => button.Bounds).ToArray());
+                }
                 Assert.All(commands.Controls, button =>
                 {
                     Assert.True(button.Width > 0 && button.Height > 0);

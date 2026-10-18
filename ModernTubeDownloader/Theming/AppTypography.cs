@@ -42,16 +42,20 @@ public static class AppTypography
         var styles = new[] { control.Style, control.StyleHover, control.StyleFocused, control.StylePressed, control.StyleDisabled };
         var dashboard = IsDashboard(control);
         if (dashboard) classicStateSizes.GetValue(control, _ => styles.Select(s => s.FontSize).ToArray());
-        control.Font = Font(binding.Size * factor, binding.Style);
+        // MFN exposes effective integer font sizes. Passing the fractional recipe again
+        // would raise FontChanged on every refresh, although no rendered metric changed.
+        var font = new Font("Segoe UI", Math.Max(1, (int)Math.Round(binding.Size * factor * Scale)), binding.Style);
+        var changed = !control.Font.Equals(font);
+        control.Font = font;
         classicStateSizes.TryGetValue(control, out var savedSizes);
         for (var index = 0; index < styles.Length; index++)
         {
-            styles[index].TextFont = control.Font;
-            if (dashboard) styles[index].FontSize = (int)Math.Round(binding.Size * factor * Scale);
-            else if (index > 0 && savedSizes is not null) styles[index].FontSize = savedSizes[index];
+            if (!Equals(styles[index].TextFont, font)) { styles[index].TextFont = font; changed = true; }
+            var size = dashboard ? (int?)font.SizeInPoints : index > 0 && savedSizes is not null ? savedSizes[index] : styles[index].FontSize;
+            if (styles[index].FontSize != size) { styles[index].FontSize = size; changed = true; }
         }
         if (!dashboard) classicStateSizes.Remove(control);
-        control.Invalidate();
+        if (changed) control.Invalidate();
     }
     internal static bool IsDashboard(Control control)
     {

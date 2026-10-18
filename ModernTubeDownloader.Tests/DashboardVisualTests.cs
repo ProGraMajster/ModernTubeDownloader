@@ -17,6 +17,37 @@ public sealed class DashboardVisualTests
 {
     [Theory]
     [InlineData(100)] [InlineData(150)] [InlineData(200)]
+    public void ReapplyingTheSameTextRecipeDoesNotNotifyAFontChange(int scale)
+    {
+        using var host = ModernFormsTestHost.Create();
+        AppTypography.SetScale(scale);
+        try
+        {
+            using var root = new Panel();
+            var label = AppUi.Muted("Stable typography — Łódź 日本語"); root.Controls.Add(label);
+            foreach (var modern in new[] { false, true, false })
+            {
+                AppTypography.SetDashboardPresentation(root, modern);
+                AppTypography.Bind(label, 9.5f);
+                var before = label.Font;
+                var changes = 0;
+                EventHandler changed = (_, _) => changes++;
+                label.FontChanged += changed;
+                for (var i = 0; i < 20; i++)
+                {
+                    AppTypography.Bind(label, 9.5f);
+                    AppTypography.SetDashboardPresentation(root, modern);
+                }
+                label.FontChanged -= changed;
+                Assert.Equal(before, label.Font);
+                Assert.Equal(0, changes);
+            }
+        }
+        finally { AppTypography.SetScale(100); }
+    }
+
+    [Theory]
+    [InlineData(100)] [InlineData(150)] [InlineData(200)]
     public void FittingUnicodeTextHasIdenticalPixelsWithAndWithoutEllipsis(int scale)
     {
         using var host = ModernFormsTestHost.Create();

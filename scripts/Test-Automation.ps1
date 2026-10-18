@@ -768,11 +768,15 @@ try {
         $modernChoice = Find-Node 'InterfaceModernDashboard' $mainRoot
         Invoke-NodeAction $classicChoice $mainRoot 'ScrollIntoView' | Out-Null
         for ($i = 0; $i -lt $passes; $i++) {
+            Write-Output "Shell switch $($i + 1)/${passes}: Classic requested at $([DateTimeOffset]::Now.ToString('O'))."
             Invoke-NodeAction $classicChoice $mainRoot 'Invoke' | Out-Null
             [void](Find-Node 'NavDownloads' $mainRoot)
             if ($i -eq 0) { Capture-Dashboard 'classic-after-switch' }
+            Write-Output "Shell switch $($i + 1)/${passes}: Modern requested at $([DateTimeOffset]::Now.ToString('O'))."
             Invoke-NodeAction $modernChoice $mainRoot 'Invoke' | Out-Null
             [void](Find-Node 'NavBatch' $mainRoot)
+            $script:automationProcess.Refresh()
+            Write-Output "Shell switch $($i + 1)/$passes completed; handles=$($script:automationProcess.HandleCount); private bytes=$($script:automationProcess.PrivateMemorySize64)."
         }
         $runtimeLog = (Get-ChildItem -LiteralPath (Join-Path $dataRoot 'logs') -File | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
         if ([regex]::Matches($runtimeLog, 'Native tray icon registered\.').Count -ne 2) { throw 'Shell switches registered an extra tray icon (two owned QA processes expected).' }
