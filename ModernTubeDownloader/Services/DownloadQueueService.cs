@@ -59,6 +59,12 @@ public sealed class DownloadQueueService
         lock (sync) return items.Select(DownloadNotificationState.From).ToArray();
     }
 
+    public IReadOnlyList<QueueProgressItem> ProgressSnapshot()
+    {
+        lock (sync) return items.Select(item => new QueueProgressItem(item.Id, item.Status, item.ProgressPercent,
+            item.EstimatedSizeBytes, item.TotalBytes, item.DownloadedBytes, item.SpeedBytesPerSecond)).ToArray();
+    }
+
     public DownloadQueueItem? Find(Guid id)
     {
         lock (sync)
@@ -328,6 +334,7 @@ public sealed class DownloadQueueService
         try
         {
             if (!retryDegraded && Storage.State.PersistenceDegraded) return;
+            lock (sync) { if (!retryDegraded && savedRevision == revision) return; }
             try
             {
                 DownloadQueueItem[] snapshot; long writingRevision;
@@ -351,7 +358,14 @@ public sealed class DownloadQueueService
             var failureVersion = Storage.State.FailureVersion;
             try
             {
-                await Storage.CheckWritableAsync(token).ConfigureAwait(false);
+                try { await Storage.CheckWritableAsync(token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { return false; }
+                catch (Exception probeError)
+                {
+                    Storage.Report(probeError);
+                    logger.Warning($"Queue recovery write probe failed ({probeError.GetType().Name}); admission remains paused.");
+                    return false; // An unavailable output folder is not proof that queue.json failed to save.
+                }
                 // Active phase transitions may mutate the queue during a save. Never
                 // clear degraded state on a stale checkpoint; bound reconciliation.
                 for (var attempt = 0; attempt < 3; attempt++)

@@ -1,4 +1,4 @@
-# System notifications — candidate.4
+# System notifications
 
 Optional Windows OS notifications, distinct from in-app status/toasts. The application consumes current ModernFormsNext `ISystemNotificationService`, `SystemNotification` and `SystemNotificationCapabilities`; it has no custom WinRT wrapper, COM activator, toast window or history store.
 

@@ -30,13 +30,17 @@ public sealed class BatchSessionStore(string root)
     public Task SaveSessionAsync(BatchImportSession session, CancellationToken token = default)
         => AtomicJsonFile.WriteAsync(Path.Combine(Folder(session.Id), "session.json"), session, token);
     public async Task SaveEntryAsync(BatchImportSession session, BatchImportEntry entry, CancellationToken token = default)
+        => await SaveEntriesAsync(session, [entry], token).ConfigureAwait(false);
+
+    public async Task SaveEntriesAsync(BatchImportSession session, IEnumerable<BatchImportEntry> entries, CancellationToken token = default)
     {
-        var line = JsonSerializer.Serialize(entry, Lines);
-        await gate.WaitAsync(token);
+        await gate.WaitAsync(token).ConfigureAwait(false);
         try
         {
             await using var writer = new StreamWriter(new FileStream(Path.Combine(Folder(session.Id), "updates.jsonl"), FileMode.Append, FileAccess.Write, FileShare.Read, 8192, true), new UTF8Encoding(false));
-            await writer.WriteLineAsync(line.AsMemory(), token); await writer.FlushAsync(token);
+            foreach (var entry in entries)
+                await writer.WriteLineAsync(JsonSerializer.Serialize(entry, Lines).AsMemory(), token).ConfigureAwait(false);
+            await writer.FlushAsync(token).ConfigureAwait(false);
         }
         finally { gate.Release(); }
     }

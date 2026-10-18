@@ -159,23 +159,49 @@ public sealed class ApplicationUpdateTests
     [InlineData("1.2.0", "1.2.0-candidate.1", true)]
     [InlineData("1.1.0", "1.2.0-candidate.1", false)]
     [InlineData("1.2.0", "1.2.0", false)]
+    [InlineData("1.2.1", "1.2.0", true)]
+    [InlineData("1.2.1", "1.2.1", false)]
+    [InlineData("1.2.2-candidate.1", "1.2.1", false)]
     [InlineData("1.3.0-beta.1", "1.2.0", false)]
     [InlineData("garbage", "1.1.0", false)]
     public void VersionComparisonPreventsDowngrade(string latest, string current, bool expected)
         => Assert.Equal(expected, ApplicationUpdateService.IsNewer(latest, current));
 
-    [Fact]
-    public async Task InstalledStableReleaseHasNoUpdateOrInstallationIntent()
+    [Theory]
+    [InlineData("1.2.0")]
+    [InlineData("1.2.1")]
+    public async Task InstalledStableReleaseHasNoUpdateOrInstallationIntent(string version)
     {
         using var fixture = new Fixture(); using var http = new HttpClient();
         var paths = AppPaths.Create(Path.Combine(fixture.Root, "data"));
         using var service = new ApplicationUpdateService(paths, new SettingsService(paths, new NullAppLogger()),
-            http, new NullAppLogger(), new Source(Release()), "1.2.0");
+            http, new NullAppLogger(), new Source(Release(version)), version);
         await service.CheckAsync();
         Assert.Equal("Updates.Current", service.StatusKey);
         Assert.Null(service.State.Available);
         Assert.False(service.Ready);
         Assert.False(service.State.InstallOnExit);
+    }
+
+    [Fact]
+    public async Task Stable120SelectsExact121ApplicationAndChecksumWithoutInstalling()
+    {
+        using var fixture = new Fixture(); using var http = new HttpClient();
+        var repository = GitHubApplicationReleaseSource.Repository;
+        const string archive = "ModernTubeDownloader-1.2.1-win-x64.zip";
+        using var metadata = JsonDocument.Parse(JsonSerializer.Serialize(new { draft = false, prerelease = false,
+            tag_name = "v1.2.1", html_url = repository + "/releases/tag/v1.2.1", body = "Patch notes",
+            assets = new[] { archive + ".sha256", "ModernTubeDownloader-1.2.1-win-x64-symbols.zip", archive }
+                .Select(name => new { name, browser_download_url = repository + "/releases/download/v1.2.1/" + name }) }));
+        var release = GitHubApplicationReleaseSource.Parse(metadata.RootElement);
+        Assert.Equal(Release("1.2.1").Archive, release.Archive);
+        Assert.Equal(Release("1.2.1").Checksum, release.Checksum);
+        var paths = AppPaths.Create(Path.Combine(fixture.Root, "data"));
+        using var service = new ApplicationUpdateService(paths, new SettingsService(paths, new NullAppLogger()),
+            http, new NullAppLogger(), new Source(release), "1.2.0");
+        await service.CheckAsync();
+        Assert.Equal("1.2.1", service.State.Available?.Version);
+        Assert.False(service.Ready); Assert.False(service.State.InstallOnExit);
     }
 
     [Fact]

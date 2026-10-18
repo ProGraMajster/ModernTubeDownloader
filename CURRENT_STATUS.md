@@ -1,5 +1,47 @@
 # Current status
 
+## Release 1.2.1 — 2026-10-18
+
+Patch release target: **1.2.1**, assembly/file version **1.2.1.0**, Classic UI only.
+The owner authorizes master push, terminal exact-head CI, annotated tag and the existing
+public Release workflow. The [release page](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.2.1)
+is the publication authority; local ignored `FINAL_RELEASE_1_2_1.md` records published/verified
+completion, workflow URLs and downloaded-asset smoke without a post-tag status commit.
+The final pipeline must pass before tagging; unchecked external gates are not prospective PASS.
+
+Scope: storage/persistence pause and recovery checkpoint, pinned notification resilience,
+bounded Batch JSON/error UX, off-UI large Batch handoff, filter-aware actions, linear
+reconciliation, 50-card queue pages and advisory progress/size/transfer ETA. New analysis
+and download defaults are one, with saved preferences preserved. No Modern Dashboard work,
+new scheduler, retry/auth policy change or MFN upgrade is included.
+MFN remains clean committed `8d8a7679779608b4edbee7dc687c13e3b1a611d9`, with no local patch.
+
+Release-local source qualification: Debug/Release 775/775 each, JS 92/92. Final release results,
+native Batch/official ZIP checks and updater 1.2.0 → 1.2.1 evidence belong in the final report.
+Windows 11 23H2 physical testing, exhaustive DPI/devices/soak and clean-PC updater remain
+unqualified. MFN #204/#205, Experimental SponsorBlock Remove and LIVE FromStart limits remain.
+Source HTTP 403/500 errors are not represented as fixed application bugs.
+Native local EN/Light production UIA passed TXT/JSON/errors, 1,300-row import and bounded
+60-row selected analysis/handoff, cancel/reopen/queue paging and graceful shutdown.
+The previous hotfix-head CI pacing failure measured worker scheduling/checkpoint latency;
+the regression now uses the existing injected clock with exact 500 ms logical spacing,
+real watchdogs and unchanged production pacing. No retry-until-green or policy change.
+
+## Historical Batch responsiveness follow-up — 2026-10-18 (before release)
+
+Additional owner-supplied 1.2.0 logs and implementation findings are recorded in
+[Batch import](BATCH_IMPORT.md#large-batches-and-estimates--2026-10-18-follow-up).
+This round adds off-UI cancellable handoff/import progress, batched journals, linear status
+reconciliation, filter-aware actions, bounded 50-card queue pages and honest size/transfer
+estimates. New analysis defaults to one worker; existing download default is already one.
+Unavailable destination directories now latch admission, preventing the observed cascading failures.
+Native/manual verification is deferred per the owner's request, pending confirmation
+that their separate MTD session has finished.
+Local validation: restore and Debug/Release builds (zero warnings/errors), 770/770 tests
+in each configuration and JS 92/92. Headless PL/Dark and EN/Light control-tree tests cover
+1,300 queued jobs, page changes, reveal and text scale 100–200%; this is not native/manual QA.
+No version bump, framework edits, commit/push or release publication is part of this round.
+
 ## Local 1.2.1-candidate.1 hotfix — 2026-10-15
 
 Qualification: **READY FOR OWNER MANUAL TEST**, not public/stable promotion.

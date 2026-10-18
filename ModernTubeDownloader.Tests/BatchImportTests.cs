@@ -34,6 +34,129 @@ public sealed class BatchImportTests(ITestOutputHelper output)
         Id = new Uri(url).AbsolutePath.Trim('/'), WebpageUrl = url, Title = "Żółć 世界", DurationSeconds = 100,
         Formats = [new() { Id = "18", Extension = "mp4", Height = 360, VideoCodec = "h264", AudioCodec = "aac" }]
     };
+
+    [Fact]
+    public async Task ThirteenHundredRowsHandoffDoesNotCaptureUiContextAndFiltersConstrainActions()
+    {
+        using var f = new Fixture(); using var service = f.Service();
+        var session = await service.ImportAsync(await f.File(".txt", string.Join('\n', Enumerable.Range(0, 1300).Select(i => "https://example.test/video/" + i))));
+        Assert.Equal(1, session.AnalysisWorkers); Assert.Equal(1, f.Settings.Current.MaxSimultaneousDownloads);
+        await service.StartAsync(session);
+        Assert.Equal(1300, service.Page(session, BatchFilter.Ready, "", 0).Total);
+        var all = service.ActionSelection(session, BatchFilter.Ready, "");
+        var context = new UnpumpedContext(); var previous = SynchronizationContext.Current;
+        Task<int> pending;
+        try { SynchronizationContext.SetSynchronizationContext(context); pending = service.AddReadyAsync(session, all); }
+        finally { SynchronizationContext.SetSynchronizationContext(previous); }
+        var timer = Stopwatch.StartNew();
+        Assert.Equal(1300, await pending.WaitAsync(TimeSpan.FromSeconds(45)));
+        Assert.Equal(0, context.Posts);
+        Assert.Equal(1300, f.Queue.Snapshot().Count);
+        Assert.Empty(service.ActionSelection(session, BatchFilter.Ready, ""));
+        var completed = f.Queue.Snapshot()[0]; f.Queue.Update(completed.Id, item => item.Status = DownloadStatus.Completed, false);
+        var failed = f.Queue.Snapshot()[1]; f.Queue.Update(failed.Id, item => item.Status = DownloadStatus.Failed, false);
+        await service.RefreshQueueAsync(session);
+        Assert.Equal(1, service.Page(session, BatchFilter.Completed, "", 0).Total);
+        Assert.Equal(1, service.Page(session, BatchFilter.Errors, "", 0).Total);
+        Assert.Equal(1298, service.Page(session, BatchFilter.Queued, "", 0).Total);
+        Assert.Empty(service.ActionSelection(session, BatchFilter.Errors, "no-match", all));
+        Assert.Empty(service.ActionSelection(session, BatchFilter.Ready, "", all));
+        output.WriteLine($"Indicative 1300-row canonical handoff + refresh: {timer.Elapsed.TotalMilliseconds:F1} ms; 0 UI-context posts. Not native UI evidence.");
+        var reopened = await f.Store.LoadAsync(session.Id);
+        Assert.Equal(1300, reopened.Snapshot().Count(entry => entry.QueueItemId is not null));
+    }
+
+    [Fact]
+    public async Task FilterSearchSelectionIntersectionCannotActOnHiddenRowsOrAnotherPage()
+    {
+        using var f = new Fixture(); using var service = f.Service();
+        var session = await service.ImportAsync(await f.File(".txt", string.Join('\n', Enumerable.Range(0, 55).Select(i => "https://example.test/video/" + i))));
+        var before = session.Snapshot();
+        await service.StartAsync(session, before.Take(30).Select(entry => entry.Id).ToHashSet());
+        var ready = service.ActionSelection(session, BatchFilter.Ready, "");
+        Assert.Equal(30, ready.Count); // across all pages, not just the visible 20
+        Assert.Empty(service.ActionSelection(session, BatchFilter.Ready, "", before.Skip(30).Select(entry => entry.Id).ToHashSet()));
+        Assert.All(service.ActionSelection(session, BatchFilter.All, "/video/2"), id => Assert.Contains("/video/2", before.Single(entry => entry.Id == id).Url));
+        Assert.Equal(0, await service.AddReadyAsync(session, new HashSet<Guid>())); // explicit empty is never null/all
+        Assert.Empty(f.Queue.Snapshot());
+    }
+
+    [Fact]
+    public async Task QueueRemovalDoesNotLeaveBatchStuckInQueuedFilter()
+    {
+        using var f = new Fixture(); using var service = f.Service();
+        var session = await service.ImportAsync(await f.File(".txt", "https://example.test/a"));
+        await service.StartAsync(session); await service.AddReadyAsync(session);
+        f.Queue.Remove(f.Queue.Snapshot().Single().Id);
+        await service.RefreshQueueAsync(session);
+        var row = Assert.Single(session.Snapshot());
+        Assert.Null(row.QueueItemId); Assert.Equal(BatchEntryStatus.Failed, row.Status);
+        Assert.Equal("Batch.Error.QueueMissing", row.ErrorKey);
+    }
+
+    private sealed class UnpumpedContext : SynchronizationContext
+    {
+        public int Posts;
+        public override void Post(SendOrPostCallback callback, object? state) => Interlocked.Increment(ref Posts);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancelBulkHandoffRetainsAdmittedLinksAndLeavesUnprocessedRowsReady(bool duringAdmission)
+    {
+        using var f = new Fixture(); using var service = f.Service(); using var cancellation = new CancellationTokenSource();
+        var session = await service.ImportAsync(await f.File(".txt", string.Join('\n', Enumerable.Range(0, 350).Select(i => "https://example.test/video/" + i))));
+        await service.StartAsync(session);
+        if (duringAdmission) f.Queue.Changed += (_, args) => { if (args.Kind == QueueChangeKind.Collection) cancellation.Cancel(); };
+        var progress = new InlineProgress(value => { if (value.Completed >= 100) cancellation.Cancel(); });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.AddReadyAsync(session, token: cancellation.Token, progress: progress));
+        Assert.Equal(100, f.Queue.Snapshot().Count);
+        Assert.Equal(100, session.Snapshot().Count(row => row.QueueItemId is not null));
+        Assert.Equal(250, service.Page(session, BatchFilter.Ready, "", 0).Total);
+        Assert.DoesNotContain(session.Snapshot(), row => row.Status == BatchEntryStatus.Validating);
+        var reopened = await f.Store.LoadAsync(session.Id);
+        Assert.Equal(100, reopened.Snapshot().Count(row => row.QueueItemId is not null));
+    }
+
+    [Fact]
+    public async Task FailedCanonicalCheckpointDoesNotResetAlreadyAdmittedRowsToReady()
+    {
+        using var f = new Fixture(); var persistence = new FailingPersistence();
+        var queue = new DownloadQueueService(persistence, new NullAppLogger()); queue.SetPaused(true);
+        using var service = new BatchImportService(f.Store,
+            (url, _) => Task.FromResult(new SourceCheckResult(url, Metadata(url), null, null)), queue, f.Settings, new NullAppLogger());
+        var session = await service.ImportAsync(await f.File(".txt", string.Join('\n', Enumerable.Range(0, 250).Select(i => "https://example.test/video/" + i))));
+        await service.StartAsync(session); persistence.Fail = true;
+        await Assert.ThrowsAsync<StoragePausedException>(() => service.AddReadyAsync(session));
+        Assert.Equal(100, queue.Snapshot().Count);
+        Assert.Equal(100, session.Snapshot().Count(row => row.QueueItemId is not null));
+        Assert.Equal(150, service.Page(session, BatchFilter.Ready, "", 0).Total);
+        Assert.True(queue.Storage.State.PersistenceDegraded);
+    }
+    private sealed class InlineProgress(Action<BatchOperationProgress> report) : IProgress<BatchOperationProgress>
+    { public void Report(BatchOperationProgress value) => report(value); }
+
+    [Fact]
+    public async Task ConcurrentStatusRefreshCannotEraseNewHandoffLinks()
+    {
+        using var f = new Fixture(); using var service = f.Service();
+        var session = await service.ImportAsync(await f.File(".txt", string.Join('\n', Enumerable.Range(0, 1300).Select(i => "https://example.test/concurrent/" + i))));
+        await service.StartAsync(session);
+        var handoff = service.AddReadyAsync(session);
+        while (!handoff.IsCompleted) await service.RefreshQueueAsync(session);
+        Assert.Equal(1300, await handoff);
+        await service.RefreshQueueAsync(session);
+        Assert.Equal(1300, session.Snapshot().Count(entry => entry.QueueItemId is not null && entry.Status == BatchEntryStatus.AddedToQueue));
+        Assert.DoesNotContain(session.Snapshot(), entry => entry.ErrorKey == "Batch.Error.QueueMissing");
+    }
+    private sealed class FailingPersistence : IQueuePersistence
+    {
+        public bool Fail;
+        public Task<IReadOnlyList<DownloadQueueItem>> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<DownloadQueueItem>>([]);
+        public Task SaveAsync(IReadOnlyList<DownloadQueueItem> items, CancellationToken cancellationToken = default)
+            => Fail ? Task.FromException(new IOException("synthetic checkpoint failure")) : Task.CompletedTask;
+    }
     [Theory]
     [InlineData(10)] [InlineData(10000)] [InlineData(50000)]
     public async Task TxtImportIsDurableAndPagesRemainBounded(int count)

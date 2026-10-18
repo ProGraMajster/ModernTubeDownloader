@@ -11,6 +11,44 @@ public sealed class StorageSafetyTests
     private static IOException Full() => new("synthetic localized storage failure", unchecked((int)0x80070070));
 
     [Fact]
+    public async Task MissingOutputFolderProbeDoesNotInventQueuePersistenceCorruption()
+    {
+        var unavailable = new DirectoryNotFoundException("synthetic output unavailable");
+        var probe = new Probe { Error = unavailable };
+        var safety = new QueueStorageSafety(probe); var queue = new DownloadQueueService(new Store(), new NullAppLogger(), storage: safety);
+        queue.Add(new()); safety.Report(unavailable);
+        Assert.False(await queue.ResumeAsync()); Assert.True(queue.IsPaused);
+        Assert.False(safety.State.PersistenceDegraded); Assert.False(queue.HasUnsavedChanges);
+        probe.Error = null; Assert.True(await queue.ResumeAsync());
+    }
+
+    [Fact]
+    public async Task UnchangedBackgroundCheckpointsAreCoalescedWithoutWeakeningExplicitRecovery()
+    {
+        var store = new Store(); var queue = new DownloadQueueService(store, new NullAppLogger());
+        queue.AddRangeSkippingDuplicates(Enumerable.Range(0, 1300).Select(i => new DownloadQueueItem { VideoId = "row-" + i }).ToArray());
+        await queue.SaveSafelyAsync(); var writes = store.Writes;
+        for (var i = 0; i < 100; i++) await queue.CheckpointBeforeStartAsync(default);
+        Assert.Equal(writes, store.Writes);
+        await queue.SaveAsync(); Assert.Equal(writes + 1, store.Writes);
+    }
+
+    [Fact]
+    public async Task MissingDriveStopsTheRemainingBatchInsteadOfFailingEveryQueuedItem()
+    {
+        var queue = new DownloadQueueService(new Store(), new NullAppLogger());
+        for (var i = 0; i < 1300; i++) queue.Add(new() { VideoId = "row-" + i });
+        var executor = new Executor((_, _) => throw new DirectoryNotFoundException("synthetic unavailable destination"));
+        using var processor = new QueueProcessor(queue, executor, Settings(), new NullAppLogger());
+        processor.Start(); await Until(() => queue.IsPaused && processor.ActiveItemIds.Count == 0);
+        Assert.Single(executor.Starts);
+        Assert.Equal(1299, queue.Snapshot().Count(item => item.Status == DownloadStatus.Queued));
+        Assert.Equal(StorageFailureKind.DirectoryUnavailable, queue.Storage.State.Kind);
+        Assert.Equal("Storage.DirectoryUnavailable", queue.Storage.State.MessageKey);
+        await processor.StopAsync();
+    }
+
+    [Fact]
     public void CookieJarWriteExhaustionKeepsNativeErrorAndCleansOnlyItsOwnedLeaseFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), "mtd-cookie-storage-test-" + Guid.NewGuid().ToString("N"));
