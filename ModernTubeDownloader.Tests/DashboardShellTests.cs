@@ -237,6 +237,51 @@ public sealed class DashboardShellTests
         finally { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
+    [Theory]
+    [InlineData(100)] [InlineData(150)] [InlineData(200)]
+    public async Task QueuePresentationRoundtripRetainsHostSelectionAndCanonicalRecords(int scale)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-queue-roundtrip-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            var items = Enumerable.Range(0, 100).Select(i => new DownloadQueueItem
+            {
+                VideoId = "qa-" + i, Title = "QA " + i + " Łódź 日本語", SourceUrl = "https://example.test/" + i,
+                Status = DownloadStatus.Completed
+            }).ToArray();
+            services.Queue.AddRangeSkippingDuplicates(items);
+            var before = JsonSerializer.Serialize(services.Queue.Snapshot());
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize(); AppTypography.SetScale(scale);
+                var view = new DownloadsView(services); host.Show(view, 1920, 1080);
+                var list = Find<FlowLayoutPanel>(view, "QueueList"); var parent = list.Parent;
+                view.SetDashboard(true); AppTypography.SetDashboardPresentation(view, true);
+                view.RevealQueueItem(items[^1].Id); host.ProcessPendingWork();
+                for (var cycle = 0; cycle < 2; cycle++)
+                {
+                    DashboardVisual.RestoreTree(view); AppTypography.SetDashboardPresentation(view, false);
+                    view.SetDashboard(false); host.ProcessPendingWork();
+                    Assert.Same(parent, list.Parent);
+                    Assert.Equal(100, list.Controls.OfType<QueueItemCard>().Count());
+                    Assert.Equal(items[^1].Id, view.SelectedItemId);
+                    view.SetDashboard(true); AppTypography.SetDashboardPresentation(view, true); host.ProcessPendingWork();
+                    Assert.Same(list, Find<FlowLayoutPanel>(view, "QueueList")); Assert.Same(parent, list.Parent);
+                    Assert.Equal(1, parent!.Controls.Count(control => ReferenceEquals(control, list)));
+                    Assert.Equal(20, list.Controls.OfType<QueueItemCard>().Count());
+                    Assert.Equal(items[^1].Id, view.SelectedItemId);
+                    var selected = Find<QueueItemCard>(list, $"QueueItem-{items[^1].Id:N}");
+                    Assert.True(selected.AccessibilityObject.State.HasFlag(ModernFormsNext.Accessibility.AccessibleStates.Selected));
+                    Assert.True(list.Width > 0 && list.Height > 0);
+                    Assert.Equal(before, JsonSerializer.Serialize(services.Queue.Snapshot()));
+                }
+            }
+            await services.ShutdownAsync();
+        }
+        finally { AppearancePresentation.Current = new(); AppTypography.SetScale(100); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Fact]
     public async Task HistoryFiltersDateRangeAndSortUseTheCanonicalHistoryWithoutMutatingIt()
     {

@@ -45,7 +45,6 @@ internal sealed partial class DownloadsView
         if (dashboardInspector is not null) dashboardInspector.Visible = value;
         if (dashboardWidgets is not null) dashboardWidgets.Visible = value;
         foreach (var control in new Control?[] { dashboardStart, dashboardClear, dashboardDetails, dashboardPrevious, dashboardNext, dashboardPaging }) if (control is not null) control.Visible = value;
-        foreach (var card in cards.Values) card.SetDashboard(value);
         if (dashboardLink is not null) dashboardLink.Visible = value;
         urlLabel.Visible = !value; pageTitle.Visible = pageSubtitle.Visible = !value;
         if (!value)
@@ -55,8 +54,30 @@ internal sealed partial class DownloadsView
                 control?.SetBounds(0, 0, 0, 0);
             AppUi.BindBackground(queueHost); AppUi.BindBackground(queueToolbar); AppUi.Card(queueEmpty, true); AppTypography.Bind(queueTitle, 16.5f, FontStyle.Bold);
         }
-        BuildQueueCards(); ApplyLocalization(); UpdateLayout();
+        RebuildQueuePresentation(); ApplyLocalization(); UpdateLayout();
         if (!value) analysisProgress.Bounds = classicAnalysisProgressBounds;
+    }
+    private void RebuildQueuePresentation()
+    {
+        // The rows are replaced on a shell change. Prepare the same queue host off-tree so
+        // native accessibility sees the completed collection instead of every intermediate
+        // removal and layout of the old/new rows. Ordinary queue updates retain their path.
+        var parent = queueHost.Parent;
+        if (parent is null) { BuildQueueCards(); return; }
+        var index = parent.Controls.GetChildIndex(queueHost);
+        parent.SuspendLayout();
+        try
+        {
+            parent.Controls.Remove(queueHost);
+            BuildQueueCards();
+        }
+        finally
+        {
+            parent.Controls.Add(queueHost);
+            parent.Controls.SetChildIndex(queueHost, Math.Min(index, parent.Controls.Count - 1));
+            if (queueHost.Visible) queueHost.BringToFront();
+            parent.ResumeLayout(true);
+        }
     }
     public void SetDashboardStatus(string value, string token) { if (dashboardStatus is not null) { dashboardStatus.Text = value; pasteToolTip.SetToolTip(dashboardStatus, value); AppUi.BindBackground(dashboardStatusDot!, token); } }
     private void EnsureDashboard()
