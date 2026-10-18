@@ -474,7 +474,12 @@ public sealed class WorkflowIntegrationTests(ITestOutputHelper output) : IAsyncL
             await WaitUntilAsync(() => services.Live.Find(session.Id)?.WorkspacePath is { } path &&
                 File.Exists(Path.Combine(path, "part-0001", ".test-started.json")), TimeSpan.FromSeconds(10));
             Assert.True(services.Live.Cancel(session.Id));
-            var result = await WaitForLiveTerminalAsync(services.Live, session.Id, TimeSpan.FromSeconds(15));
+            // Terminal publication precedes workspace cleanup and the final checkpoint.
+            // Check the worker completion boundary before inspecting files/history.
+            await WaitUntilAsync(() => services.Live.Find(session.Id)?.State is
+                LiveSessionState.Completed or LiveSessionState.Partial or LiveSessionState.Cancelled or LiveSessionState.Failed &&
+                !services.LiveScheduler.ActiveIds.Contains(session.Id), TimeSpan.FromSeconds(15));
+            var result = services.Live.Find(session.Id)!;
             Assert.Equal(preserve ? LiveSessionState.Partial : LiveSessionState.Cancelled, result.State);
             Assert.Equal(preserve ? 1 : 0, result.Parts.Count);
             Assert.Equal(preserve ? 1 : 0, services.History.Snapshot().Count);
