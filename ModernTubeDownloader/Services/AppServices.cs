@@ -50,6 +50,7 @@ public sealed class AppServices : IDisposable
     public QueueProcessor Processor { get; }
     public HistoryService History { get; }
     public ThumbnailCacheService Thumbnails { get; }
+    public ThumbnailToolService ThumbnailTool { get; private set; } = null!;
     public SystemNotificationCoordinator? Notifications { get; private set; }
     public LiveSessionService Live { get; private set; } = null!;
     public LiveRecordingScheduler LiveScheduler { get; private set; } = null!;
@@ -103,6 +104,7 @@ public sealed class AppServices : IDisposable
             new YtDlpLiveAvailabilityProbe(metadata), settings, logger);
         var thumbnails = new ThumbnailCacheService(paths, logger, () => settings.Current.DownloadThumbnail);
         var services = new AppServices(paths, logger, settings, localization, appearance, tools, metadata, queue, processor, history, thumbnails, httpClient);
+        services.ThumbnailTool = new(metadata.AnalyzeAsync, thumbnails, paths, logger);
         services.Live = live;
         services.Updates = new ApplicationUpdateService(paths, settings, httpClient, logger);
         services.Authentication = authentication;

@@ -94,8 +94,11 @@ internal sealed partial class DownloadsView
             var button = new DashboardButton { Text = text[key], AccessibleAutomationId = "DashboardChip" + key.Split('.').Last(), Width = 150, Height = 36, Margin = new Padding(0, 0, 10, 0), Tag = key };
             AppUi.Secondary(button); button.Click += (_, _) => action(); dashboardChips.Controls.Add(button);
         }
-        Chip("Sources.Link", () => SupportedSourcesRequested?.Invoke(this, EventArgs.Empty));
+        Chip("Dashboard.Source.Video", () => _ = AnalyzeAsync());
         Chip("Playlist.Analyze", () => _ = AnalyzeAsync(true));
+        Chip("Dashboard.Source.Channel", () => _ = AnalyzeAsync(true));
+        Chip("Dashboard.Source.Shorts", () => _ = AnalyzeAsync());
+        Chip("Sources.Link", () => SupportedSourcesRequested?.Invoke(this, EventArgs.Empty));
         dashboardAdd = new DashboardButton { AccessibleAutomationId = "DashboardQuickQueue" }; AppUi.Primary(dashboardAdd);
         dashboardAdd.Click += async (_, _) =>
         {
@@ -157,7 +160,8 @@ internal sealed partial class DownloadsView
         dashboardPrevious!.Text = "‹"; dashboardPrevious.AccessibleName = text["Batch.Previous"];
         dashboardNext!.Text = "›"; dashboardNext.AccessibleName = text["Batch.Next"];
         pasteToolTip.SetToolTip(dashboardPrevious, text["Batch.Previous"]); pasteToolTip.SetToolTip(dashboardNext, text["Batch.Next"]);
-        foreach (var chip in dashboardChips!.Controls.OfType<Button>()) if (chip.Tag is string key) chip.Text = text[key];
+        foreach (var chip in dashboardChips!.Controls.OfType<Button>()) if (chip.Tag is string key)
+            chip.Text = text[key switch { "Playlist.Analyze" => "Dashboard.Source.Playlist", "Sources.Link" => "Dashboard.Source.Other", _ => key }];
         pasteButton.Text = text["Dashboard.Paste"]; pasteIcon.Visible = false;
         RefreshDashboardSelection();
     }
@@ -169,7 +173,7 @@ internal sealed partial class DownloadsView
         var width = Math.Max(0, DisplayRectangle.Width - margin * 2);
         var p = AppearancePresentation.Current.ModernDashboardShell;
         var inline = p.Inspector != DashboardInspectorMode.Hidden && width >= AppTypography.TextHeight(1080);
-        var inspectorWidth = inline ? Math.Clamp(width / 4, 310, AppTypography.TextHeight(340)) : 0;
+        var inspectorWidth = inline ? Math.Clamp(width * 23 / 100, 288, AppTypography.TextHeight(340)) : 0;
         var queueWidth = inline ? width - inspectorWidth - gap : width;
         var inputWidth = inline ? Math.Min(width, queueWidth + 36) : width;
         var row = AppTypography.TextHeight(46); var wideToolbar = queueWidth >= AppTypography.TextHeight(860);
@@ -186,8 +190,15 @@ internal sealed partial class DownloadsView
         pasteToolTip.SetToolTip(analyzeButton, text["Common.Analyze"]);
         pasteButton.SetBounds(inputWidth - addWidth - AppTypography.TextHeight(100) - 12, 0, AppTypography.TextHeight(100), row);
         urlInput.SetBounds(0, 0, Math.Max(180, pasteButton.Left - 12), row); DashboardVisual.SetPadding(urlInput, new Padding(42, 0, 12, 0)); dashboardLink!.SetBounds(12, (row - 20) / 2, 20, 20); dashboardLink.BringToFront();
-        dashboardChips!.SetBounds(margin + origin.X, urlPanel.Bottom + 12, width, AppTypography.TextHeight(38));
-        foreach (var chip in dashboardChips.Controls) { chip.Width = AppTypography.TextHeight(240); chip.Height = AppTypography.TextHeight(36); }
+        var chipRowHeight = AppTypography.TextHeight(38); var chipRows = 1; var chipX = 0;
+        foreach (var chip in dashboardChips!.Controls.OfType<Button>())
+        {
+            DashboardVisual.Button(chip);
+            chip.Width = Math.Min(width, DashboardVisual.ActionWidth(chip, withIcon: true)); chip.Height = chipRowHeight;
+            if (chipX > 0 && chipX + chip.Width > width) { chipRows++; chipX = 0; }
+            chipX += chip.Width + chip.Margin.Horizontal;
+        }
+        dashboardChips.SetBounds(margin + origin.X, urlPanel.Bottom + 12, width, chipRows * (chipRowHeight + 4));
         analysisProgress.Visible = false;
         var previewVisible = previewState != PreviewState.Empty;
         previewPanel.Visible = previewVisible && previewState != PreviewState.PlaylistAnalyzed;
@@ -307,8 +318,11 @@ internal sealed partial class DownloadsView
         DashboardVisual.Icon(dashboardClear, AppIconKind.Trash);
         analyzeButton.Text = ""; DashboardVisual.Icon(analyzeButton, AppIconKind.ChevronDown, true);
         moreButton.Text = ""; DashboardVisual.Icon(moreButton, AppIconKind.More, true);
-        DashboardVisual.Icon((Button)dashboardChips.Controls[0], AppIconKind.Search);
+        DashboardVisual.Icon((Button)dashboardChips.Controls[0], AppIconKind.Play);
         DashboardVisual.Icon((Button)dashboardChips.Controls[1], AppIconKind.Queue);
+        DashboardVisual.Icon((Button)dashboardChips.Controls[2], AppIconKind.Folder);
+        DashboardVisual.Icon((Button)dashboardChips.Controls[3], AppIconKind.Live);
+        DashboardVisual.Icon((Button)dashboardChips.Controls[4], AppIconKind.Link);
         DashboardVisual.Flat(urlPanel); DashboardVisual.Flat(queueHost); DashboardVisual.Flat(queueToolbar);
         ResizeCards(); dashboardQueue.SendToBack();
     }

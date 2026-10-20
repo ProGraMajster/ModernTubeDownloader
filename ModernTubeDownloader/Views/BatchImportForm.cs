@@ -60,6 +60,12 @@ internal sealed partial class BatchImportView : UserControl
         AppTypography.RegisterLayout(body, () => { signature = ""; LayoutPage(); Render(); });
     }
     public event EventHandler? CloseRequested;
+    public Task ImportDroppedFilesAsync(IReadOnlyList<string> files) => RunAsync(async () =>
+    {
+        if (files.Count != 1) throw new InvalidDataException("Batch.Error.SingleFile");
+        path.Text = files[0];
+        await ImportAsync();
+    });
     public void Present(BatchImportSession value) { session = value; page = 0; selection.Clear(); signature = ""; Render(); }
     private BatchPage CurrentPage(BatchImportSession value) => services.Batch.Page(value, (BatchFilter)Math.Max(0, filter.SelectedIndex), search.Text, page);
     private void ApplyText()
@@ -91,7 +97,8 @@ internal sealed partial class BatchImportView : UserControl
     private async Task BrowseAsync()
     {
         var dialog = new OpenFileDialog(); dialog.AddFilter("TXT / CSV / JSON", "*.txt", "*.csv", "*.json");
-        if (await dialog.ShowDialog(FindForm()!) == DialogResult.OK && dialog.FileName is { } file) path.Text = file;
+        if (await dialog.ShowDialog(FindForm()!) == DialogResult.OK && dialog.FileName is { } file)
+        { path.Text = file; if (dashboard) await ImportAsync(); }
     }
     private async Task ShowExamplesAsync()
     {

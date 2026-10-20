@@ -47,9 +47,20 @@ internal sealed class DashboardMetric : Panel
     private readonly Label caption = AppUi.Muted(), value = AppUi.Heading("", 18);
     public DashboardMetric(string token)
     {
-        AppUi.BindBackground(this, AppThemeTokens.SurfaceSecondary); AppUi.BindForeground(value, token);
-        caption.Multiline = true; AppTypography.Bind(caption, 9); Controls.AddRange([caption, value]);
-        SizeChanged += (_, _) => { caption.SetBounds(12, 10, Math.Max(1, Width - 24), AppTypography.TextHeight(36)); value.SetBounds(12, caption.Bottom + 2, Math.Max(1, Width - 24), AppTypography.TextHeight(40)); };
+        DashboardStyle.Card(this); AppUi.BindForeground(value);
+        var icon = new AppVectorIcon(token == AppThemeTokens.Success ? AppIconKind.Check : token == AppThemeTokens.Error ? AppIconKind.Info :
+            token == AppThemeTokens.Warning ? AppIconKind.Clipboard : AppIconKind.Queue, 20, token)
+            { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
+        caption.Multiline = true; AppTypography.Bind(caption, 9); Controls.AddRange([icon, caption, value]);
+        SizeChanged += (_, _) =>
+        {
+            icon.SetBounds(12, 14, 20, 20);
+            var textWidth = Math.Max(1, Width - 54);
+            caption.SetBounds(42, 10, textWidth, DashboardVisual.LabelHeight(caption, textWidth, 2));
+            value.SetBounds(42, caption.Bottom + 2, textWidth, DashboardVisual.LabelHeight(value, textWidth, 1));
+        };
     }
+    public int DesiredHeight(int width) => 22 + DashboardVisual.LabelHeight(caption, Math.Max(1, width - 54), 2)
+        + DashboardVisual.LabelHeight(value, Math.Max(1, width - 54), 1);
     public void Present(string name, int number) { caption.Text = name; value.Text = number.ToString(); }
 }

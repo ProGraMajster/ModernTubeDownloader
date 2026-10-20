@@ -130,6 +130,7 @@ if (arguments.Contains("--dump-single-json"))
         {"id":"sample123","webpage_url":"https://example.test/watch/sample123","original_url":"https://example.test/watch/sample123","title":"Integration Sample","description":"Synthetic metadata emitted only by the integration-test tool.","uploader":"Test Uploader","channel":"Test Channel","channel_id":"channel-test","duration":12.5,"duration_string":"00:12","upload_date":"20260830","view_count":1234,"like_count":100,"comment_count":8,"thumbnail":null,"tags":["test"],"categories":["Testing"],"language":"en","availability":"public","age_limit":0,"live_status":"not_live","extractor":"test","extractor_key":"Test","unknown_future_field":{"preserved":true},"chapters":[{"title":"Start","start_time":0,"end_time":12.5}],"subtitles":{"en":[{"ext":"vtt","url":"https://example.test/sub.vtt"}]},"automatic_captions":{},"formats":[{"format_id":"137","ext":"mp4","width":1920,"height":1080,"resolution":"1920x1080","fps":30,"vcodec":"avc1.640028","acodec":"none","vbr":4500,"protocol":"https","filesize":1000,"format_note":"1080p"},{"format_id":"22","ext":"mp4","width":1280,"height":720,"resolution":"1280x720","fps":30,"vcodec":"avc1.64001F","acodec":"mp4a.40.2","tbr":1800,"protocol":"https","filesize":800,"format_note":"720p"},{"format_id":"140","ext":"m4a","vcodec":"none","acodec":"mp4a.40.2","abr":129,"asr":44100,"audio_channels":2,"protocol":"https","filesize":200,"format_note":"medium"}]}
         """;
     var title = Environment.GetEnvironmentVariable("MTD_FAKE_METADATA_TITLE");
+    var thumbnail = Environment.GetEnvironmentVariable("MTD_FAKE_METADATA_THUMBNAIL");
     var sourceUri = Uri.TryCreate(sourceUrl, UriKind.Absolute, out var parsedUri) ? parsedUri : null;
     if (sourceUrl.Contains("/source/opaque", StringComparison.Ordinal))
     {
@@ -155,11 +156,12 @@ if (arguments.Contains("--dump-single-json"))
         return 0;
     }
     var liveRoute = sourceUri?.AbsolutePath.StartsWith("/live/", StringComparison.OrdinalIgnoreCase) == true;
-    if (!string.IsNullOrWhiteSpace(title) || liveRoute ||
+    if (!string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(thumbnail) || liveRoute ||
         sourceUri?.Query.Contains("id=", StringComparison.OrdinalIgnoreCase) == true)
     {
         var metadata = JsonNode.Parse(metadataJson)!.AsObject();
         if (!string.IsNullOrWhiteSpace(title)) metadata["title"] = title;
+        if (!string.IsNullOrWhiteSpace(thumbnail)) metadata["thumbnail"] = thumbnail;
         if (liveRoute)
         {
             var status = sourceUri!.AbsolutePath.EndsWith("/active", StringComparison.OrdinalIgnoreCase)
@@ -173,7 +175,8 @@ if (arguments.Contains("--dump-single-json"))
             metadata["is_live"] = status == "is_live";
             metadata["was_live"] = status == "was_live";
             metadata["release_date"] = "20260829";
-            metadata["release_timestamp"] = 1787990400;
+            metadata["release_timestamp"] = sourceUri.Query.Contains("id=visual", StringComparison.Ordinal)
+                ? DateTimeOffset.UtcNow.AddHours(2).ToUnixTimeSeconds() : 1787990400;
             metadata["extractor_key"] = "Youtube";
             metadata["extractor"] = "youtube";
         }

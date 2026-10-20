@@ -23,8 +23,10 @@ public sealed class MainForm : Form
     private readonly OtherView otherView;
     private readonly AppShellHost shellHost;
     private readonly CaptionLabel caption = new();
+    private readonly CaptionLabel captionVersion = new();
     private readonly Button captionTheme = new();
     private readonly ToolTip captionTips = new();
+    private WindowsFileDrop? fileDrop;
     private bool fallbackNotice;
     private readonly Panel content;
     private readonly BatchImportView batchView;
@@ -74,7 +76,8 @@ public sealed class MainForm : Form
         AppUi.Secondary(captionTheme); captionTheme.AccessibleAutomationId = "CaptionTheme";
         captionTheme.Click += async (_, _) => await services.Appearance.SetModeAsync(
             services.Appearance.EffectiveVariant == ThemeVariant.Dark ? Settings.AppThemeMode.Light : Settings.AppThemeMode.Dark);
-        TitleBar.Controls.AddRange([caption, captionTheme]); TitleBar.SizeChanged += (_, _) => LayoutCaption();
+        AppUi.BindForeground(captionVersion, AppThemeTokens.TextSecondary);
+        TitleBar.Controls.AddRange([caption, captionVersion, captionTheme]); TitleBar.SizeChanged += (_, _) => LayoutCaption();
         Size = new System.Drawing.Size(1440, 900);
         MinimumSize = new System.Drawing.Size(1000, 700);
 
@@ -105,6 +108,7 @@ public sealed class MainForm : Form
         settingsView = new SettingsView(services) { Visible = false };
         otherView = new OtherView(services) { Visible = false };
         otherView.RegisterTool("Batch", () => _ = OpenBatchAsync());
+        otherView.RegisterTool("Thumbnails", () => _ = OpenThumbnailToolAsync());
         otherView.ResumeBatch += (_, session) => _ = OpenBatchAsync(session);
         settingsView.InstallUpdateRequested += (_, _) => _ = RequestUpdateInstallationAsync();
         downloadsView.SupportedSourcesRequested += OpenSupportedSources;
@@ -227,6 +231,20 @@ public sealed class MainForm : Form
         catch (Exception ex) { services.Logger.Error("Supported sources window failed.", ex); }
     }
 
+    private async Task OpenThumbnailToolAsync()
+    {
+        try
+        {
+            using var window = new ThumbnailToolForm(services, shellHost.Mode == AppInterfaceMode.ModernDashboard);
+#if DEBUG
+            using var registration = automation?.RegisterWindow(window);
+#endif
+            await window.ShowDialog(this);
+            await otherView.RefreshToolsAsync();
+        }
+        catch (Exception error) { services.Logger.Error("Thumbnail tool window failed.", error); }
+    }
+
     private async Task OpenBatchAsync(ModernTubeDownloader.Batch.BatchImportSession? session = null)
     {
         try
@@ -281,6 +299,7 @@ public sealed class MainForm : Form
         Text = modern ? "ModernTubeDownloader   v" + AppBranding.Version : text["App.Title"];
         AppTypography.SetDashboardPresentation(TitleBar, modern);
         AppTypography.Bind(caption, modern ? 10.5f : 12, FontStyle.Bold);
+        AppTypography.Bind(captionVersion, 10, FontStyle.Regular);
         TitleBar.Height = modern ? AppTypography.TextHeight(48) : 34;
         AppUi.BindBackground(TitleBar, modern ? AppThemeTokens.Background : AppThemeTokens.Surface);
         foreach (var view in pages.Keys) AppTypography.SetDashboardPresentation(view, modern);
@@ -293,15 +312,18 @@ public sealed class MainForm : Form
     {
         if (shellHost is null) return;
         var modern = shellHost.Mode == AppInterfaceMode.ModernDashboard;
-        caption.Visible = captionTheme.Visible = modern;
+        caption.Visible = captionVersion.Visible = captionTheme.Visible = modern;
+        TitleBar.Image = AppBranding.CaptionIcon(modern);
         if (modern)
         {
-            TitleBar.Text = ""; caption.Text = "ModernTubeDownloader   v" + AppBranding.Version;
+            TitleBar.Text = ""; caption.Text = "ModernTubeDownloader"; captionVersion.Text = "v" + AppBranding.Version;
             captionTheme.Text = ""; captionTheme.AccessibleName = text["Dashboard.Theme"];
             captionTips.SetToolTip(captionTheme, captionTheme.AccessibleName);
             captionTheme.SetBounds(Math.Max(52, TitleBar.Width - 200), (TitleBar.Height - 34) / 2, 36, 34);
             DashboardVisual.Button(captionTheme); DashboardVisual.Icon(captionTheme, AppIconKind.Sun, iconOnly: true);
-            var captionLeft = TitleBar.Height + 8; caption.SetBounds(captionLeft, 0, Math.Max(180, captionTheme.Left - captionLeft - 14), TitleBar.Height);
+            var captionLeft = TitleBar.Height + 8;
+            caption.SetBounds(captionLeft, 0, Math.Min(DashboardVisual.TextWidth(caption, caption.Text) + 4, Math.Max(0, captionTheme.Left - captionLeft - 14)), TitleBar.Height);
+            captionVersion.SetBounds(caption.Right + 14, 0, Math.Max(0, captionTheme.Left - caption.Right - 28), TitleBar.Height);
         }
         else TitleBar.Text = Text;
     }
@@ -356,6 +378,7 @@ public sealed class MainForm : Form
     private void UpdateNavigationState()
     {
         if (currentView is not null) shellHost.Select(pages[currentView]);
+        if (fileDrop is not null) fileDrop.Enabled = shellHost.Mode == AppInterfaceMode.ModernDashboard && (currentView == batchView || currentView == otherView);
     }
 
     private async Task InitializeAsync()
@@ -496,6 +519,19 @@ public sealed class MainForm : Form
     private void FormShown(object? sender, EventArgs e)
     {
         InitializeRuntime(); ShowFallbackNotice();
+        if (fileDrop is null && OperatingSystem.IsWindows() && PlatformHandle.HandleDescriptor == "HWND")
+        {
+            try
+            {
+                fileDrop = new WindowsFileDrop(PlatformHandle.Handle, files =>
+                {
+                    if (shutdownStarted || shellHost.Mode != AppInterfaceMode.ModernDashboard) return;
+                    Navigate(AppPageId.Batch); _ = batchView.ImportDroppedFilesAsync(files);
+                }, services.Logger);
+                UpdateNavigationState();
+            }
+            catch (Exception error) { services.Logger.Error("Native file drop unavailable; file picker remains available.", error); }
+        }
     }
 
     public void StartRuntime(bool autostart, bool hiddenArgument)
@@ -694,7 +730,7 @@ public sealed class MainForm : Form
     {
         if (disposing)
         {
-            captionTips.Dispose(); tray.Dispose();
+            fileDrop?.Dispose(); captionTips.Dispose(); tray.Dispose();
             services.Queue.Changed -= StateChanged;
             services.Tools.Changed -= StateChanged;
             services.Live.Changed -= StateChanged; services.Updates.Changed -= StateChanged;

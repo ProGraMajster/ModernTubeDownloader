@@ -38,6 +38,7 @@ internal sealed class SettingsView : UserControl
     private Action? restoreClassicTypography, restoreClassicLabels;
     private readonly ToolTip compactTips = new();
     private readonly Dictionary<Panel, AppVectorIcon> overviewIcons = [];
+    private readonly Dictionary<string, SettingsOverviewCard> overviewSummaries = [];
     private readonly TextBox categorySearch = new() { AccessibleAutomationId = "SettingsCategorySearch", Visible = false };
     public void SetDashboard(bool value)
     {
@@ -601,6 +602,7 @@ internal sealed class SettingsView : UserControl
     }
     private void LayoutSettings()
     {
+        UpdateToolStatus();
         foreach (var card in logicalCardHeights.Keys) AppTypography.UnflowRows(card, true);
         foreach (var (label, bounds) in rowLabelBounds) { label.Top = bounds.Top; label.Height = bounds.Height; }
         // Restore absolute section coordinates before the optional overview layout.
@@ -655,6 +657,19 @@ internal sealed class SettingsView : UserControl
         var grid = columnCount > 1;
         var cardWidth = dashboard ? Math.Max(1, grid ? (contentWidth - 48 - (columnCount - 1) * 12) / columnCount : contentWidth - 60) :
             Math.Max(540, scroll.ClientSize.Width - 60);
+        if (dashboard && currentCategory == "General" && overviewSummaries.Count == 0)
+        {
+            foreach (var category in new[] { "Startup", "Notifications", "Updates" })
+            {
+                var card = new SettingsOverviewCard(category, CategoryIcon(category), () => ShowCategory(category));
+                overviewSummaries.Add(category, card); scroll.Controls.Add(card);
+            }
+        }
+        foreach (var card in overviewSummaries.Values)
+        {
+            card.Visible = dashboard && currentCategory == "General";
+            if (!card.Visible) card.SetBounds(0, 0, 0, 0);
+        }
         notificationCard.LayoutForWidth(cardWidth);
         startupCard.LayoutForWidth(cardWidth);
         updatesCard.LayoutForWidth(cardWidth);
@@ -669,7 +684,7 @@ internal sealed class SettingsView : UserControl
         foreach (var card in new[] { generalCard, toolsCard, behaviorCard, resilienceCard, liveCard, notificationCard, subtitlesCard, sponsorCard,
                      cookiesCard, appearanceCard, interfaceCard, textScaleCard, personalizationCard, browserCard, remoteCard, updatesCard, startupCard, advancedCard, actionsCard })
         {
-            if (card != actionsCard) card.Visible = currentCategory == "All" || cardCategories.GetValueOrDefault(card) == currentCategory || dashboard && currentCategory == "General" && new Control[] { interfaceCard, textScaleCard, startupCard, updatesCard }.Contains(card);
+            if (card != actionsCard) card.Visible = currentCategory == "All" || cardCategories.GetValueOrDefault(card) == currentCategory || dashboard && currentCategory == "General" && new Control[] { interfaceCard, textScaleCard }.Contains(card);
             if (!card.Visible) continue;
             if (card != textScaleCard && card != remoteCard && card != personalizationCard && card != interfaceCard) card.Height = AppTypography.TextHeight(logicalCardHeights.GetValueOrDefault(card, card.Height));
             card.SetBounds(page + displayOrigin.X, top, cardWidth, card.Height);
@@ -793,6 +808,22 @@ internal sealed class SettingsView : UserControl
             foreach (var inner in card.Controls.OfType<Panel>()) { DashboardVisual.Flat(inner); }
             foreach (var button in card.Controls.OfType<Button>()) DashboardVisual.Button(button, button == save); }
         if (dashboard && currentCategory == "General" && columnCount > 1) LayoutCompactOverview(cardWidth);
+        if (dashboard && currentCategory == "General")
+        {
+            string Flag(bool enabled) => text[enabled ? "Dashboard.Enabled" : "Dashboard.Disabled"];
+            var startup = services.Settings.Current.Startup; var notifications = services.Settings.Current.Notifications;
+            var action = text["Dashboard.OpenSettingsSection"];
+            overviewSummaries["Startup"].Present(cardWidth, text["Settings.Category.Startup"], action,
+                (text["Tray.ShowIcon"], Flag(startup.ShowTrayIcon)), (text["Startup.Enable"], Flag(startup.StartWithWindows)),
+                (text["Startup.Hidden"], Flag(startup.AutostartInTray)));
+            overviewSummaries["Notifications"].Present(cardWidth, text["Settings.Category.Notifications"], action,
+                (text["Notification.Preference.Enabled"], Flag(notifications.Enabled)),
+                (text["Notification.Preference.DownloadCompleted"], Flag(notifications.DownloadCompleted)),
+                (text["Notification.Preference.DownloadFailed"], Flag(notifications.DownloadFailed)));
+            overviewSummaries["Updates"].Present(cardWidth, text["Settings.Category.Updates"], action,
+                (text["Updates.Automatic"], Flag(services.Settings.Current.Updates.AutomaticChecks)),
+                (text["Dashboard.LastCheck"], services.Updates.State.LastCheck?.ToLocalTime().ToString("g", text.Culture) ?? "—"));
+        }
         // Generic card styling must not erase the canonical interface selection.
         interfaceCard.RefreshPresentation();
         top = displayOrigin.Y;
@@ -843,26 +874,30 @@ internal sealed class SettingsView : UserControl
         themeLabel.SetBounds(16, appearanceTop, inner, labelHeight); theme.SetBounds(16, themeLabel.Bottom + 4, inner, line);
         languageLabel.SetBounds(16, theme.Bottom + 12, inner, labelHeight); language.SetBounds(16, languageLabel.Bottom + 4, inner, line); appearanceCard.Height = language.Bottom + 16;
         var top = OverviewHeader(toolsCard, AppIconKind.Download);
-        foreach (var (panel, description, status, progress) in new[]
+        foreach (var (panel, description, status, progress, tool) in new[]
         {
-            (ytDlpToolCard, ytDlpDescription, ytDlpStatus, ytDlpProgress),
-            (ffmpegToolCard, ffmpegDescription, ffmpegStatus, ffmpegProgress),
-            (denoToolCard, denoDescription, denoStatus, denoProgress)
+            (ytDlpToolCard, ytDlpDescription, ytDlpStatus, ytDlpProgress, services.Tools.YtDlp),
+            (ffmpegToolCard, ffmpegDescription, ffmpegStatus, ffmpegProgress, services.Tools.Ffmpeg),
+            (denoToolCard, denoDescription, denoStatus, denoProgress, services.Tools.Deno)
         })
         {
+            status.Text = FormatTool(tool, compact: true); status.AccessibleName = FormatTool(tool);
             panel.SetBounds(16, top, inner, 1); DashboardVisual.Flat(panel, separator: true);
             var title = panel.Controls.OfType<Label>().First(label => label != description && label != status);
             AppTypography.Bind(title, 10.5f, FontStyle.Bold); title.SetBounds(0, 8, inner, AppTypography.TextHeight(22));
-            foreach (var label in new[] { description, status })
+            description.Visible = false; description.SetBounds(0, 0, 0, 0);
+            compactTips.SetToolTip(title, description.Text);
+            foreach (var label in new[] { status })
             {
                 AppTypography.Bind(label, 9); label.Multiline = true; label.AutoEllipsis = false;
                 if (label == description) label.TextAlign = ContentAlignment.TopLeft;
                 var style = label.CurrentStyle;
                 var measured = TextMeasurer.MeasureText(label.Text, style.GetFont(), style.GetFontSize(), new System.Drawing.Size(inner, int.MaxValue), style.GetFontStyle());
-                label.SetBounds(0, label == description ? title.Bottom + 2 : description.Bottom + 4, inner, Math.Max(AppTypography.TextHeight(18), (int)Math.Ceiling(measured.Height) + 2));
-                compactTips.SetToolTip(label, label.Text);
+                label.SetBounds(0, title.Bottom + 4, inner, Math.Max(AppTypography.TextHeight(18), (int)Math.Ceiling(measured.Height) + 2));
+                compactTips.SetToolTip(label, FormatTool(tool));
             }
-            progress.SetBounds(0, status.Bottom + 5, inner, 3); panel.Height = progress.Bottom + 8; top = panel.Bottom + 6;
+            progress.SetBounds(0, status.Bottom + 5, inner, progress.Visible ? 3 : 0);
+            panel.Height = (progress.Visible ? progress.Bottom : status.Bottom) + 8; top = panel.Bottom + 6;
         }
         checkUpdates.SetBounds(16, top, (inner - 8) / 2, line); retrySetup.SetBounds(checkUpdates.Right + 8, top, (inner - 8) / 2, line);
         supportedSources.SetBounds(16, checkUpdates.Bottom + 8, inner, line); toolsCard.Height = supportedSources.Bottom + 16;
@@ -873,7 +908,7 @@ internal sealed class SettingsView : UserControl
     private IEnumerable<Control> ModernVisibleCards()
     {
         if (!dashboard || currentCategory != "General") return scroll.Controls.Where(c => c.Visible);
-        return new Control[] { appearanceCard, startupCard, interfaceCard, textScaleCard, toolsCard, updatesCard, actionsCard }.Where(c => c.Visible);
+        return new Control[] { appearanceCard, overviewSummaries["Startup"], interfaceCard, overviewSummaries["Notifications"], textScaleCard, toolsCard, overviewSummaries["Updates"], actionsCard }.Where(c => c.Visible);
     }
 
     private static void ResizeSectionHeader(Panel card)
@@ -892,6 +927,7 @@ internal sealed class SettingsView : UserControl
 
     private static void LayoutToolCard(Panel card, Label description, Label status, ProgressBar progress, Panel owner, int top)
     {
+        description.Visible = true;
         card.SetBounds(24, top, owner.Width - 48, 74);
         var title = card.Controls.OfType<Label>().First(label => label != description && label != status);
         title.SetBounds(16, 10, 190, 24);
@@ -1328,7 +1364,7 @@ internal sealed class SettingsView : UserControl
         services.Settings.Current.CustomDenoPath = string.IsNullOrWhiteSpace(denoPath.Text) ? null : denoPath.Text.Trim();
     }
 
-    private void ToolsChanged(object? sender, EventArgs e) => Application.RunOnUIThread(UpdateToolStatus);
+    private void ToolsChanged(object? sender, EventArgs e) => Application.RunOnUIThread(UpdateLayout);
 
     private void UpdateToolStatus()
     {
@@ -1346,12 +1382,12 @@ internal sealed class SettingsView : UserControl
         progress.Value = (int)Math.Clamp(tool.ProgressPercent ?? 0, 0, 100);
     }
 
-    private string FormatTool(ToolInfo tool)
+    private string FormatTool(ToolInfo tool, bool compact = false)
     {
         var parts = new List<string> { text[$"ToolStatus.{tool.Status}"] };
-        parts.Add(tool.ManagedByApplication ? text["Tools.Managed"] : text["Tools.Custom"]);
+        if (!compact) parts.Add(tool.ManagedByApplication ? text["Tools.Managed"] : text["Tools.Custom"]);
         if (tool.Installed)
-            parts.Add(text.Get("Tools.InstalledVersion", tool.InstalledVersion ?? text["Common.Unknown"]));
+            parts.Add(compact ? tool.InstalledVersion ?? text["Common.Unknown"] : text.Get("Tools.InstalledVersion", tool.InstalledVersion ?? text["Common.Unknown"]));
         else
             parts.Add(text["Tools.NotInstalled"]);
         if (!string.IsNullOrWhiteSpace(tool.LatestVersion))

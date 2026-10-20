@@ -13,6 +13,8 @@ internal sealed partial class OtherView
     public event EventHandler<ModernTubeDownloader.Shell.AppPageId>? NavigateRequested;
     private Label? quickTitle;
     private readonly List<Button> quickButtons = [];
+    private DashboardDropZone? importDropZone;
+    private Label? importDropTitle, importDropHint;
 
     public void SetDashboard(bool value)
     {
@@ -27,6 +29,7 @@ internal sealed partial class OtherView
             }
             foreach (var icon in moduleIcons.Values) icon.Visible = false;
             foreach (var workflow in moduleWorkflows.Values) workflow.Visible = false;
+            if (importDropZone is not null) importDropZone.Visible = false;
             ApplyLocalization();
         }
         if (value && quick is null)
@@ -89,7 +92,7 @@ internal sealed partial class OtherView
         var inline = width >= AppTypography.TextHeight(960); var left = inline ? width * 2 / 3 - 12 : width;
         tools.SetBounds(heading.Left, subtitle.Bottom + 18, left, 1); AppUi.BindBackground(tools);
         var toolHeight = 0;
-        foreach (var module in modules.Values)
+        foreach (var (id, module) in modules)
         {
             if (module.Title.Parent is not { } card) continue;
             DashboardStyle.Card(card); card.Width = left - 2;
@@ -99,12 +102,35 @@ internal sealed partial class OtherView
                 moduleIcons.Add(card, icon); card.Controls.Add(icon);
             }
             icon.Visible = true; icon.SetBounds(24, 24, 36, 36);
+            icon.SetKind(id == "Batch" ? AppIconKind.Clipboard : AppIconKind.Media);
             AppTypography.Bind(module.Title, 14, FontStyle.Bold);
             module.Title.SetBounds(80, 20, card.Width - 104, AppTypography.TextHeight(36));
             module.Description.Multiline = true;
             var descriptionStyle = module.Description.CurrentStyle;
             var descriptionSize = TextMeasurer.MeasureText(module.Description.Text, descriptionStyle.GetFont(), descriptionStyle.GetFontSize(), new System.Drawing.Size(card.Width - 104, int.MaxValue), descriptionStyle.GetFontStyle());
             module.Description.SetBounds(80, module.Title.Bottom + 6, card.Width - 104, Math.Max(AppTypography.TextHeight(24), (int)Math.Ceiling(descriptionSize.Height) + 4));
+            if (id != "Batch")
+            {
+                module.Open.Text = services.Localization["Other.Open"];
+                DashboardVisual.Button(module.Open); DashboardVisual.Icon(module.Open, AppIconKind.Media);
+                var openWidth = Math.Min(card.Width - 104, DashboardVisual.ActionWidth(module.Open, true));
+                module.Open.SetBounds(card.Width - 24 - openWidth, module.Description.Bottom + 12, openWidth, AppTypography.TextHeight(36));
+                card.Height = module.Open.Bottom + 18; toolHeight += card.Height + card.Margin.Bottom;
+                continue;
+            }
+            if (importDropZone is null)
+            {
+                importDropZone = new(); importDropTitle = AppUi.Heading("", 12); importDropHint = AppUi.Muted();
+                importDropTitle.TextAlign = importDropHint.TextAlign = ContentAlignment.MiddleCenter;
+                importDropHint.Multiline = true;
+                importDropZone.Controls.AddRange([importDropTitle, importDropHint]); card.Controls.Add(importDropZone);
+            }
+            importDropZone.Visible = true;
+            importDropZone.SetBounds(24, module.Description.Bottom + 16, card.Width - 48, AppTypography.TextHeight(110));
+            importDropTitle!.Text = services.Localization["Dashboard.DropFile"];
+            importDropHint!.Text = services.Localization["Dashboard.DropFormats"];
+            importDropTitle.SetBounds(12, 20, importDropZone.Width - 24, AppTypography.TextHeight(28));
+            importDropHint.SetBounds(12, importDropTitle.Bottom + 6, importDropZone.Width - 24, DashboardVisual.LabelHeight(importDropHint, importDropZone.Width - 24, 2));
             if (!moduleWorkflows.TryGetValue(card, out var workflow))
             {
                 workflow = new Panel(); DashboardVisual.Flat(workflow); AppUi.BindBackground(workflow, AppThemeTokens.SurfaceSecondary);
@@ -114,7 +140,7 @@ internal sealed partial class OtherView
                 }
                 moduleWorkflows.Add(card, workflow); card.Controls.Add(workflow);
             }
-            workflow.Visible = true; workflow.SetBounds(24, module.Description.Bottom + 20, card.Width - 48, 1);
+            workflow.Visible = true; workflow.SetBounds(24, importDropZone.Bottom + 12, card.Width - 48, 1);
             var stepColumns = workflow.Width >= AppTypography.TextHeight(570) ? 3 : 1;
             var stepWidth = (workflow.Width - 24 - (stepColumns - 1) * 12) / stepColumns;
             var stepHeight = 0;

@@ -424,5 +424,5 @@ internal sealed partial class LiveSessionCard : Panel
         details.Top = primary.Bottom + gap; folder.Top = details.Top;
         facts.Visible = !compactWaiting; Height = Math.Max(details.Bottom + 18, thumbnail.Bottom + 18);
     }
-    protected override void Dispose(bool disposing) { if (disposing && !imageDisposed) { imageDisposed = true; imageLifetime.Cancel(); imageLifetime.Dispose(); } base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing && !imageDisposed) { imageDisposed = true; imageLifetime.Cancel(); imageLifetime.Dispose(); dashboardTips.Dispose(); } base.Dispose(disposing); }
 }

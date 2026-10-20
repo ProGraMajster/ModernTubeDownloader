@@ -17,6 +17,61 @@ public sealed class DashboardVisualTests
 {
     [Theory]
     [InlineData(100)] [InlineData(150)] [InlineData(200)]
+    public void MetricValuesRemainVisibleAtEveryTextScale(int scale)
+    {
+        using var host = ModernFormsTestHost.Create();
+        AppTypography.SetScale(scale);
+        try
+        {
+            using var root = new Panel(); AppTypography.SetDashboardPresentation(root, true);
+            var metric = new DashboardMetric(AppThemeTokens.Success); root.Controls.Add(metric);
+            metric.Present("Gotowe", 7);
+            metric.SetBounds(0, 0, 173, metric.DesiredHeight(173));
+            var window = host.Show(root, 200, metric.Height + 20);
+            using var first = window.CaptureRenderedSnapshot();
+            metric.Present("Gotowe", 9);
+            using var second = window.CaptureRenderedSnapshot();
+            Assert.False(first.CopyPixels().SequenceEqual(second.CopyPixels()), "Changing the value must change rendered pixels, not only accessible text.");
+        }
+        finally { AppTypography.SetScale(100); }
+    }
+
+    [Fact]
+    public void DisplayedOutputFormatUsesTheExecutorSelectionAndCompletedFile()
+    {
+        var item = new DownloadQueueItem { QualityPresetId = "audio", PreferredVideoContainer = PreferredVideoContainer.Mp4 };
+        Assert.Equal("—", DashboardStyle.OutputFormat(item));
+        item.SelectedFormats = new(null, "140", "", "m4a", true, false);
+        Assert.Equal("M4A", DashboardStyle.OutputFormat(item));
+        item.Status = DownloadStatus.Completed; item.FinalFile = "finished.ogg";
+        Assert.Equal("OGG", DashboardStyle.OutputFormat(item));
+        item.Status = DownloadStatus.Queued; item.QualityPresetId = "1080";
+        item.SelectedFormats = new("137", "140", "mp4", "m4a", false, true);
+        Assert.Equal("MP4", DashboardStyle.OutputFormat(item));
+    }
+    [Fact]
+    public void DashboardButtonGradientsAreReusedAndRestoreEveryClassicState()
+    {
+        using var host = ModernFormsTestHost.Create();
+        using var button = new Button(); AppUi.Secondary(button);
+        var disabled = new ModernFormsNext.Drawing.SolidColorBrush(SKColors.Orange);
+        button.StyleDisabled.BackgroundBrush = disabled;
+        DashboardVisual.Button(button);
+        var normal = button.Style.BackgroundBrush;
+        Assert.IsType<ModernFormsNext.Drawing.LinearGradientBrush>(normal);
+        Assert.IsType<ModernFormsNext.Drawing.LinearGradientBrush>(button.StyleDisabled.BackgroundBrush);
+        DashboardVisual.Button(button);
+        Assert.Same(normal, button.Style.BackgroundBrush);
+        DashboardVisual.RestoreTree(button);
+        Assert.Null(button.Style.BackgroundBrush);
+        Assert.Null(button.StyleHover.BackgroundBrush);
+        Assert.Null(button.StylePressed.BackgroundBrush);
+        Assert.Null(button.StyleFocused.BackgroundBrush);
+        Assert.Same(disabled, button.StyleDisabled.BackgroundBrush);
+    }
+
+    [Theory]
+    [InlineData(100)] [InlineData(150)] [InlineData(200)]
     public void ReapplyingTheSameTextRecipeDoesNotNotifyAFontChange(int scale)
     {
         using var host = ModernFormsTestHost.Create();

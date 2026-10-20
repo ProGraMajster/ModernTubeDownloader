@@ -182,7 +182,19 @@ internal sealed class DashboardWidgets : Panel
 
 internal static class DashboardStyle
 {
-    public static void Card(Control control) { AppUi.Card(control); AppUi.BindBorder(control, AppThemeTokens.Border); AppUi.BindGradient(control, AppThemeTokens.Surface, AppThemeTokens.SurfaceSecondary); control.Style.Border.Width = 1; control.Style.Border.Radius = Math.Min(10, AppearancePresentation.Current.Global.CornerRadius); }
+    public static string OutputFormat(DownloadQueueItem item)
+    {
+        if (item.Status is DownloadStatus.Completed or DownloadStatus.Partial && !string.IsNullOrWhiteSpace(item.FinalFile))
+        {
+            var extension = System.IO.Path.GetExtension(item.FinalFile).TrimStart('.');
+            if (extension.Length > 0) return extension.ToUpperInvariant();
+        }
+        if (item.SelectedFormats is { } formats)
+            return FfmpegService.ChooseContainer(formats, item.PreferredVideoContainer).ToUpperInvariant();
+        if (QualityPreset.Find(item.QualityPresetId).AudioOnly || item.PreferredVideoContainer == PreferredVideoContainer.Auto) return "—";
+        return item.PreferredVideoContainer.ToString().ToUpperInvariant();
+    }
+    public static void Card(Control control) { AppUi.Card(control); AppUi.BindBorder(control, AppThemeTokens.Border); AppUi.BindGradient(control, AppThemeTokens.SurfaceSecondary, AppThemeTokens.Surface); control.Style.Border.Width = 1; control.Style.Border.Radius = Math.Min(9, AppearancePresentation.Current.Global.CornerRadius); }
     public static string Duration(double? seconds)
     {
         if (seconds is null) return "";

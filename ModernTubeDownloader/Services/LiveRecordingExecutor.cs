@@ -332,9 +332,13 @@ public sealed class LiveRecordingExecutor(
         int partIndex, string historyStatus, Action<Action<LiveSession>, bool> update)
     {
         var verifiedDuration = TimeSpan.Zero;
+        double? partDuration = null;
         foreach (var part in live.Parts.Append(finalPath).Distinct())
             if (await ffmpeg.TryProbeDurationAsync(part).ConfigureAwait(false) is > 0 and var seconds)
+            {
                 verifiedDuration += TimeSpan.FromSeconds(seconds);
+                if (part == finalPath) partDuration = seconds;
+            }
         update(current =>
         {
             if (!current.Parts.Contains(finalPath)) current.Parts.Add(finalPath);
@@ -349,7 +353,8 @@ public sealed class LiveRecordingExecutor(
                 finalPath, DateTimeOffset.Now, historyStatus, live.ThumbnailUrl, live.QualityPresetId,
                 LivePartIndex: partIndex, WasLiveRecording: true,
                 RecordingStartedAt: live.RecordingStartedAt, RecordingEndedAt: DateTimeOffset.UtcNow,
-                RecordedDuration: live.RecordedDuration, WasPartial: historyStatus == "Partial", PartsCount: live.Parts.Count),
+                RecordedDuration: live.RecordedDuration, WasPartial: historyStatus == "Partial", PartsCount: live.Parts.Count,
+                DurationSeconds: partDuration, FileSizeBytes: HistoryOutputFacts.TryFileSize(finalPath, logger)),
                 CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)

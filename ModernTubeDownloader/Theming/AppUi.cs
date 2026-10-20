@@ -26,7 +26,18 @@ internal static class AppUi
     public static void BindGradient(Control control, string first, string second)
     {
         var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
+        control.ClearResourceReference(nameof(Control.BackgroundBrush));
         state.Gradient = (first, second); state.Refresh();
+    }
+    public static void SetDashboardButtonSurface(Button button, bool enabled)
+    {
+        if (!ThemeBindings.TryGetValue(button, out var state)) return;
+        if (!enabled && state.DashboardButton)
+            button.StyleDisabled.BackgroundBrush = state.ClassicDisabledBrush;
+        if (enabled && !state.DashboardButton)
+            state.ClassicDisabledBrush = button.StyleDisabled.BackgroundBrush;
+        state.DashboardButton = enabled;
+        state.Refresh();
     }
     public static void ClearGradient(Control control)
     {
@@ -215,6 +226,7 @@ internal static class AppUi
         public (string First, string Second)? Gradient;
         private LinearGradientBrush? gradientBrush;
         private (SKColor, SKColor)? gradientColors;
+        private readonly Dictionary<ControlStyle, (SKColor Top, SKColor Bottom, LinearGradientBrush Brush)> buttonGradients = new();
         private readonly WeakReference<Control> target;
         private readonly EventHandler<ThemeChangedEventArgs> handler;
 
@@ -238,6 +250,8 @@ internal static class AppUi
         public ButtonVariant? ButtonVariant { get; set; }
         public bool IsComboBox { get; set; }
         public bool IsCard { get; set; }
+        public bool DashboardButton { get; set; }
+        public Brush? ClassicDisabledBrush { get; set; }
         public (string Normal, string Hover)? InteractiveSurface { get; set; }
 
         public void Refresh()
@@ -251,12 +265,34 @@ internal static class AppUi
                 if (effectsButton.Ripple is { } ripple) ripple.Enabled = AppearancePresentation.Current.Global.Animations;
                 if (effectsButton.PressEffect is { } press) press.Enabled = AppearancePresentation.Current.Global.Animations;
             }
-            if (BackgroundToken is not null)
+            if (BackgroundToken is not null && Gradient is null)
                 control.SetResourceReference(nameof(Control.BackgroundBrush), AppThemeTokens.BrushResource(BackgroundToken));
             if (ForegroundToken is not null)
                 control.SetResourceReference(nameof(Control.TextBrush), AppThemeTokens.BrushResource(ForegroundToken));
             if (control is Button button && ButtonVariant is { } variant)
+            {
                 RefreshButtonStates(button, variant);
+                if (DashboardButton)
+                {
+                    var primary = variant == AppUi.ButtonVariant.Primary;
+                    foreach (var style in new[] { button.Style, button.StyleHover, button.StylePressed, button.StyleFocused, button.StyleDisabled })
+                    {
+                        var normal = style.GetBackgroundColor();
+                        var top = normal;
+                        normal = new SKColor((byte)Math.Max(0, normal.Red - 5), (byte)Math.Max(0, normal.Green - 5), (byte)Math.Max(0, normal.Blue - 5), normal.Alpha);
+                        if (!buttonGradients.TryGetValue(style, out var cached) || cached.Top != top || cached.Bottom != normal)
+                        {
+                            var brush = new LinearGradientBrush { End = new System.Drawing.PointF(0, 1) };
+                            brush.GradientStops.Add(new GradientStop(top, 0)); brush.GradientStops.Add(new GradientStop(normal, 1));
+                            cached = (top, normal, brush); buttonGradients[style] = cached;
+                        }
+                        style.BackgroundBrush = cached.Brush;
+                        style.Border.Width = 1; style.Border.Radius = 7;
+                        style.Border.Color = GetColor(primary ? AppThemeTokens.AccentHover : AppThemeTokens.Border);
+                    }
+                    button.StyleFocused.Border.Color = GetColor(AppThemeTokens.Accent);
+                }
+            }
             if (IsComboBox)
             {
                 ApplyInputState(control.Style, AppThemeTokens.Surface, AppThemeTokens.Border, AppThemeTokens.TextPrimary);
@@ -278,7 +314,7 @@ internal static class AppUi
                 var first = GetColor(gradient.First); var second = GetColor(gradient.Second);
                 if (gradientColors != (first, second))
                 {
-                    gradientColors = (first, second); gradientBrush = new LinearGradientBrush();
+                    gradientColors = (first, second); gradientBrush = new LinearGradientBrush { End = new System.Drawing.PointF(0.35f, 1) };
                     gradientBrush.GradientStops.Add(new GradientStop(first, 0)); gradientBrush.GradientStops.Add(new GradientStop(second, 1));
                 }
                 control.BackgroundBrush = gradientBrush;

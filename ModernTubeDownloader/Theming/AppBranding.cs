@@ -9,6 +9,9 @@ internal static class AppBranding
     private const int TitleBarIconSize = 24;
     private static readonly Lazy<SKBitmap> NativeIcon = new(LoadIcon);
     private static readonly Lazy<SKBitmap> TitleBarIcon = new(LoadTitleBarIcon);
+    private static readonly Lazy<SKBitmap> DashboardTitleBarIcon = new(() => NativeIcon.Value.Resize(new SKSizeI(34, 34), new SKSamplingOptions(SKCubicResampler.Mitchell))
+        ?? throw new InvalidOperationException("The application icon could not be resized for the dashboard."));
+    public static SKBitmap CaptionIcon(bool dashboard) => dashboard ? DashboardTitleBarIcon.Value : TitleBarIcon.Value;
 
     public static string Version => typeof(AppBranding).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "";
 

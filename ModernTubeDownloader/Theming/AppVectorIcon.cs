@@ -12,7 +12,7 @@ internal enum AppIconKind
     Queue,
     Live,
     History,
-    Settings, Help, Info, Link, Search, Play, Close, More, Retry, Folder, Plus, Pause, Trash, ChevronDown, Check, Sun
+    Settings, Help, Info, Link, Search, Play, Close, More, Retry, Folder, Plus, Pause, Trash, ChevronDown, Check, Sun, Media, Audio, Resolution, Storage, Stop
 }
 
 internal sealed class AppVectorIcon : UserControl
@@ -65,6 +65,16 @@ internal sealed class AppVectorIcon : UserControl
     {
         switch (kind)
         {
+            case AppIconKind.Media:
+                AddPath(scale, [ClosedFigure((5,2),(15,2),(20,7),(20,22),(5,22)), OpenFigure((15,2),(15,7),(20,7)), ClosedFigure((10,11),(16,15),(10,19))]); break;
+            case AppIconKind.Audio:
+                AddPath(scale, [OpenFigure((9,18),(9,5),(20,2),(20,15)), OpenFigure((9,9),(20,6))]);
+                AddCircle(2*scale,15*scale,7*scale,scale); AddCircle(13*scale,12*scale,7*scale,scale); break;
+            case AppIconKind.Resolution:
+                AddPath(scale, [ClosedFigure((2,4),(22,4),(22,20),(2,20)), OpenFigure((6,10),(6,8),(9,8)), OpenFigure((15,16),(18,16),(18,14))]); break;
+            case AppIconKind.Storage:
+                AddPath(scale, [ClosedFigure((6,3),(18,3),(22,18),(21,21),(3,21),(2,18)), OpenFigure((2,17),(22,17))]);
+                AddFilledCircle(16*scale,18*scale,2*scale); break;
             case AppIconKind.Sun:
                 AddCircle(8 * scale, 8 * scale, 8 * scale, scale);
                 for (var ray = 0; ray < 8; ray++)
@@ -80,6 +90,8 @@ internal sealed class AppVectorIcon : UserControl
                 AddLine(12*scale,4*scale,12*scale,20*scale,scale); AddLine(4*scale,12*scale,20*scale,12*scale,scale); break;
             case AppIconKind.Pause:
                 AddPath(scale, [ClosedFigure((6,4),(9,4),(9,20),(6,20)), ClosedFigure((15,4),(18,4),(18,20),(15,20))]); break;
+            case AppIconKind.Stop:
+                AddPath(scale, [ClosedFigure((5,5),(19,5),(19,19),(5,19))]); break;
             case AppIconKind.Trash:
                 AddPath(scale, [OpenFigure((4,6),(20,6)), ClosedFigure((6,6),(7,21),(17,21),(18,6)), OpenFigure((9,6),(9,3),(15,3),(15,6)), OpenFigure((10,10),(10,17)), OpenFigure((14,10),(14,17))]); break;
             case AppIconKind.ChevronDown:

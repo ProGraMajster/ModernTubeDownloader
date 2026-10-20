@@ -56,8 +56,8 @@ internal sealed partial class HistoryView
             dateRange.SelectedIndexChanged += (_,_) => { days = dateRange.SelectedIndex switch { 1 => 7, 2 => 30, _ => 0 }; dashboardPage = 0; RefreshItems(); }; Controls.Add(dateRange);
             dateSort = new DashboardButton { AccessibleAutomationId = "HistoryDateSort" }; dateSort.Click += (_,_) => { oldestFirst = !oldestFirst; dashboardPage = 0; RefreshItems(); };
             tableHeader = new Panel { AccessibleAutomationId = "HistoryTableHeader" }; tableHeader.Controls.Add(dateSort); AppUi.BindBackground(tableHeader, AppThemeTokens.Surface);
-            foreach (var key in new[] { "Dashboard.Title", "Dashboard.Source", "Dashboard.Date", "Downloads.Quality", "Dashboard.Status" })
-            { var label = AppUi.Muted(); label.Tag = key; label.TextAlign = ContentAlignment.MiddleLeft; AppTypography.Bind(label, 9.5f); tableHeadings.Add(label); tableHeader.Controls.Add(label); }
+            foreach (var key in new[] { "Dashboard.Title", "Dashboard.Source", "Dashboard.Date", "Dashboard.Time", "Dashboard.Format", "Dashboard.Size", "Dashboard.Status" })
+            { var label = AppUi.Muted(); label.Tag = key; label.TextAlign = ContentAlignment.MiddleLeft; label.AutoEllipsis = true; AppTypography.Bind(label, 9.5f); tableHeadings.Add(label); tableHeader.Controls.Add(label); }
             Controls.Add(tableHeader);
             paging = AppUi.Muted(); Controls.AddRange([inspector, filters, export, previous, next, paging]);
             searchIcon = new AppVectorIcon(AppIconKind.Search, 18) { AccessibilityView = AccessibilityView.Hidden };
@@ -180,6 +180,7 @@ internal sealed partial class HistoryEntryCard
     private AppVectorIcon? folderIcon;
     private AppVectorIcon? statusIcon;
     private AppVectorIcon? placeholderIcon;
+    private Label? durationBadge;
     internal Guid ItemId => entry.QueueItemId;
     internal string ItemPath => entry.FinalPath;
     protected override AccessibleObject CreateAccessibilityInstance() => new HistoryRowAccessibleObject(this);
@@ -216,16 +217,17 @@ internal sealed partial class HistoryEntryCard
         if (folderIcon is not null) folderIcon.Visible = value;
         if (statusIcon is not null) statusIcon.Visible = value;
         if (placeholderIcon is not null) placeholderIcon.Visible = value;
+        if (durationBadge is not null) durationBadge.Visible = value && entry.DurationSeconds is > 0;
         placeholderText.Visible = !value;
         if (!value) openFolder.Text = text["Common.OpenFolder"];
         LayoutControls();
     }
     private void LayoutDashboardCard()
     {
-        while (cells.Count < 4)
+        while (cells.Count < 6)
         {
             var label = AppUi.Muted(); label.Multiline = true; label.TextAlign = ContentAlignment.MiddleLeft;
-            label.AccessibleAutomationId = "HistoryCell" + new[] { "Source", "Date", "Format", "Status" }[cells.Count];
+            label.AccessibleAutomationId = "HistoryCell" + new[] { "Source", "Date", "Duration", "Format", "Size", "Status" }[cells.Count];
             label.Click += (_, _) => SelectionRequested?.Invoke(this, entry);
             AppTypography.Bind(label, 9.25f); cells.Add(label); Controls.Add(label);
         }
@@ -238,10 +240,10 @@ internal sealed partial class HistoryEntryCard
             : entry.Channel;
         var titleHeight = HistoryTable.MeasuredHeight(title, titleWidth, 2);
         var factsHeight = HistoryTable.MeasuredHeight(facts, titleWidth, compact ? 2 : 1);
-        var statusHeight = HistoryTable.LineHeight(cells[3]);
+        var statusHeight = HistoryTable.LineHeight(cells[5]);
         var textHeight = titleHeight + 3 + factsHeight + (compact ? statusHeight + 6 : 0);
-        Height = Math.Max(AppTypography.TextHeight(72), textHeight + 20); Margin = new Padding(0, 0, 0, 1);
-        placeholder.SetBounds(12, (Height - 58) / 2, 104, 58); thumbnail.Bounds = placeholder.Bounds;
+        Height = Math.Max(AppTypography.TextHeight(70), textHeight + 12); Margin = new Padding(0, 0, 0, 1);
+        placeholder.SetBounds(12, (Height - 48) / 2, 86, 48); thumbnail.Bounds = placeholder.Bounds;
         if (placeholderIcon is null)
         {
             placeholderIcon = new AppVectorIcon(AppIconKind.History, 24) { AccessibilityView = AccessibilityView.Hidden, AccessibleAutomationId = "HistoryThumbnailPlaceholder" };
@@ -250,23 +252,40 @@ internal sealed partial class HistoryEntryCard
         placeholderIcon.SetBounds((placeholder.Width - 24) / 2, (placeholder.Height - 24) / 2, 24, 24);
         placeholderText.Visible = false;
         placeholder.Visible = thumbnail.Image is null; thumbnail.Visible = thumbnail.Image is not null;
+        if (durationBadge is null)
+        {
+            durationBadge = AppUi.Muted(); AppUi.BindForeground(durationBadge); AppTypography.Bind(durationBadge, 8.5f);
+            durationBadge.TextAlign = ContentAlignment.MiddleCenter;
+            durationBadge.AccessibleAutomationId = "HistoryThumbnailDuration";
+            AppUi.BindBackground(durationBadge, AppThemeTokens.Surface);
+            durationBadge.Click += (_, _) => SelectionRequested?.Invoke(this, entry);
+            Controls.Add(durationBadge);
+        }
+        durationBadge.Text = entry.DurationSeconds is { } duration ? DashboardStyle.Duration(duration) : "";
+        durationBadge.Visible = entry.DurationSeconds is > 0;
+        var badgeWidth = Math.Min(thumbnail.Width, HistoryTable.MeasuredWidth(durationBadge) + 8);
+        var badgeHeight = HistoryTable.LineHeight(durationBadge) + 2;
+        durationBadge.SetBounds(thumbnail.Right - badgeWidth, thumbnail.Bottom - badgeHeight, badgeWidth, badgeHeight);
+        durationBadge.BringToFront();
         title.SetBounds(HistoryTable.TitleLeft, (Height - textHeight) / 2, titleWidth, titleHeight);
         facts.SetBounds(title.Left, title.Bottom + 3, title.Width, factsHeight); path.Visible = false;
         cells[0].Text = SourcePresentation.Host(entry.SourceUrl);
         cells[1].Text = entry.CompletedAt.ToLocalTime().ToString("yyyy-MM-dd\nHH:mm", text.Culture);
-        cells[2].Text = System.IO.Path.GetExtension(entry.FinalPath).TrimStart('.').ToUpperInvariant() + "\n" + entry.Quality;
-        cells[3].Text = text["Status." + (entry.WasPartial ? "Partial" : entry.Status)];
-        for (var i = 0; i < 4; i++)
+        cells[2].Text = entry.DurationSeconds is { } seconds ? DashboardStyle.Duration(seconds) : "—";
+        cells[3].Text = System.IO.Path.GetExtension(entry.FinalPath).TrimStart('.').ToUpperInvariant() + "\n" + entry.Quality;
+        cells[4].Text = entry.FileSizeBytes is { } bytes ? DashboardStyle.Bytes(bytes) : "—";
+        cells[5].Text = text["Status." + (entry.WasPartial ? "Partial" : entry.Status)];
+        for (var i = 0; i < cells.Count; i++)
         {
             var c = columns[i + 1]; cells[i].SetBounds(c.Left, 10, Math.Max(1, c.Width - 8), Height - 20);
             cells[i].Visible = !compact; cells[i].AutoEllipsis = true;
         }
         var completed = entry.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase);
         var statusColor = entry.WasPartial ? AppThemeTokens.Warning : completed ? AppThemeTokens.Success : AppThemeTokens.Error;
-        AppUi.BindForeground(cells[3], statusColor);
+        AppUi.BindForeground(cells[5], statusColor);
         if (compact)
         {
-            cells[3].Visible = true; cells[3].SetBounds(title.Left, facts.Bottom + 6, title.Width, statusHeight);
+            cells[5].Visible = true; cells[5].SetBounds(title.Left, facts.Bottom + 6, title.Width, statusHeight);
         }
         if (statusIcon is null)
         {
@@ -275,8 +294,8 @@ internal sealed partial class HistoryEntryCard
         }
         statusIcon.SetKind(entry.WasPartial ? AppIconKind.Info : completed ? AppIconKind.Check : AppIconKind.Close);
         statusIcon.SetColorToken(statusColor); statusIcon.Visible = true;
-        statusIcon.SetBounds(cells[3].Left, cells[3].Top + (cells[3].Height - 16) / 2, 16, 16);
-        cells[3].SetBounds(cells[3].Left + 22, cells[3].Top, Math.Max(1, cells[3].Width - 22), cells[3].Height);
+        statusIcon.SetBounds(cells[5].Left, cells[5].Top + (cells[5].Height - 16) / 2, 16, 16);
+        cells[5].SetBounds(cells[5].Left + 22, cells[5].Top, Math.Max(1, cells[5].Width - 22), cells[5].Height);
         if (folderIcon is null) { folderIcon = new AppVectorIcon(AppIconKind.Folder, 20); folderIcon.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden; folderIcon.Click += (_,_) => openFolder.PerformClick(); openFolder.Controls.Add(folderIcon); }
         folderIcon.SetBounds(6,7,20,20);
         openFile.Visible = false; openFolder.SetBounds(Width - 42, (Height - 34) / 2, 32, 34); openFolder.Text = ""; openFolder.AccessibleName = text["Common.OpenFolder"];
@@ -289,7 +308,7 @@ internal sealed partial class HistoryEntryCard
 
 internal static class HistoryTable
 {
-    internal const int TitleLeft = 128;
+    internal const int TitleLeft = 110;
     internal static bool IsCompact(int width) => width < AppTypography.TextHeight(820);
     internal static int MeasuredWidth(Label label)
     {
@@ -312,8 +331,14 @@ internal static class HistoryTable
     }
     internal static (int Left, int Width)[] Columns(int width)
     {
-        var content = Math.Max(1, width - 72); var title = content * 46 / 100;
-        var source = content * 11 / 100; var date = content * 14 / 100; var format = content * 13 / 100;
-        return [(12, title), (12 + title, source), (12 + title + source, date), (12 + title + source + date, format), (12 + title + source + date + format, content - title - source - date - format)];
+        var content = Math.Max(1, width - 60);
+        int[] percentages = [36, 10, 12, 8, 10, 9, 15];
+        var columns = new (int Left, int Width)[percentages.Length]; var left = 12;
+        for (var i = 0; i < columns.Length; i++)
+        {
+            var size = i == columns.Length - 1 ? 12 + content - left : content * percentages[i] / 100;
+            columns[i] = (left, size); left += size;
+        }
+        return columns;
     }
 }

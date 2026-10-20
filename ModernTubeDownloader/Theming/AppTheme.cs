@@ -246,14 +246,15 @@ public sealed class AppAppearanceService : IDisposable
     {
         var dark = variant == ThemeVariant.Dark;
         var theme = CreateTheme(dark ? DarkThemeId : LightThemeId, "Modern Dashboard", dark ? BuiltInThemes.DarkThemeId : BuiltInThemes.LightThemeId,
-            variant, dark ? "#0E161D" : "#F2F5F8", dark ? "#141D24" : "#FAFBFD", dark ? "#1B2731" : "#E9EFF5",
-            dark ? "#263744" : "#DCE8F4", dark ? "#293844" : "#CBD7E3", dark ? "#F2F6FA" : "#172637",
-            dark ? "#AEB9C7" : "#4F6378", dark ? "#91A1B5" : "#53677B", "#076DE2", "#0872E4", "#0965C7",
+            variant, dark ? "#0D161D" : "#F2F5F8", dark ? "#121C24" : "#FAFBFD", dark ? "#1C2935" : "#E9EFF5",
+            dark ? "#243746" : "#DCE8F4", dark ? "#273847" : "#CBD7E3", dark ? "#F2F6FA" : "#172637",
+            dark ? "#B6C4D3" : "#4F6378", dark ? "#91A1B5" : "#53677B", "#006FEA", "#0071E6", "#075DC4",
             dark ? "#38D996" : "#087E52", dark ? "#FFB548" : "#926000", dark ? "#FF5D6C" : "#BA2438", dark ? "#48A6FF" : "#0965C7",
             dark ? "#0F1925" : "#E7EEF6", dark ? "#203249" : "#D8E5F3", dark ? "#173E6C" : "#CFE3FC");
         Set(theme, AppThemeTokens.AccentText, "#FFFFFF"); Set(theme, ThemeTokens.Colors.PrimaryText.Name, "#FFFFFF");
         Set(theme, "Legacy.ForegroundColorOnAccent", dark ? "#F2F6FA" : "#172637");
         Set(theme, "Legacy.AccentColor2", "#076DE2");
+        Set(theme, AppThemeTokens.RowSelected, dark ? "#1A2B3A" : "#DDEBFA");
         return theme;
     }
 

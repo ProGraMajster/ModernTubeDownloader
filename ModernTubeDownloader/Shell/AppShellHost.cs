@@ -175,6 +175,10 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         AppUi.BindBackground(activeMarker, AppThemeTokens.Accent); DashboardVisual.Flat(activeMarker); activeMarker.Style.Border.Radius = 2;
         Sidebar.Controls.AddRange([sectionRule, activeMarker]);
         Sidebar.AutoScroll = true;
+        AppUi.BindGradient(Sidebar, AppThemeTokens.Surface, AppThemeTokens.Navigation);
+        Sidebar.Style.Border.Right.Width = 1; Sidebar.Style.Border.Right.Color = AppUi.GetColor(AppThemeTokens.Border);
+        AppUi.BindGradient(Footer, AppThemeTokens.Surface, AppThemeTokens.Background);
+        Footer.Style.Border.Top.Width = 1; Footer.Style.Border.Top.Color = AppUi.GetColor(AppThemeTokens.Border);
         Footer.Height = 32; Status.Padding = new Padding(10, 5, 10, 0);
         identity.Dock = DockStyle.Left; identity.Width = 290; identity.Padding = new Padding(12, 5, 4, 0);
         identity.Text = "ModernTubeDownloader v" + AppBranding.Version;
@@ -188,7 +192,12 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
     public override void Select(AppPageId page)
     {
         base.Select(page);
-        foreach (var button in Buttons.Values) { DashboardVisual.Flat(button); AppTypography.Bind(button, 10.5f); button.StyleFocused.Border.Width = 1; button.StyleFocused.Border.Color = AppUi.GetColor(AppThemeTokens.Accent); }
+        foreach (var (id, button) in Buttons)
+        {
+            DashboardVisual.Flat(button); AppTypography.Bind(button, 10.5f);
+            if (id != page) button.Style.BackgroundColor = SkiaSharp.SKColors.Transparent;
+            button.StyleFocused.Border.Width = 1; button.StyleFocused.Border.Color = AppUi.GetColor(AppThemeTokens.Accent);
+        }
         if (activeMarker is not null && Buttons.TryGetValue(page, out var selected)) activeMarker.SetBounds(0, selected.Top + 4, 4, selected.Height - 8);
     }
     public override void SetStatus(string status, string token) { base.SetStatus(status, token); AppUi.BindBackground(statusDot, token); }
@@ -196,6 +205,7 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
     {
         // The base constructor may receive a layout callback before derived fields exist.
         if (theme is null) return;
+        Sidebar.Style.Border.Right.Color = Footer.Style.Border.Top.Color = AppUi.GetColor(AppThemeTokens.Border);
         var p = AppearancePresentation.Current.ModernDashboardShell;
         var compact = p.Sidebar == DashboardSidebarMode.Compact || p.Sidebar == DashboardSidebarMode.Auto && (Root.Width < 1280 || AppTypography.Scale > 1.25);
         Sidebar.Width = compact ? 66 : Math.Max(212, AppTypography.TextHeight(170));
@@ -210,12 +220,13 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         SetButton(AppPageId.Help, compact, 10, bottom, Sidebar.Width - 20, row);
         SetButton(AppPageId.About, compact, 10, bottom + row + 6, Sidebar.Width - 20, row);
         sectionRule.SetBounds(18, Buttons[AppPageId.Settings].Top - 16, Sidebar.Width - 36, 1);
-        Footer.Height = AppTypography.TextHeight(32); identity.Width = Math.Min(AppTypography.TextHeight(360), Root.Width / 2);
+        Footer.Height = AppTypography.TextHeight(32); identity.Width = Math.Min(DashboardVisual.TextWidth(identity, identity.Text) + 30, Root.Width / 2);
         statusDot.SetBounds(identity.Width + 8, (Footer.Height - 8) / 2, 8, 8);
         Status.Padding = new Padding(26, 5, 8, 0);
         theme.Text = Text["Dashboard.Theme"]; updates.Text = Text["Updates.Check"];
         Select(Selected);
         DashboardVisual.Flat(updates);
+        AppUi.BindInteractiveSurface(updates, AppThemeTokens.Background, AppThemeTokens.SurfaceHover);
         AppTypography.Bind(identity, 9); AppTypography.Bind(Status, 9); AppTypography.Bind(updates, 9);
         AppUi.BindForeground(updates, AppThemeTokens.Info);
     }

@@ -101,7 +101,7 @@ internal sealed partial class LiveView
         }
         // The list owns only its rows. A stacked inspector must not enlarge the
         // list background or reserve a full details form when nothing is selected.
-        var listBottom = inline ? Math.Max(next + 24, ClientSize.Height - AppTypography.TextHeight(164)) : next;
+        var listBottom = inline ? Math.Max(next, ClientSize.Height - AppTypography.TextHeight(164)) : next;
         dashboardList!.SetBounds(18 + origin.X, top, center, inline ? Math.Max(AppTypography.TextHeight(240), listBottom - top) : listBottom - top);
         dashboardList.SendToBack();
         next = dashboardList.Bottom + 12;
@@ -110,8 +110,10 @@ internal sealed partial class LiveView
         if (inspectorEnabled)
             inspector.SetBounds(inline ? 18 + origin.X + center + 12 : 18 + origin.X, inline ? top : next, inline ? right : width, inspectorHeight);
         else inspector.SetBounds(0, 0, 0, 0);
-        var selected = selectedSession is { } id ? services.Live.Find(id) : null;
-        selected ??= services.Live.Snapshot().FirstOrDefault();
+        var visibleSessions = services.Live.Snapshot().Where(s => showRecent
+            ? !s.IsActive && s.State is not LiveSessionState.Pending and not LiveSessionState.WaitingForLive
+            : s.IsActive || s.State is LiveSessionState.Pending or LiveSessionState.WaitingForLive).ToArray();
+        var selected = visibleSessions.FirstOrDefault(s => s.Id == selectedSession) ?? visibleSessions.FirstOrDefault();
         if (selected is not null) SelectSession(selected);
         else
         {
@@ -133,6 +135,7 @@ internal sealed partial class LiveSessionCard
     private AppVectorIcon? dashboardState;
     private Panel? dashboardThumbnail;
     private AppVectorIcon? dashboardThumbnailIcon;
+    private readonly ToolTip dashboardTips = new();
     public event EventHandler<LiveSession>? SelectionRequested;
     public void SetSelected(bool value) { if (selected == value) return; selected = value; if (dashboard) LayoutDashboardCard(); }
     public void SetDashboard(bool value)
@@ -144,7 +147,7 @@ internal sealed partial class LiveSessionCard
         if (!value)
         {
             DashboardVisual.RestoreTree(this); AppUi.Primary(primary); AppUi.BindForeground(state, AppThemeTokens.TextSecondary);
-            title.AutoEllipsis = false;
+            title.AutoEllipsis = false; title.Multiline = false;
             if (dashboardChannel is not null) dashboardChannel.Visible = dashboardTiming!.Visible = dashboardState!.Visible = false;
             if (dashboardThumbnail is not null) dashboardThumbnail.Visible = false;
             if (current is not null) UpdateSession(current);
@@ -177,10 +180,11 @@ internal sealed partial class LiveSessionCard
         DashboardVisual.Flat(this, !selected);
         AppUi.BindBackground(this, selected ? AppThemeTokens.RowSelected : AppThemeTokens.Surface);
         Style.Border.Width = selected ? 1 : 0; Style.Border.Radius = selected ? 6 : 0; Style.Border.Color = AppUi.GetColor(AppThemeTokens.Accent).WithAlpha(130);
-        title.AutoEllipsis = true; title.SetBounds(left, 12, textWidth, line);
+        title.AutoEllipsis = true; title.Multiline = true;
+        title.SetBounds(left, 12, textWidth, DashboardVisual.LabelHeight(title, textWidth, 2));
         AppTypography.Bind(dashboardChannel, 9.5f); dashboardChannel.AutoEllipsis = true;
         dashboardChannel.Text = current?.Channel ?? ""; dashboardChannel.SetBounds(left, title.Bottom + 4, textWidth, line);
-        facts.Visible = true; facts.SetBounds(left, dashboardChannel.Bottom + 4, textWidth, line * 2);
+        facts.Visible = true;
         if (current is not null)
         {
             var t = services.Localization;
@@ -199,6 +203,8 @@ internal sealed partial class LiveSessionCard
             else if ((current.State == LiveSessionState.WaitingForLive ? current.NextCheckAt : current.RetryAt) is { } next)
                 dashboardTiming.Text += "\n" + t.Get("Live.NextCheck", Math.Max(0, (int)(next - DateTimeOffset.UtcNow).TotalSeconds));
         }
+        facts.Multiline = true;
+        facts.SetBounds(left, dashboardChannel.Bottom + 4, textWidth, DashboardVisual.LabelHeight(facts, textWidth, 2));
         var statusLeft = narrow ? left : left + textWidth + 12;
         var statusTop = narrow ? facts.Bottom + 4 : 12;
         var availableStatus = narrow ? textWidth : statusWidth;
@@ -209,12 +215,26 @@ internal sealed partial class LiveSessionCard
         var token = current?.State switch { LiveSessionState.Recording or LiveSessionState.Completed => AppThemeTokens.Success, LiveSessionState.Reconnecting or LiveSessionState.WaitingForLive => AppThemeTokens.Warning, LiveSessionState.Failed => AppThemeTokens.Error, _ => AppThemeTokens.Info };
         AppUi.BindForeground(state, token); dashboardState.SetColorToken(token);
         dashboardState.SetKind(current?.State switch { LiveSessionState.WaitingForLive => AppIconKind.History, LiveSessionState.Completed => AppIconKind.Check, LiveSessionState.Failed => AppIconKind.Close, _ => AppIconKind.Live });
-        var actionTop = 12;
-        foreach (var button in new[] { primary, details, secondary, folder })
+        var actionTop = 12; var actionLeft = Width - actionWidth - 12; var actionHeight = AppTypography.TextHeight(34);
+        if (primary.Visible)
         {
-            if (!button.Visible) continue;
-            button.SetBounds(Width - actionWidth - 12, actionTop, actionWidth, AppTypography.TextHeight(34)); actionTop = button.Bottom + 7;
-            DashboardVisual.Icon(button, button == details ? AppIconKind.Info : button == folder ? AppIconKind.Folder : button == secondary ? (current?.IsActive == true || current?.State is LiveSessionState.Pending or LiveSessionState.WaitingForLive ? AppIconKind.Close : AppIconKind.Play) : current?.IsActive == true ? AppIconKind.Pause : current?.State == LiveSessionState.WaitingForLive ? AppIconKind.Settings : AppIconKind.Play);
+            primary.SetBounds(actionLeft, actionTop, actionWidth, actionHeight); actionTop = primary.Bottom + 7;
+            DashboardVisual.Icon(primary, current?.IsActive == true ? AppIconKind.Stop : current?.State == LiveSessionState.WaitingForLive ? AppIconKind.Settings : AppIconKind.Play);
+        }
+        details.AccessibleName = services.Localization["Common.Details"]; details.Text = "";
+        dashboardTips.SetToolTip(details, details.AccessibleName);
+        details.SetBounds(actionLeft + actionWidth - 36, actionTop, 36, actionHeight); DashboardVisual.Icon(details, AppIconKind.Info);
+        if (secondary.Visible)
+        {
+            secondary.SetBounds(actionLeft, actionTop, actionWidth - 42, actionHeight);
+            // Text retains its native action semantics; the adjacent square opens details.
+            DashboardVisual.RestoreTree(secondary); DashboardVisual.Button(secondary);
+        }
+        actionTop += actionHeight + 7;
+        if (folder.Visible)
+        {
+            folder.SetBounds(actionLeft, actionTop, actionWidth, actionHeight); actionTop = folder.Bottom + 7;
+            DashboardVisual.Icon(folder, AppIconKind.Folder);
         }
         Height = Math.Max(Math.Max(thumbnail.Bottom + 12, Math.Max(facts.Bottom, dashboardTiming.Bottom) + 12), actionTop + 5);
     }

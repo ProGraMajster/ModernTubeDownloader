@@ -18,6 +18,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private readonly AppVectorIcon copyGlyph = new(AppIconKind.Clipboard, 18);
     private readonly AppVectorIcon emptyIcon = new(AppIconKind.Info, 32, AppThemeTokens.TextSecondary) { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
     private readonly PictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom };
+    private readonly Label imageDuration = AppUi.Muted();
     private readonly Label title = AppUi.Heading("", 12), author = AppUi.Muted(), link = AppUi.Muted(), facts = AppUi.Muted(), hint = AppUi.Muted();
     private readonly Panel editor = new();
     private readonly DashboardFields fields = new();
@@ -49,6 +50,9 @@ internal sealed class DashboardInspector : AppScrollPanel
         range.ModeChanged += (_, _) => LayoutInspector();
         editor.Controls.AddRange([qualityLabel, quality, containerLabel, container, range, advanced, apply, hint]);
         Controls.AddRange([details, options, image, title, author, link, copy, facts, fields, editor, openFile, openFolder, retry, emptyIcon]);
+        AppTypography.Bind(imageDuration, 9.5f); imageDuration.TextAlign = ContentAlignment.MiddleCenter;
+        AppUi.BindBackground(imageDuration, AppThemeTokens.Background); Controls.Add(imageDuration);
+        image.Style.Border.Radius = 6; image.Style.Border.Width = 0;
         details.Click += (_, _) => { showOptions = false; LayoutInspector(); }; options.Click += (_, _) => { showOptions = true; LayoutInspector(); };
         copy.Click += async (_, _) =>
         {
@@ -66,6 +70,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     public void Clear()
     {
         historyMode = false; hasSelection = false; queueId = null; source = finalPath = null; thumbnailUrl = null; image.Image = null;
+        imageDuration.Text = "";
         title.Text = services.Localization["Dashboard.SelectItem"]; author.Text = link.Text = factText = ""; copy.Enabled = openFile.Enabled = openFolder.Enabled = false;
         queued = false; options.Visible = false; showOptions = false; RefreshText(); LayoutInspector();
     }
@@ -75,6 +80,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         var changed = queueId != item.Id || queued != (item.Status == DownloadStatus.Queued);
         queueId = item.Id; queued = item.Status == DownloadStatus.Queued; options.Visible = true;
         Present(item.Title, item.Channel, item.SourceUrl, item.ThumbnailUrl, item.FinalFile);
+        imageDuration.Text = DashboardStyle.Duration(item.DurationSeconds);
         var t = services.Localization;
         factText = string.Join("\n\n", new[] {
             t[$"Status.{item.Status}"],
@@ -98,7 +104,7 @@ internal sealed class DashboardInspector : AppScrollPanel
             range.SetRange(item.RequestedRange); subtitles = item.SubtitleOptions.Copy(); sponsors = item.SponsorBlockOptions.Copy();
             hint.Text = t[queued ? "Dashboard.QueuedOptions" : "Dashboard.ReadOnlyOptions"];
         }
-        fields.SetRows((t["Downloads.Container"], item.PreferredVideoContainer.ToString()), (t["Downloads.Quality"], t["Quality." + item.QualityPresetId]),
+        fields.SetRows((t["Downloads.Container"], DashboardStyle.OutputFormat(item)), (t["Downloads.Quality"], t["Quality." + item.QualityPresetId]),
             (t["Dashboard.AddedAt"], item.AddedAt.ToLocalTime().ToString("g", t.Culture)), (t["Dashboard.Duration"], DashboardStyle.Duration(item.DurationSeconds)),
             (t["Dashboard.Status"], t["Status." + item.Status]), (t["Dashboard.Size"], item.TotalBytes is { } totalSize ? DashboardStyle.Bytes(totalSize) : null),
             (t["Dashboard.Output"], item.FinalFile ?? services.Settings.Current.FinalOutputDirectory),
@@ -110,12 +116,16 @@ internal sealed class DashboardInspector : AppScrollPanel
         historyMode = true;
         queueId = null; options.Visible = false; showOptions = false;
         Present(entry.Title, entry.Channel, entry.SourceUrl, entry.ThumbnailUrl, entry.FinalPath);
+        imageDuration.Text = entry.DurationSeconds is { } seconds ? DashboardStyle.Duration(seconds) : "";
         var t = services.Localization;
         factText = entry.Status + "\n\n" + entry.CompletedAt.ToLocalTime().ToString("g", t.Culture) + "\n\n" +
             SourcePresentation.Host(entry.SourceUrl) + " · " + entry.Quality + "\n\n" + entry.FinalPath +
             (entry.RecordedDuration is { } duration ? "\n\n" + duration : "");
         fields.SetRows((t["Dashboard.Source"], SourcePresentation.Host(entry.SourceUrl)), (t["Dashboard.AddedAt"], entry.CompletedAt.ToLocalTime().ToString("g", t.Culture)),
-            (t["Downloads.Quality"], entry.Quality), (t["Dashboard.Status"], t["Status." + (entry.WasPartial ? "Partial" : entry.Status)]), (t["Dashboard.Output"], entry.FinalPath));
+            (t["Dashboard.Duration"], entry.DurationSeconds is { } durationSeconds ? DashboardStyle.Duration(durationSeconds) : "—"),
+            (t["Downloads.Container"], System.IO.Path.GetExtension(entry.FinalPath).TrimStart('.').ToUpperInvariant()),
+            (t["Downloads.Quality"], entry.Quality), (t["Dashboard.Size"], entry.FileSizeBytes is { } size ? DashboardStyle.Bytes(size) : "—"),
+            (t["Dashboard.Status"], t["Status." + (entry.WasPartial ? "Partial" : entry.Status)]), (t["Dashboard.Output"], entry.FinalPath));
         RefreshText(); LayoutInspector();
     }
     public void ShowLive(LiveSession session)
@@ -123,6 +133,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         historyMode = false;
         queueId = null; options.Visible = false; showOptions = false;
         Present(session.Title, session.Channel, session.SourceUrl, session.ThumbnailUrl, session.Parts.LastOrDefault());
+        imageDuration.Text = session.RecordedDuration > TimeSpan.Zero ? DashboardStyle.Duration(session.RecordedDuration.TotalSeconds) : "";
         var t = services.Localization;
         factText = t["Live.State." + session.State] + "\n\n" + SourcePresentation.Host(session.SourceUrl) + "\n\n" +
             t["Quality." + session.QualityPresetId] + " · MKV\n\n" + session.RecordedDuration.ToString(@"hh\:mm\:ss") + " · " + DashboardStyle.Bytes(session.BytesWritten) +
@@ -221,12 +232,20 @@ internal sealed class DashboardInspector : AppScrollPanel
             emptyIcon.SetBounds(12 + o.X + (width - 32) / 2, details.Bottom + 44, 32, 32);
             title.TextAlign = ContentAlignment.MiddleCenter;
             title.SetBounds(24 + o.X, emptyIcon.Bottom + 16, Math.Max(0, width - 24), DashboardVisual.LabelHeight(title, Math.Max(1, width - 24), 3)); editor.Visible = fields.Visible = false;
-            foreach (var hidden in new Control[] { options, image, author, link, copy, facts, fields, editor, openFile, openFolder, retry }) hidden.SetBounds(0, 0, 0, 0);
+            foreach (var hidden in new Control[] { options, image, imageDuration, author, link, copy, facts, fields, editor, openFile, openFolder, retry }) hidden.SetBounds(0, 0, 0, 0);
             return;
         }
         emptyIcon.SetBounds(0, 0, 0, 0); title.TextAlign = ContentAlignment.TopLeft;
         image.Visible = !string.IsNullOrWhiteSpace(thumbnailUrl) && !thumbnailFailed;
         image.SetBounds(12 + o.X, details.Bottom + 14, width, image.Visible ? width * 9 / 16 : 0);
+        imageDuration.Visible = image.Visible && imageDuration.Text.Length > 0;
+        if (imageDuration.Visible)
+        {
+            var badgeWidth = Math.Min(width, DashboardVisual.TextWidth(imageDuration, imageDuration.Text) + 12);
+            var badgeHeight = AppTypography.TextHeight(25);
+            imageDuration.SetBounds(image.Right - badgeWidth - 4, image.Bottom - badgeHeight - 4, badgeWidth, badgeHeight); imageDuration.BringToFront();
+        }
+        else imageDuration.SetBounds(0, 0, 0, 0);
         title.SetBounds(12 + o.X, image.Bottom + 12, width, DashboardVisual.LabelHeight(title, width, 3));
         author.SetBounds(12 + o.X, title.Bottom + 2, width, AppTypography.TextHeight(24));
         link.SetBounds(12 + o.X, author.Bottom + 6, width - AppTypography.TextHeight(32) - 6, AppTypography.TextHeight(30));

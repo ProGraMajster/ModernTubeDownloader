@@ -60,6 +60,7 @@ internal static class DashboardVisual
     }
     public static void RestoreTree(Control control)
     {
+        if (control is Button surfaceButton) AppUi.SetDashboardButtonSurface(surfaceButton, false);
         if (control is Button button && icons.TryGetValue(button, out var icon)) icon.Visible = false;
         if (originalPadding.TryGetValue(control, out var padding))
         {
@@ -83,6 +84,8 @@ internal static class DashboardVisual
     {
         Flat(button); // Capture the Classic recipe before applying Modern presentation.
         if (primary) AppUi.Primary(button); else AppUi.Secondary(button);
+        AppTypography.Bind(button, 10.5f, ModernFormsNext.FontStyle.Regular);
+        AppUi.SetDashboardButtonSurface(button, true);
         foreach (var style in Styles(button))
         {
             style.Border.Width = 1;

@@ -24,6 +24,9 @@ param(
     [switch]$DashboardSwitchStress,
     [switch]$DashboardFixture,
     [switch]$DashboardVisualFixture,
+    [switch]$DashboardPopulatedFixture,
+    [switch]$ExplorerDropSmoke,
+    [switch]$ThumbnailExportSmoke,
     [ValidateRange(5, 1000)][int]$DashboardFixtureCount = 100,
     [switch]$DashboardEmptyFixture,
     [switch]$ClassicUiRecovery,
@@ -68,9 +71,12 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($ClassicUiRecovery) { $DashboardSmoke = $true }
 if ($DashboardVisualFixture) { $DashboardFixture = $true; $DashboardSmoke = $true }
+if ($DashboardPopulatedFixture) { $DashboardVisualFixture = $true; $DashboardFixture = $true; $DashboardSmoke = $true }
 if ($DashboardEmptyFixture) { $DashboardSmoke = $true }
 if ($DashboardLayoutSmoke) { $DashboardSmoke = $true }
 $previousFakeDownloadDelay = $env:MTD_FAKE_DOWNLOAD_DELAY_MS
+$previousFakeThumbnail = $env:MTD_FAKE_METADATA_THUMBNAIL
+if ($DashboardPopulatedFixture) { $env:MTD_FAKE_METADATA_THUMBNAIL = 'https://example.test/dashboard/fixture-0.png' }
 if ($DashboardTransferSmoke) { $DashboardSmoke = $true; $env:MTD_FAKE_DOWNLOAD_DELAY_MS = '10000' }
 if ($DashboardSmoke) { $InterfaceMode = 'ModernDashboard' }
 if (Get-Process -Name ModernTubeDownloader -ErrorAction SilentlyContinue) {
@@ -461,6 +467,16 @@ if ($QueueScrollRepro -or $CrashStress -or $DashboardFixture) {
         }
     }
     if ($DashboardVisualFixture) { & (Join-Path $PSScriptRoot 'New-DashboardVisualFixture.ps1') -DataRoot $dataRoot -Queue $seededQueue -History $seededHistory }
+    if ($DashboardPopulatedFixture -and $seededHistory.Count -lt 10) {
+        foreach ($index in $seededHistory.Count..9) {
+            $extra = $seededHistory[$index % 5].Clone()
+            $extra.QueueItemId = [guid]::NewGuid(); $extra.Title = "Synthetic QA — Archive entry $($index + 1)"
+            $extra.CompletedAt = [DateTimeOffset]::UtcNow.AddDays(-$index).ToString('O')
+            $extra.FinalPath = Join-Path $dataRoot "output\archive-$index.mp4"
+            $extra.DurationSeconds = $null; $extra.FileSizeBytes = $null # genuine unknown legacy fields
+            $seededHistory += $extra
+        }
+    }
     $seededQueue | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Encoding utf8
     $seededHistory | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'history.json') -Encoding utf8
 }
@@ -565,6 +581,23 @@ try {
         $seededQueue[3].Status = 13; $seededQueue[3].ProgressPercent = 0
         $seededQueue[4].Status = 8; $seededQueue[4].ProgressPercent = 0
         $seededQueue | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Encoding utf8
+    }
+    if ($DashboardPopulatedFixture) {
+        # Synthetic persisted intent in this script's owned temporary profile only.
+        # One recording and three upcoming sessions use the real scheduler/FakeTool.
+        $liveFixture = @(foreach ($index in 0..5) {
+            @{
+                SessionId = [guid]::NewGuid(); SourceUrl = $(if ($index -eq 0) { 'https://example.test/live/active?behavior=wait&id=visual0' } else { "https://example.test/live/upcoming?id=visual$index" })
+                MediaId = "visual$index"; Title = @('Synthetic QA — Alpine panorama · 4K LIVE', 'Synthetic QA — Studio broadcast',
+                    'Synthetic QA — Scheduled launch', 'Synthetic QA — Evening music', 'Synthetic QA — Completed broadcast', 'Synthetic QA — Cancelled recording')[$index]
+                Channel = @('QA Nature', 'QA Studio', 'QA Space', 'QA Music', 'QA Archive', 'QA Archive')[$index]
+                ThumbnailUrl = "https://example.test/dashboard/fixture-$($index % 5).png"; State = @(0,1,1,1,6,9)[$index]
+                CreatedAt = [DateTimeOffset]::UtcNow.AddMinutes(-20 - $index).ToString('O'); QualityPresetId = @('2160','1080','2160','audio','1080','720')[$index]
+                Container = 2; WaitForScheduledStart = ($index -ne 0); StartPolicy = 0; Parts = @()
+                ScheduledStartAt = [DateTimeOffset]::UtcNow.AddHours(2 + $index).ToString('O')
+            }
+        })
+        $liveFixture | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'live-sessions.json') -Encoding utf8
     }
     $automationArguments = @('--automation'); if ($ClassicUiRecovery) { $automationArguments += '--classic-ui' }
     $script:automationProcess = Start-Process -FilePath $app -ArgumentList $automationArguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $dataRoot 'automation-stderr.log')
@@ -776,11 +809,73 @@ try {
             Invoke-NodeAction (Find-Node 'ClearAnalyzedPreviewButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
             Capture-Dashboard 'analysis-cleared'
         }
-        foreach ($page in @('Live','Other','Batch','History','Settings','Help','About')) {
+        foreach ($page in @('Live','History','Settings','Other','Batch','Help','About')) {
             Invoke-NodeAction (Find-Node ('Nav' + $page) $mainRoot) $mainRoot 'Invoke' | Out-Null
             Start-Sleep -Milliseconds 250
+            if ($page -eq 'Batch' -and $DashboardPopulatedFixture) {
+                $batchFixture = Join-Path $dataRoot 'synthetic-visual-batch.csv'
+                $batchRows = @('url,quality')
+                foreach ($index in 1..10) {
+                    $batchRows += "https://example.test/watch/visual$index,1080"
+                    if ($index -eq 2) { $batchRows += 'https://example.test/watch/visual2,1080' }
+                    if ($index -eq 4) { $batchRows += 'not-a-url,1080' }
+                }
+                $batchRows | Set-Content -LiteralPath $batchFixture -Encoding utf8
+                if ($ExplorerDropSmoke) {
+                    $dropFolder = Join-Path $dataRoot 'drop-source'; New-Item -ItemType Directory -Path $dropFolder -Force | Out-Null
+                    $dropFile = Join-Path $dropFolder 'visual-links.csv'; Copy-Item -LiteralPath $batchFixture -Destination $dropFile
+                    $dropBounds = (Find-Node 'BatchDropZone' $mainRoot).bounds
+                    # Match the native UIA client above: inline our reviewed helper,
+                    # without changing the machine or process execution policy.
+                    $dropSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-ExplorerFileDrop.ps1') -Raw
+                    $dropCommand = '& { ' + $dropSource + ' } -ProcessId ' + $script:automationProcess.Id +
+                        " -WorktreeRoot '" + $repo.Replace("'", "''") + "' -DataRoot '" + $dataRoot.Replace("'", "''") +
+                        "' -FilePath '" + $dropFile.Replace("'", "''") + "' -TargetX " + ([int]($dropBounds.x + $dropBounds.width / 2)) +
+                        ' -TargetY ' + ([int]($dropBounds.y + $dropBounds.height / 2))
+                    & powershell.exe -NoProfile -Command $dropCommand
+                    if ($LASTEXITCODE -ne 0) { throw 'Physical Explorer file drop failed.' }
+                } else {
+                    Invoke-NodeAction (Find-Node 'BatchFilePath' $mainRoot) $mainRoot 'SetValue' $batchFixture | Out-Null
+                    Invoke-NodeAction (Find-Node 'BatchImport' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                }
+                Wait-Node 'BatchEntryTitle12' $mainRoot | Out-Null
+                Capture-Dashboard 'batch-import-parsed'
+                Invoke-NodeAction (Find-Node 'BatchAnalyze' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-Node 'BatchAnalyze' $mainRoot 'Enabled' | Out-Null
+                if ($ExplorerDropSmoke) { Write-Output 'Native Batch Explorer drop PASS: real Explorer drag parsed 12 rows, including duplicate and invalid input; analysis uses controlled FakeTool.' }
+                else { Write-Output 'Native Batch UI: CSV parsed through semantic actions; duplicate and invalid rows retained. Analysis uses controlled FakeTool. Physical Explorer drag-and-drop was not run.' }
+            }
             if ($page -eq 'History' -and $DashboardFixture) { Invoke-NodeAction (Find-Node ('HistoryItem-' + $seededQueue[0].Id.ToString('N') + '-vod') $mainRoot) $mainRoot 'Select' | Out-Null }
             Capture-Dashboard ('dashboard-' + $page.ToLowerInvariant())
+            if ($page -eq 'Live' -and $DashboardPopulatedFixture) {
+                Invoke-NodeAction (Find-Node 'DashboardLiveRecent' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Capture-Dashboard 'live-recent'
+                Invoke-NodeAction (Find-Node 'DashboardLiveActive' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            }
+            if ($page -eq 'Other' -and $DashboardPopulatedFixture) {
+                Invoke-NodeAction (Find-Node 'OtherOpenThumbnails' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                $toolRoots = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
+                $toolRoot = @($toolRoots.value | Where-Object rootId -ne $mainRoot) | Select-Object -First 1
+                if (-not $toolRoot) { throw 'Thumbnail tool did not expose its native semantic root.' }
+                Invoke-NodeAction (Find-Node 'ThumbnailSource' $toolRoot.rootId) $toolRoot.rootId 'SetValue' 'https://example.test/watch/thumbnail-preview' | Out-Null
+                Invoke-NodeAction (Find-Node 'ThumbnailLoad' $toolRoot.rootId) $toolRoot.rootId 'Invoke' | Out-Null
+                Wait-Node 'ThumbnailSavePng' $toolRoot.rootId 'Enabled' | Out-Null
+                $toolBounds = (Find-Node 'ThumbnailToolWindow' $toolRoot.rootId).bounds
+                $toolPicture = [Drawing.Bitmap]::new([int]$toolBounds.width, [int]$toolBounds.height)
+                $toolDrawing = [Drawing.Graphics]::FromImage($toolPicture)
+                try { Capture-OwnedBitmap $toolDrawing $true; $toolPicture.Save((Join-Path $dataRoot 'thumbnail-tool-ready.png')) }
+                finally { $toolDrawing.Dispose(); $toolPicture.Dispose() }
+                if ($ThumbnailExportSmoke) {
+                    $exportSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-ThumbnailNativeExport.ps1') -Raw
+                    $exportCommand = '& { ' + $exportSource + ' } -ProcessId ' + $script:automationProcess.Id +
+                        " -DataRoot '" + $dataRoot.Replace("'", "''") + "'"
+                    & powershell.exe -NoProfile -MTA -Command $exportCommand
+                    if ($LASTEXITCODE -ne 0) { throw 'Native thumbnail export failed.' }
+                }
+                Invoke-NodeAction (Find-Node 'ThumbnailClose' $toolRoot.rootId) $toolRoot.rootId 'Invoke' | Out-Null
+                if ($ThumbnailExportSmoke) { Start-Sleep -Milliseconds 250; Capture-Dashboard 'dashboard-other' }
+                Write-Output 'Native thumbnail preview PASS: canonical metadata via FakeTool, bounded cached QA image, both export actions enabled; export codecs and I/O qualified by service tests.'
+            }
         }
         Invoke-NodeAction (Find-Node 'NavSettings' $mainRoot) $mainRoot 'Invoke' | Out-Null
         Invoke-NodeAction (Find-Node 'SettingsCategoryPersonalization' $mainRoot) $mainRoot 'Invoke' | Out-Null
@@ -2197,6 +2292,7 @@ finally {
     $env:MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL = $previousSkipProtocol
     $env:MODERNTUBEDOWNLOADER_DATA_ROOT = $previousDataRoot
     $env:MTD_FAKE_PLAYLIST_COUNT = $previousPlaylistCount
+    $env:MTD_FAKE_METADATA_THUMBNAIL = $previousFakeThumbnail
     foreach ($process in @($normalProcess, $script:automationProcess)) {
         if ($null -ne $process -and -not $process.HasExited) {
             $process.CloseMainWindow() | Out-Null

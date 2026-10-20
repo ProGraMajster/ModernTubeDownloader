@@ -21,6 +21,7 @@ internal sealed partial class QueueItemCard
     }
     private bool dashboard;
     private Label? duration, dashboardAuthor;
+    private DashboardMediaFacts? dashboardFacts;
     private AppVectorIcon? actionGlyph, menuGlyph, statusGlyph;
     private readonly ToolTip dashboardTips = new();
     protected override void OnKeyDown(KeyEventArgs e)
@@ -42,6 +43,9 @@ internal sealed partial class QueueItemCard
         }
         if (value && dashboardAuthor is null) { dashboardAuthor = AppUi.Muted(); Controls.Add(dashboardAuthor); AppTypography.Bind(dashboardAuthor, 9.5f); dashboardAuthor.AutoEllipsis = true; }
         if (dashboardAuthor is not null) dashboardAuthor.Visible = value;
+        if (value && dashboardFacts is null) { dashboardFacts = new(); dashboardFacts.Activated += SelectCard; Controls.Add(dashboardFacts); }
+        if (dashboardFacts is not null) { dashboardFacts.Visible = value; if (!value) dashboardFacts.SetBounds(0, 0, 0, 0); }
+        subtitle.Visible = !value;
         if (value && actionGlyph is null)
         {
             statusGlyph = new AppVectorIcon(AppIconKind.Info, 16) { AccessibilityView = AccessibilityView.Hidden }; Controls.Add(statusGlyph);
@@ -54,6 +58,7 @@ internal sealed partial class QueueItemCard
         if (statusGlyph is not null) statusGlyph.Visible = value;
         if (!value && currentItem is not null) ConfigureActions(currentItem);
         if (!value) transfer.Visible = true;
+        if (!value) positionBadge.Visible = positionBadge.Text.Length > 0;
         if (duration is not null) duration.Visible = value;
         AppTypography.Bind(title, value ? DashboardVisual.ItemTitle : 13.5f, value ? FontStyle.Regular : FontStyle.Bold);
         title.Multiline = value;
@@ -66,7 +71,7 @@ internal sealed partial class QueueItemCard
     {
         var p = AppearancePresentation.Current.ModernDashboardShell;
         var narrow = Width < AppTypography.TextHeight(860);
-        var imageWidth = AppearancePresentation.ImageWidth(p.Thumbnail, 140);
+        var imageWidth = AppearancePresentation.ImageWidth(p.Thumbnail, 124);
         var h = (p.QueueDensity switch { AppearanceDensity.Compact => 88, AppearanceDensity.Comfortable => 116, _ => 100 });
         var line = AppTypography.TextHeight(22);
         Margin = new Padding(0, 0, 0, 1);
@@ -74,6 +79,7 @@ internal sealed partial class QueueItemCard
         thumbnail.SetBounds(8, 8, imageWidth, imageWidth * 9 / 16); thumbnailPlaceholder.Padding = new Padding(16);
         if (duration is not null) { var badgeWidth = Math.Min(imageWidth, AppTypography.TextHeight(64)); var badgeHeight = AppTypography.TextHeight(22); duration.SetBounds(thumbnail.Right - badgeWidth, thumbnail.Bottom - badgeHeight, badgeWidth, badgeHeight); duration.BringToFront(); duration.Visible = imageWidth > 0 && duration.Text.Length > 0; }
         positionBadge.SetBounds(12, AppTypography.Scale > 1.25 && imageWidth > 0 ? thumbnail.Bottom + 8 : 12, AppTypography.TextHeight(28), AppTypography.TextHeight(24));
+        positionBadge.Visible = false;
         var left = imageWidth == 0 ? positionBadge.Visible ? positionBadge.Right + 14 : 12 : imageWidth + 26; var right = Width - 98;
         var progressWidth = narrow ? right - left : Math.Clamp(Width * 29 / 100, 210, 310);
         var progressLeft = narrow ? left : right - progressWidth - 10;
@@ -82,12 +88,13 @@ internal sealed partial class QueueItemCard
         dashboardAuthor!.Visible = !string.IsNullOrWhiteSpace(dashboardAuthor.Text);
         dashboardAuthor.SetBounds(left, title.Bottom + (narrow ? 2 : 4), textWidth, dashboardAuthor.Visible ? line : 0);
         subtitle.SetBounds(left, (dashboardAuthor.Visible ? dashboardAuthor.Bottom : title.Bottom) + (narrow ? 2 : 3), textWidth, line); subtitle.AutoEllipsis = true;
-        progress.SetBounds(progressLeft, narrow ? subtitle.Bottom + 6 : 28, Math.Max(50, progressWidth), 6);
+        dashboardFacts!.SetBounds(left, subtitle.Top, textWidth, line); dashboardFacts.Arrange(textWidth);
+        progress.SetBounds(progressLeft, narrow ? dashboardFacts.Bottom + 6 : 28, Math.Max(50, progressWidth), 6);
         status.SetBounds(progressLeft + 22, progress.Bottom + (narrow ? 4 : 7), Math.Max(50, progressWidth - 22), line);
         statusGlyph?.SetBounds(progressLeft, status.Top + 2, 16, 16);
         transfer.SetBounds(progressLeft, status.Bottom, Math.Max(50, progressWidth), line); transfer.TextAlign = ContentAlignment.TopLeft;
         transfer.Visible = !string.IsNullOrWhiteSpace(transfer.Text);
-        Height = Math.Max(AppTypography.TextHeight(h), Math.Max(thumbnail.Bottom, Math.Max(subtitle.Bottom, transfer.Visible ? transfer.Bottom : status.Bottom)) + 10);
+        Height = Math.Max(AppTypography.TextHeight(h), Math.Max(thumbnail.Bottom, Math.Max(dashboardFacts.Bottom, transfer.Visible ? transfer.Bottom : status.Bottom)) + 10);
         primaryAction.SetBounds(Width - 84, (Height - 36) / 2, 36, 36); secondaryAction.SetBounds(Width - 84, Height - 34, 36, 28);
         moreAction.SetBounds(Width - 42, (Height - 36) / 2, 34, 36);
         secondaryAction.Visible = false;
@@ -106,9 +113,16 @@ internal sealed partial class QueueItemCard
         if (dashboardAuthor is not null) { dashboardAuthor.Text = p.ShowAuthor ? item.Channel : ""; dashboardTips.SetToolTip(dashboardAuthor, item.Channel); }
         if (p.ShowSource) parts.Add(Services.SourcePresentation.Host(item.SourceUrl));
         if (p.ShowQuality) parts.Add(text["Quality." + item.QualityPresetId]);
-        if (p.ShowFormat) parts.Add(item.PreferredVideoContainer.ToString());
+        if (p.ShowFormat) parts.Add(DashboardStyle.OutputFormat(item));
         if (p.ShowSize && item.TotalBytes is { } total) parts.Add(DashboardStyle.Bytes(total));
         subtitle.Text = string.Join(" · ", parts);
+        var mediaFacts = new List<(AppIconKind, string)>();
+        if (p.ShowSource) mediaFacts.Add((AppIconKind.Play, Services.SourcePresentation.Host(item.SourceUrl)));
+        if (p.ShowQuality) mediaFacts.Add((item.QualityPresetId == "audio" ? AppIconKind.Audio : AppIconKind.Resolution,
+            QualityPreset.Find(item.QualityPresetId).MaximumHeight is { } height ? height + "p" : text["Quality." + item.QualityPresetId]));
+        if (p.ShowFormat) mediaFacts.Add((AppIconKind.Media, DashboardStyle.OutputFormat(item)));
+        if (p.ShowSize && item.TotalBytes is { } size) mediaFacts.Add((AppIconKind.Storage, DashboardStyle.Bytes(size)));
+        dashboardFacts?.SetFacts(mediaFacts.ToArray());
         if (duration is not null) duration.Text = DashboardStyle.Duration(item.DurationSeconds);
         dashboardTips.SetToolTip(title, item.Title); dashboardTips.SetToolTip(subtitle, subtitle.Text);
         dashboardTips.SetToolTip(primaryAction, primaryAction.Text); primaryAction.AccessibleName = primaryAction.Text;
