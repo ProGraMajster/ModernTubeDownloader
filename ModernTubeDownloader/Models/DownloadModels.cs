@@ -52,6 +52,7 @@ public sealed class DownloadQueueItem
     public double ProgressPercent { get; set; }
     public long? DownloadedBytes { get; set; }
     public long? TotalBytes { get; set; }
+    public long? EstimatedSizeBytes { get; set; }
     public double? SpeedBytesPerSecond { get; set; }
     public TimeSpan? Eta { get; set; }
     public DownloadStatus Status { get; set; } = DownloadStatus.Queued;
@@ -95,6 +96,7 @@ public sealed class DownloadQueueItem
         SubtitleOptions = subtitles?.Copy() ?? new(),
         SponsorBlockOptions = sponsorBlock?.Copy() ?? new(),
         SelectedFormats = selection,
+        EstimatedSizeBytes = MediaSizeEstimator.Estimate(metadata, selection, requestedRange ?? MediaTimeRange.Full),
         // Active manifests often contain short-lived signed stream URLs. LIVE
         // retries always reanalyze, so persisting that JSON is unnecessary.
         RawMetadataJson = liveSession is null ? metadata.RawJson : string.Empty,

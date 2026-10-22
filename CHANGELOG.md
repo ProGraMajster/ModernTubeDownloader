@@ -18,7 +18,45 @@
 Development identity: **1.3.0-candidate.1**, local only; no 1.3.0 release published.
 
 
-## 1.2.1-candidate.1 — local, unreleased
+## 1.2.1 — 2026-10-18
+
+Stability/performance patch; Classic UI and the existing download/LIVE ownership remain.
+
+### Fixed
+
+- Apply download/merge progress before phase completion instead of allowing delayed callbacks to overwrite interrupted/terminal job state.
+- Pause queue admission when the destination folder/drive becomes unavailable.
+- Protect queue persistence after disk-full/write failures and require a successful
+  writable probe and current checkpoint before explicit Resume.
+- Preserve VOD/LIVE partial and recovery media on storage failure.
+- Improve Windows notification provider fallback and bounded Shell identity lifetime
+  through the pinned ModernFormsNext notification fix; notifications remain optional.
+- Accept bounded Batch JSON arrays, single `url` objects and `urls`/`items` envelopes,
+  with localized schema errors and examples instead of technical exception text.
+- Move heavy Batch import/handoff work off the UI context; avoid rebuilding thousands
+  of download cards and quadratic queue-status reconciliation.
+- Reconcile missing/interrupted queue jobs and respect filtered selection/action scope.
+
+### Improved
+
+- New Batch sessions default to one analysis worker. Downloads retain the existing
+  one-job default and preserve explicitly saved concurrency preferences.
+- Render at most 50 queue cards per page with card reuse and page-aware reveal.
+- Separate preparation/download processing progress; show advisory size/transfer ETA
+  only where data is sufficient, with unknown values explicitly indicated.
+- Coalesce progress, journal appends and checkpoints; improve cancellable chunked handoff.
+- Add correlated process diagnostics without changing retry/authentication policy.
+
+### Known limitations
+
+- Source HTTP 403/500/availability errors are not claimed fixed. SponsorBlock Remove
+  remains Experimental/default OFF; LIVE FromStart remains Experimental/source-dependent.
+- MFN #204/#205 typography, physical Windows 11 23H2, exhaustive device/DPI/soak and
+  clean-PC updater qualification remain follow-ups. No Modern Dashboard changes included.
+
+### Historical candidate qualification
+
+The following describes the earlier local 1.2.1-candidate.1, not an additional release.
 
 - Pause VOD admission and new media phases after confirmed disk exhaustion; retain partials
   even when ordinary failed-download cleanup is enabled.

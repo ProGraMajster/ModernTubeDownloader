@@ -40,6 +40,7 @@ public sealed record QueueStorageState(StorageFailureKind Kind, bool Persistence
     {
         StorageFailureKind.DiskFull => "Storage.DiskFull",
         StorageFailureKind.InsufficientSpace => "Storage.LowSpace",
+        StorageFailureKind.DirectoryUnavailable => "Storage.DirectoryUnavailable",
         _ => "Storage.PersistenceDegraded"
     };
 }

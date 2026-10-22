@@ -40,6 +40,8 @@ internal sealed partial class BatchImportView
         foreach (var key in SourceActions) MoveDashboardControl(buttons[key], value ? sourceTabs! : toolbar);
         foreach (var key in SelectionActions) MoveDashboardControl(buttons[key], value ? dashboardSelectionActions! : toolbar);
         foreach (var key in new[] { "Previous", "Next" }) MoveDashboardControl(buttons[key], value ? body : toolbar);
+        MoveDashboardControl(overall, value ? summaryCard! : body);
+        MoveDashboardControl(downloadProgress, value ? summaryCard! : body);
         MoveDashboardControl(path, value ? sourceCard! : body);
         MoveDashboardControl(status, value ? resultCard! : body);
         foreach (var control in new Control[] { quality, container, workers, range }) MoveDashboardControl(control, value ? dashboardOptions! : body);
@@ -207,7 +209,9 @@ internal sealed partial class BatchImportView
         AppUi.BindBackground(rows, AppThemeTokens.Surface); DashboardVisual.Flat(rows);
         summaryTitle!.SetBounds(16, 12, width - 32, AppTypography.TextHeight(24));
         summaryFacts!.SetBounds(16, summaryTitle.Bottom + 6, width - 32, DashboardVisual.LabelHeight(summaryFacts, width - 32, 3));
-        var summaryHeight = summaryFacts.Bottom + 12;
+        overall.SetBounds(16, summaryFacts.Bottom + 4, width - 32, DashboardVisual.LabelHeight(overall, width - 32, 2));
+        downloadProgress.SetBounds(16, overall.Bottom + 4, width - 32, 4);
+        var summaryHeight = downloadProgress.Bottom + 12;
         rows.SetBounds(18 + origin.X, dashboardHeader.Bottom, width,
             Math.Max(AppTypography.TextHeight(180), body.ClientSize.Height - (dashboardHeader.Bottom - origin.Y) - line - summaryHeight - 42));
         progress.SetBounds(rows.Left, dashboardHeader.Top - 3, width, 3);

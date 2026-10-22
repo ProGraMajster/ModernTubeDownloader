@@ -78,6 +78,14 @@ internal sealed partial class DownloadsView : UserControl
     private readonly Label queueTitle;
     private readonly Label admissionCountdown;
     private readonly Label storageWarning;
+    private readonly Label queueSummary = AppUi.Muted();
+    private readonly Label queuePageText = AppUi.Muted();
+    private readonly ProgressBar queueProgress = new() { Minimum = 0, Maximum = 100, AccessibleAutomationId = "QueueOverallProgress" };
+    private readonly Button queuePrevious = new() { Text = "‹", AccessibleAutomationId = "QueuePagePrevious" };
+    private readonly Button queueNext = new() { Text = "›", AccessibleAutomationId = "QueuePageNext" };
+    private int queuePage;
+    private bool queueStructureDirty;
+    private Guid? pendingQueueReveal;
     private readonly ModernFormsNext.Timer admissionCountdownTimer;
     private readonly Button pauseButton;
     private readonly Button moreButton;
@@ -238,14 +246,26 @@ internal sealed partial class DownloadsView : UserControl
         AppUi.Secondary(moreButton);
         pauseButton.Click += (_, _) => services.Queue.SetPaused(!services.Queue.IsPaused);
         moreButton.Click += (_, _) => Application.RunOnUIThread(
-            () => queueMenu.Show(
+            () => { BuildQueueMenu(); queueMenu.Show(
                 moreButton,
-                moreButton.PointToScreen(new System.Drawing.Point(0, moreButton.Height + 4))));
+                moreButton.PointToScreen(new System.Drawing.Point(0, moreButton.Height + 4))); });
         queueToolbar.Controls.AddRange([queueTitle, admissionCountdown, pauseButton, moreButton]);
+        queueSummary.Multiline = true; queueSummary.AccessibleAutomationId = "QueueOverallSummary";
+        queuePageText.AccessibleAutomationId = "QueuePageSummary";
+        AppUi.Secondary(queuePrevious); AppUi.Secondary(queueNext);
+        queuePrevious.Click += (_, _) => { selectedItemId = null; queuePage--; BuildQueueCards(); };
+        queueNext.Click += (_, _) => { selectedItemId = null; queuePage++; BuildQueueCards(); };
+        queueToolbar.Controls.AddRange([queueSummary, queueProgress, queuePrevious, queueNext, queuePageText]);
         admissionCountdownTimer = new ModernFormsNext.Timer { Interval = 1000 };
         admissionCountdownTimer.Tick += (_, _) =>
         {
+            if (queueStructureDirty)
+            {
+                queueStructureDirty = false; var reveal = pendingQueueReveal; pendingQueueReveal = null;
+                BuildQueueCards(reveal);
+            }
             UpdateAdmissionCountdown();
+            UpdateQueueSummary();
         };
         admissionCountdownTimer.Start();
 
@@ -401,6 +421,13 @@ internal sealed partial class DownloadsView : UserControl
             Math.Max(0, pauseButton.Left - countdownLeft - 8), 28);
         AppTypography.ReflowRows(queueToolbar);
 
+        var summaryTop = queueToolbar.Height;
+        queueSummary.SetBounds(0, summaryTop, width, AppTypography.TextHeight(44));
+        queueProgress.SetBounds(0, queueSummary.Bottom + 2, width, 5);
+        queuePrevious.SetBounds(0, queueProgress.Bottom + 5, 38, 30);
+        queueNext.SetBounds(44, queueProgress.Bottom + 5, 38, 30);
+        queuePageText.SetBounds(92, queueProgress.Bottom + 5, width - 92, 30);
+        if (queueSummary.Visible) queueToolbar.Height = (queuePageText.Visible ? queuePageText.Bottom : queueProgress.Bottom) + 4;
         var queueTop = queueToolbar.Bottom + 4;
         if (services.Queue.Storage.State.IsBlocked)
         {
@@ -976,13 +1003,17 @@ internal sealed partial class DownloadsView : UserControl
     {
         Application.RunOnUIThread(() =>
         {
+            if (disposed) return;
             pauseButton.Text = services.Queue.IsPaused ? text["Queue.Resume"] : text["Queue.Pause"];
             UpdateAdmissionCountdown();
             if (e.Kind is QueueChangeKind.Collection or QueueChangeKind.Order)
-                BuildQueueCards(e.Kind == QueueChangeKind.Collection ? e.ItemId : null);
+            {
+                queueStructureDirty = true;
+                if (e.Kind == QueueChangeKind.Collection) pendingQueueReveal = e.ItemId;
+            }
             else if (e.ItemId is { } id && cards.TryGetValue(id, out var card) && services.Queue.Find(id) is { } item)
                 card.UpdateItem(item, selectedItemId == id);
-            BuildQueueMenu();
+            // Refreshed when opened, not recreated on every byte tick.
             if (dashboard) { RefreshDashboardSelection(); queueTitle.Text = text.Get("Dashboard.QueueTitle", services.Queue.Snapshot().Count); }
         });
     }
@@ -1034,30 +1065,44 @@ internal sealed partial class DownloadsView : UserControl
         });
     }
 
-    private void BuildQueueCards(Guid? scrollToItemId = null)
+    private void BuildQueueCards(Guid? scrollToItemId = null, bool rebuildPresentation = false)
     {
         UiCrashDiagnostics.VerifyUiThread("downloads.queue-rebuild");
         UiCrashDiagnostics.Record("queue.rebuild.begin", "queueHost", queueHost.Controls.Count);
         var previousIds = cards.Keys.ToHashSet();
         var items = services.Queue.Snapshot();
+        var pageSize = dashboard ? DashboardPageSize : QueueCardPage.Size;
+        var currentPage = dashboard ? dashboardPage : queuePage;
+        if (scrollToItemId is { } reveal)
+        {
+            var index = Array.FindIndex(items.ToArray(), item => item.Id == reveal);
+            if (index >= 0) currentPage = index / pageSize;
+        }
+        currentPage = Math.Clamp(currentPage, 0, Math.Max(0, (items.Count - 1) / pageSize));
+        if (dashboard) dashboardPage = currentPage; else queuePage = currentPage;
+        var visibleItems = items.Skip(currentPage * pageSize).Take(pageSize).ToArray();
+        var visibleIds = visibleItems.Select(item => item.Id).ToHashSet();
         if (selectedItemId is { } selected && items.All(item => item.Id != selected))
             selectedItemId = null;
         queueHost.SuspendLayout();
         try
         {
-            foreach (var card in cards.Values)
-                card.Dispose();
-            cards.Clear();
-            queueHost.Controls.Clear();
-            if (dashboard) dashboardPage = Math.Clamp(dashboardPage, 0, Math.Max(0, (items.Count - 1) / DashboardPageSize));
-            foreach (var item in dashboard ? items.Skip(dashboardPage * DashboardPageSize).Take(DashboardPageSize) : items)
+            foreach (var cachedId in cards.Keys.Where(cachedId => rebuildPresentation || !visibleIds.Contains(cachedId)).ToArray())
             {
-                var card = new QueueItemCard(services.Thumbnails, text);
-                card.SetDashboard(dashboard);
-                card.KeyDown += DashboardKeys;
-                card.ActionRequested += CardActionRequested;
-                cards[item.Id] = card;
-                queueHost.Controls.Add(card);
+                var old = cards[cachedId]; queueHost.Controls.Remove(old); old.Dispose(); cards.Remove(cachedId);
+            }
+            foreach (var item in visibleItems)
+            {
+                if (!cards.TryGetValue(item.Id, out var card))
+                {
+                    card = new QueueItemCard(services.Thumbnails, text);
+                    card.SetDashboard(dashboard);
+                    card.KeyDown += DashboardKeys;
+                    card.ActionRequested += CardActionRequested;
+                    cards[item.Id] = card;
+                    queueHost.Controls.Add(card);
+                }
+                card.BringToFront();
                 card.UpdateItem(item, selectedItemId == item.Id);
                 if (!dashboard && queueBuilt && items.Count <= 40 && !previousIds.Contains(item.Id))
                 {
@@ -1083,6 +1128,7 @@ internal sealed partial class DownloadsView : UserControl
         if (scrollToItemId is { } id && !previousIds.Contains(id) && cards.ContainsKey(id))
             ScrollQueueCardIntoView(id);
         BuildQueueMenu();
+        UpdateQueueSummary();
         if (dashboard) { RefreshDashboardSelection(); UpdateLayout(); }
         UiCrashDiagnostics.Record("queue.rebuild.end", "queueHost", queueHost.Controls.Count);
     }
@@ -1096,8 +1142,8 @@ internal sealed partial class DownloadsView : UserControl
 
     internal void RevealQueueItem(Guid itemId)
     {
-        if (dashboard) { var index = services.Queue.Snapshot().ToList().FindIndex(i => i.Id == itemId); if (index < 0) return; dashboardPage = index / DashboardPageSize; BuildQueueCards(); }
-        if (!cards.ContainsKey(itemId)) return;
+        if (services.Queue.Find(itemId) is null) return;
+        if (!cards.ContainsKey(itemId)) BuildQueueCards(itemId);
         selectedItemId = itemId;
         RefreshSelection();
         ScrollQueueCardIntoView(itemId);
@@ -1273,6 +1319,26 @@ internal sealed partial class DownloadsView : UserControl
         if (analyzedMetadata is not null) PopulateMetadata(analyzedMetadata);
         BuildQueueMenu();
         LocalizeDashboard();
+        UpdateQueueSummary();
+    }
+
+    private void UpdateQueueSummary()
+    {
+        if (disposed) return;
+        var summary = QueueProgressSummary.Build(services.Queue.ProgressSnapshot(), services.Queue.IsPaused);
+        var showSummary = !dashboard && summary.Total > 0;
+        var showPaging = !dashboard && summary.Total > QueueCardPage.Size;
+        var layoutChanged = queueSummary.Visible != showSummary || queuePageText.Visible != showPaging;
+        queueSummary.Visible = queueProgress.Visible = showSummary;
+        queuePageText.Visible = queuePrevious.Visible = queueNext.Visible = showPaging;
+        queueProgress.Value = (int)summary.Percent;
+        queueSummary.Text = text.Get("Queue.Overall", summary.Settled, summary.Total, summary.Completed, summary.Failed,
+            (summary.KnownBytes / 1073741824d).ToString("N2", text.Culture), summary.UnknownSizes,
+            summary.TransferRemaining is { } eta ? eta.ToString(@"d\.hh\:mm\:ss") : "—");
+        var pages = Math.Max(1, (summary.Total + QueueCardPage.Size - 1) / QueueCardPage.Size);
+        queuePrevious.Enabled = queuePage > 0; queueNext.Enabled = queuePage + 1 < pages;
+        queuePageText.Text = text.Get("Sources.Page", queuePage + 1, pages, summary.Total);
+        if (layoutChanged) UpdateLayout();
     }
 
     private string FormatViews(long? views)

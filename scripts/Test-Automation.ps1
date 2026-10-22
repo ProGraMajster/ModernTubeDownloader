@@ -568,7 +568,7 @@ try {
         $normalProcess.Refresh()
         if ($normalProcess.HasExited) { throw 'Normal startup exited during the ready transition.' }
     }
-    if (-not $normalProcess.CloseMainWindow() -or -not $normalProcess.WaitForExit(30000)) { throw 'Normal startup did not close cleanly.' }
+    if (-not $normalProcess.HasExited -and (-not $normalProcess.CloseMainWindow() -or -not $normalProcess.WaitForExit(30000))) { throw 'Normal startup did not close cleanly.' }
     Write-Output 'Normal startup: no Automation bridge; clean shutdown.'
     if ($PublishStartupSmoke) { Write-Output "Published startup smoke PASS (isolated profile=$dataRoot; custom QA tools, not real provisioning/download)."; return }
     }

@@ -198,7 +198,7 @@ public sealed class DownloadJobExecutor(
                     queueItem.Eta = null;
                 }, true);
                 var partialFile = Path.Combine(attemptDirectory, $"final.partial.{container}");
-                var mergeProgress = new Progress<double>(percent => update(queueItem => queueItem.ProgressPercent = percent, false));
+                var mergeProgress = CreateMergeProgress(update);
                 storage?.ThrowIfBlocked();
                 if (selection.RequiresMerge)
                     await ffmpeg.MergeAsync(videoFile!, audioFile!, partialFile, RequestedDuration(item.DurationSeconds, requestedRange), mergeProgress, cancellationToken).ConfigureAwait(false);
@@ -390,10 +390,10 @@ public sealed class DownloadJobExecutor(
         return end is null ? null : Math.Max(0, end.Value - (range.Start?.TotalSeconds ?? 0));
     }
 
-    private static IProgress<DownloadProgress> CreateDownloadProgress(
+    internal static IProgress<DownloadProgress> CreateDownloadProgress(
         Action<Action<DownloadQueueItem>, bool> update,
         DownloadStatus status,
-        string message) => new Progress<DownloadProgress>(progress => update(queueItem =>
+        string message) => new InlineProgress<DownloadProgress>(progress => update(queueItem =>
         {
             queueItem.Status = status;
             queueItem.StatusMessage = message;
@@ -409,6 +409,17 @@ public sealed class DownloadJobExecutor(
             queueItem.SpeedBytesPerSecond = progress.SpeedBytesPerSecond;
             queueItem.Eta = progress.Eta;
         }, false));
+
+    internal static IProgress<double> CreateMergeProgress(Action<Action<DownloadQueueItem>, bool> update) =>
+        new InlineProgress<double>(percent => update(queueItem => queueItem.ProgressPercent = percent, false));
+
+    // These callbacks mutate canonical queue state, not UI controls. The process
+    // runner drains stdout before returning; apply each report before the next
+    // phase/terminal transition instead of leaving Progress<T> work queued behind it.
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
 
     private static void TryDeleteAttemptDirectory(string attemptDirectory)
     {

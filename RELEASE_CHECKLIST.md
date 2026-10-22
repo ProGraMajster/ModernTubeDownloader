@@ -1,6 +1,29 @@
 # ModernTubeDownloader release checklist
 
-## Local 1.2.1-candidate.1 — owner approval required
+## Final 1.2.1 — patch release
+
+Owner-authorized on 2026-10-18: reviewed master commit/push, terminal exact-SHA CI,
+annotated v1.2.1 and existing tag-only public Release workflow. No browser stores/NuGet.
+Published/verified completion is recorded by the [release/workflow](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.2.1)
+and ignored local `FINAL_RELEASE_1_2_1.md`; no post-tag documentation commit is required.
+
+- [x] Scope limited to hotfix and large Batch work; Modern Dashboard branch/worktree excluded.
+- [x] Central final version 1.2.1 / assembly 1.2.1.0; clean MFN pin `8d8a7679779608b4edbee7dc687c13e3b1a611d9`, no local patch.
+- [x] Existing deterministic storage/JSON/1300-row/10k/50k/filter/selection/cancellation regressions retained.
+- [ ] Final restore, Debug/Release full suites, JS, NativeHost/updater/storage/Batch/notification/localization gates; zero warnings/errors/failures/skips.
+- [ ] Bounded isolated native Batch (if safely available); synthetic metadata is not real media evidence.
+- [ ] Self-contained GUI/NativeHost/Updater publish; ordinary ZIP/symbols/checksum, privacy/package/diff review.
+- [ ] Exact final master CI SUCCESS before annotated tag; then tag CI + Release SUCCESS.
+- [ ] Independently download all official assets; GitHub digest/checksum/computed SHA-256 agree.
+- [ ] Official extracted ZIP native startup/views/Batch TXT+valid+invalid JSON/filter/search/paging/cancel/graceful close.
+- [ ] Updater 1.2.0 sees exact 1.2.1 stable ZIP/checksum; 1.2.1 Current; prerelease ignored.
+- [ ] After successful publication/acceptance, comment Fixed in v1.2.1 and close MTD #1/#2 only.
+
+Known limits: MFN #204/#205 remain separate; SponsorBlock Remove and LIVE FromStart stay
+Experimental. Source HTTP failures, physical 23H2, exhaustive DPI/devices/soak and clean-PC
+update are not claimed fixed/qualified. Final actual gate outcomes are in the local report.
+
+## Historical local 1.2.1-candidate.1 — before final release authorization
 
 - [x] Current full Debug/Release, JS, native smoke, package and scan evidence in hotfix report.
 - [ ] Owner manual test on Windows 11 23H2: startup, VOD, Batch valid/invalid JSON,

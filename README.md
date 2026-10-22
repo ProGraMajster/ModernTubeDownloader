@@ -4,9 +4,9 @@
 
 A Windows desktop application for analyzing, downloading and recording media through [yt-dlp](https://github.com/yt-dlp/yt-dlp), with a native [ModernFormsNext](https://github.com/ProGraMajster/ModernFormsNext) interface.
 
-**[Download v1.2.0 for Windows x64](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.2.0)** · [Changelog](CHANGELOG.md) · [Supported sources](SUPPORTED_SOURCES.md)
+**[Download v1.2.1 for Windows x64](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.2.1)** · [Changelog](CHANGELOG.md) · [Supported sources](SUPPORTED_SOURCES.md)
 
-Stable version: **1.2.0**. Published assets and workflow results are authoritative on
+Stable release target: **1.2.1**. Published assets and workflow results are authoritative on
 the release page. Historical releases remain unchanged. See [cookie synchronization](COOKIE_SYNC.md),
 [release checklist](RELEASE_CHECKLIST.md) and [yt-dlp feature audit/roadmap](YTDLP_FEATURE_GAP_AUDIT.md).
 
@@ -19,14 +19,18 @@ sharing the same runtime, queue, LIVE, history and settings. Choose the interfac
 in Settings → Personalization. Use `--classic-ui` for session-only recovery.
 This branch does not publish or promote the preceding hotfix.
 
-## New in 1.2.0
+## New in 1.2.1
 
-Local hotfix qualification: **1.2.1-candidate.1**, not published. See
-[hotfix report](HOTFIX_1_2_1_CANDIDATE_1_REPORT.md). It adds storage-safe queue pause/recovery,
-bounded notification fallback/lifetime and friendly streaming Batch JSON envelopes.
+This stability/performance patch adds storage-safe queue pause/recovery, bounded notification
+fallback/lifetime and friendly streaming Batch JSON envelopes. Large Batch handoffs run off
+the UI context; queue rendering uses 50-card pages, filtered actions, cancellation and
+advisory progress/size/transfer estimates. See [Batch import](BATCH_IMPORT.md) and the
+[historical hotfix qualification](HOTFIX_1_2_1_CANDIDATE_1_REPORT.md).
 Source builds pin the committed MFN notification hotfix in
 [PR #271](https://github.com/ProGraMajster/ModernFormsNext/pull/271), based on current master.
-This is a source-only update, not a new public release or a claim that the PR is merged.
+The exact committed pin is retained for this patch; no framework merge/publication is implied.
+
+### Retained from 1.2.0
 
 Adds [tray/autostart](TRAY_AND_STARTUP.md), [SHA-verified application updates](UPDATES.md),
 Other/[Batch import](BATCH_IMPORT.md), [versioned appearance profiles and text scaling](PERSONALIZATION.md),
@@ -63,7 +67,7 @@ controls have the [known typography limits](#known-limitations) described below.
 
 Windows 10/11 **x64**, and internet access to install the tools on first start. The self-contained ZIP includes .NET 10: no separate .NET or manual yt-dlp/FFmpeg/Deno installation is required.
 
-1. Download `ModernTubeDownloader-1.2.0-win-x64.zip` from [Releases](https://github.com/ProGraMajster/ModernTubeDownloader/releases).
+1. Download `ModernTubeDownloader-1.2.1-win-x64.zip` from [Releases](https://github.com/ProGraMajster/ModernTubeDownloader/releases).
 2. Extract it to a writable folder. Do not run it from inside the ZIP.
 3. Run `ModernTubeDownloader.exe`.
 
@@ -140,7 +144,7 @@ SponsorBlock is off by default. **Mark requires explicit MKV** and is the suppor
   post-1.2 follow-ups, not crashes; no framework workaround is included.
 - Polski: niektóre etykiety kart i edytory liczb nie podążają w pełni za globalnym
   skalowaniem tekstu z powodu ograniczeń ModernFormsNext #204/#205. Poprawa jest planowana
-  po naprawach frameworka, prawdopodobnie w 1.2.1.
+  po osobnych naprawach frameworka; ten hotfix nie zmienia tych kontrolek.
 - yt-dlp/site behavior can change; extractor availability is not an all-URL/all-feature guarantee. DRM circumvention is not implemented.
 - FromStart depends on retained source fragments and is Experimental. Real upcoming/natural-end behavior is source-dependent; scheduled monitoring needs the app running.
 - Resume depends on matching formats, source/protocol and yt-dlp support. An unexplained terminated yt-dlp process can become Failed/Unknown and require explicit Retry; retained partial data is preserved.

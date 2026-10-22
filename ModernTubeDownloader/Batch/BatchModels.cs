@@ -20,6 +20,8 @@ public sealed class BatchImportEntry
     public string? ErrorKey { get; set; }
     public Guid? QueueItemId { get; set; }
     public bool HasMetadata { get; set; }
+    public long? EstimatedSizeBytes { get; set; }
+    public double? DurationSeconds { get; set; }
     public bool Removed { get; set; }
     public long Revision { get; set; }
     public BatchImportEntry Copy() => (BatchImportEntry)MemberwiseClone();
@@ -32,7 +34,7 @@ public sealed class BatchImportSession
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public string DefaultQuality { get; set; } = "best";
     public PreferredVideoContainer DefaultContainer { get; set; }
-    public int AnalysisWorkers { get; set; } = 3;
+    public int AnalysisWorkers { get; set; } = 1;
     public bool Paused { get; set; } = true;
     public int ImportedCount { get; set; }
     [JsonIgnore] internal object Sync { get; } = new();
@@ -42,3 +44,4 @@ public sealed class BatchImportSession
 }
 public sealed record BatchPage(IReadOnlyList<BatchImportEntry> Entries, int Total, int Page, int Pages);
 public sealed record BatchRawEntry(string Url, string? Quality = null, string? Container = null, string? Start = null, string? End = null, string? ErrorKey = null);
+public sealed record BatchOperationProgress(string Phase, int Completed, int? Total = null);

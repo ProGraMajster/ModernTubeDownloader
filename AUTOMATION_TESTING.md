@@ -8,7 +8,7 @@ Candidate.3 added `NotificationsSection`, `NotificationEnabled`, all individual 
 
 The UI harness captures only its owned HWND. Native banner/center/cold-click evidence is separate; see [candidate report](CANDIDATE3_NOTIFICATIONS_PIPELINE_REPORT.md). Running with an isolated environment-variable data root does not propagate that root to an Explorer/COM cold launch: do not claim an isolated cold-start test unless profile/identity ownership is established.
 
-Build the Debug application and the CLI from the same pinned ModernFormsNext source checkout (`d36015711f63945a49025675acb9aca3df60101d`, origin/master fetched 2026-10-11):
+Build the Debug application and the CLI from the same pinned ModernFormsNext source checkout (`8d8a7679779608b4edbee7dc687c13e3b1a611d9`, notification hotfix based on master; retained for 1.2.1):
 
 ```powershell
 dotnet build .\ModernTubeDownloader\ModernTubeDownloader.csproj -c Debug -m:1 /p:UseSharedCompilation=false
@@ -97,6 +97,14 @@ Release has no Debug named-pipe endpoint; neither coordinates nor screenshots dr
 these actions. The harness restores any temporary owned URI association to its prior
 values, does not change HKCU Run and retains the isolated profile/logs as local evidence.
 This is published-binary UI smoke, not real provisioning, login or shell-menu evidence.
+
+For 1.2.1 the production UIA client also imports small TXT/valid JSON/invalid JSON,
+checks the localized error survives refresh, imports 1,300 synthetic rows, searches/filters/pages,
+selects/analyzes 60 rows across pages, hands those to the paused canonical queue,
+cancels remaining preparation, reopens the saved session and navigates queue pages.
+It explicitly accepts the pending-work close dialog and requires graceful exit.
+Handoff cancellation at/between durable chunks is separately deterministic regression evidence,
+not inferred from clicking Cancel after a fast handoff. All fixtures stay outside the package.
 
 Quality-dropdown diagnostics now write `quality-dropdown-native-trace.jsonl` in the isolated profile: iteration/timestamp, fresh canonical handle/states/actions, action result, foreground/active/focus/mouse-capture HWND and visible owned popup HWND/dimensions. Assertions are unchanged and the capture no longer inserts an arbitrary delay. Accepted Expand is an action result, not a promise that real outside clicks/window deactivation cannot close the popup before a later request. Preserve such failures and native evidence; do not retry Expand, reset focus, weaken assertions or mislabel correct Collapsed state as a stale peer. Native ComboBox is windowless; its popup/Form, not the control, owns HWNDs. The current minimal native 100-cycle variants and environmental-interruption trace are documented in STABILIZATION_REPORT.md.
 

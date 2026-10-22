@@ -344,15 +344,28 @@ public sealed class DownloadResilienceTests
             await queue.LoadAsync();
             for (var index = 0; index < 3; index++)
                 queue.Add(new DownloadQueueItem { VideoId = $"video-{index}", Title = $"Video {index}" });
-            var executor = new HoldExecutor();
-            using var processor = new QueueProcessor(queue, executor, settings, logger, new FixedTiming());
-            var startedAt = DateTimeOffset.UtcNow;
+            // CI previously measured ThreadPool scheduling + durable checkpoint I/O
+            // against a 350 ms wall-clock deadline. Pacing is a clock contract,
+            // not a runner-speed contract; keep a real watchdog for stalled work.
+            var timing = new AdmissionClock();
+            var executor = new HoldExecutor(() => timing.UtcNow);
+            using var processor = new QueueProcessor(queue, executor, settings, logger, timing);
+            var startedAt = timing.UtcNow;
             processor.Start();
+            for (var count = 1; count <= 3; count++)
+            {
+                await WaitUntilAsync(() => executor.Starts.Count == count, TimeSpan.FromSeconds(5));
+                if (count == 3) break;
+                await WaitUntilAsync(() => processor.NextAdmissionAt == timing.UtcNow + TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(5));
+                Assert.Equal(count, processor.ActiveItemIds.Count);
+                timing.Advance(TimeSpan.FromMilliseconds(500));
+                await settings.SaveAsync(); // Existing settings event wakes the scheduler, without changing policy.
+            }
             await WaitUntilAsync(() => executor.Starts.Count == 3, TimeSpan.FromSeconds(5));
             var starts = executor.Starts.OrderBy(value => value).ToArray();
-            Assert.True(starts[0] - startedAt < TimeSpan.FromMilliseconds(350));
-            Assert.True(starts[1] - starts[0] >= TimeSpan.FromMilliseconds(350));
-            Assert.True(starts[2] - starts[1] >= TimeSpan.FromMilliseconds(350));
+            Assert.Equal(startedAt, starts[0]);
+            Assert.Equal(TimeSpan.FromMilliseconds(500), starts[1] - starts[0]);
+            Assert.Equal(TimeSpan.FromMilliseconds(500), starts[2] - starts[1]);
             Assert.Equal(3, processor.ActiveItemIds.Count);
             executor.Release();
             await WaitUntilAsync(() => queue.Snapshot().All(item => item.Status == DownloadStatus.Completed), TimeSpan.FromSeconds(5));
@@ -375,14 +388,24 @@ public sealed class DownloadResilienceTests
         public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.Delay(delay, cancellationToken);
     }
 
-    private sealed class HoldExecutor : IDownloadJobExecutor
+    private sealed class AdmissionClock : IDownloadTiming
+    {
+        private long ticks;
+        public DateTimeOffset UtcNow => DateTimeOffset.UnixEpoch + TimeSpan.FromTicks(Interlocked.Read(ref ticks));
+        public void Advance(TimeSpan value) => Interlocked.Add(ref ticks, value.Ticks);
+        public TimeSpan NextAdmissionDelay(int minimumSeconds, int maximumSeconds) => TimeSpan.FromMilliseconds(500);
+        public TimeSpan RetryDelay(int failedAttempt, DownloadFailureCategory category) => TimeSpan.FromMilliseconds(1);
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.Delay(delay, cancellationToken);
+    }
+
+    private sealed class HoldExecutor(Func<DateTimeOffset>? now = null) : IDownloadJobExecutor
     {
         private readonly TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ConcurrentBag<DateTimeOffset> Starts { get; } = [];
 
         public async Task ExecuteAsync(DownloadQueueItem item, Action<Action<DownloadQueueItem>, bool> update, CancellationToken cancellationToken)
         {
-            Starts.Add(DateTimeOffset.UtcNow);
+            Starts.Add(now?.Invoke() ?? DateTimeOffset.UtcNow);
             await release.Task.WaitAsync(cancellationToken);
             update(value => value.Status = DownloadStatus.Completed, true);
         }

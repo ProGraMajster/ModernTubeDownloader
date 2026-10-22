@@ -2,7 +2,7 @@ using System.ComponentModel;
 
 namespace ModernTubeDownloader.Infrastructure;
 
-public enum StorageFailureKind { None, DiskFull, InsufficientSpace }
+public enum StorageFailureKind { None, DiskFull, InsufficientSpace, DirectoryUnavailable }
 
 /// <summary>Recognizes storage exhaustion without treating every IOException as a full disk.</summary>
 public static class StorageFailureClassifier
@@ -10,6 +10,7 @@ public static class StorageFailureClassifier
     public static StorageFailureKind Classify(Exception error)
     {
         if (error is StorageSpaceException) return StorageFailureKind.InsufficientSpace;
+        if (error is DirectoryNotFoundException or DriveNotFoundException) return StorageFailureKind.DirectoryUnavailable;
         if (error is AggregateException aggregate && aggregate.InnerExceptions.Any(e => Classify(e) == StorageFailureKind.DiskFull))
             return StorageFailureKind.DiskFull;
         // HRESULT_FROM_WIN32(ERROR_DISK_FULL / ERROR_HANDLE_DISK_FULL). These codes

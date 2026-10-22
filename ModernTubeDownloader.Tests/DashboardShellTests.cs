@@ -264,7 +264,12 @@ public sealed class DashboardShellTests
                     DashboardVisual.RestoreTree(view); AppTypography.SetDashboardPresentation(view, false);
                     view.SetDashboard(false); host.ProcessPendingWork();
                     Assert.Same(parent, list.Parent);
-                    Assert.Equal(100, list.Controls.OfType<QueueItemCard>().Count());
+                    // Classic now inherits master's bounded 50-card pages. The selected
+                    // last record must remain visible, in order, without dropping jobs.
+                    Assert.Equal(QueueCardPage.Size, list.Controls.OfType<QueueItemCard>().Count());
+                    Assert.Equal(items.Skip(50).Select(item => $"QueueItem-{item.Id:N}"),
+                        list.Controls.OfType<QueueItemCard>().Select(card => card.AccessibleAutomationId));
+                    Assert.Equal(100, services.Queue.Snapshot().Count);
                     Assert.Equal(items[^1].Id, view.SelectedItemId);
                     view.SetDashboard(true); AppTypography.SetDashboardPresentation(view, true); host.ProcessPendingWork();
                     Assert.Same(list, Find<FlowLayoutPanel>(view, "QueueList")); Assert.Same(parent, list.Parent);

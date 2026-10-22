@@ -63,13 +63,13 @@ internal sealed partial class DownloadsView
         // native accessibility sees the completed collection instead of every intermediate
         // removal and layout of the old/new rows. Ordinary queue updates retain their path.
         var parent = queueHost.Parent;
-        if (parent is null) { BuildQueueCards(); return; }
+        if (parent is null) { BuildQueueCards(selectedItemId, rebuildPresentation: true); return; }
         var index = parent.Controls.GetChildIndex(queueHost);
         parent.SuspendLayout();
         try
         {
             parent.Controls.Remove(queueHost);
-            BuildQueueCards();
+            BuildQueueCards(selectedItemId, rebuildPresentation: true);
         }
         finally
         {
