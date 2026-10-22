@@ -8,6 +8,7 @@ internal sealed class DashboardFields : Panel
 {
     private readonly List<(Label Key, Label Value)> rows = [];
     private readonly ToolTip tips = new();
+    public bool SingleLineValues { get; set; }
     public DashboardFields() { Style.BackgroundColor = SkiaSharp.SKColors.Transparent; DashboardVisual.Flat(this); SizeChanged += (_, _) => LayoutFields(); }
     public void SetRows(params (string Key, string? Value)[] values)
     {
@@ -33,7 +34,8 @@ internal sealed class DashboardFields : Panel
         foreach (var row in rows.Where(r => r.Key.Visible))
         {
             var valueWidth = Math.Max(1, Width - keyWidth);
-            var height = Math.Max(line, Math.Max(DashboardVisual.LabelHeight(row.Key, keyWidth - 8, 3), DashboardVisual.LabelHeight(row.Value, valueWidth, 3)));
+            row.Value.Multiline = !SingleLineValues;
+            var height = Math.Max(line, Math.Max(DashboardVisual.LabelHeight(row.Key, keyWidth - 8, 3), DashboardVisual.LabelHeight(row.Value, valueWidth, SingleLineValues ? 1 : 3)));
             row.Key.SetBounds(0, y, keyWidth - 8, height); row.Value.SetBounds(keyWidth, y, valueWidth, height);
             y += height + AppTypography.TextHeight(4);
         }

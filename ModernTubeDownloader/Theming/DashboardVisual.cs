@@ -138,6 +138,25 @@ internal class DashboardLabel : Label
 internal class DashboardButton : Button
 {
     static DashboardButton() => ModernFormsNext.Renderers.RenderManager.SetRenderer<DashboardButton>(new DashboardButtonRenderer());
+    // 1 joins the right edge, 2 joins the left. Input, focus and Invoke stay native.
+    public int JoinedEdge { get; set; }
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        if (JoinedEdge == 0 || !AppTypography.IsDashboard(this)) { base.OnPaintBackground(e); return; }
+        var radius = LogicalToDeviceUnits(7);
+        var rounded = new SKPoint(radius, radius); var square = SKPoint.Empty;
+        using var outline = new SKRoundRect();
+        outline.SetRectRadii(new SKRect(.5f, .5f, LogicalToDeviceUnits(Width) - .5f, LogicalToDeviceUnits(Height) - .5f),
+            JoinedEdge == 1 ? [rounded, square, square, rounded] : [square, rounded, rounded, square]);
+        // The retained MFN back buffer may contain the previous rectangular recipe.
+        // Clear outside the new clip as well when switching presentation/styles.
+        e.Canvas.Clear(SKColors.Transparent);
+        e.Canvas.Save();
+        try { e.Canvas.ClipRoundRect(outline, SKClipOperation.Intersect, true); base.OnPaintBackground(e); }
+        finally { e.Canvas.Restore(); }
+        using var border = new SKPaint { Color = CurrentStyle.Border.GetColor(), StrokeWidth = (float)Scaling, Style = SKPaintStyle.Stroke, IsAntialias = true };
+        e.Canvas.DrawRoundRect(outline, border);
+    }
 }
 
 internal sealed class DashboardButtonRenderer : ModernFormsNext.Renderers.ButtonRenderer

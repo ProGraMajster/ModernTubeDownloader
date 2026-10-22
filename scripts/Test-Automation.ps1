@@ -21,6 +21,9 @@ param(
     [switch]$DashboardSmoke,
     [switch]$DashboardLayoutSmoke,
     [switch]$DashboardTransferSmoke,
+    [switch]$DownloadsReviewSmoke,
+    [switch]$DownloadsInputSmoke,
+    [switch]$DownloadsTooltipSmoke,
     [switch]$DashboardSwitchStress,
     [switch]$DashboardFixture,
     [switch]$DashboardVisualFixture,
@@ -69,6 +72,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($DownloadsTooltipSmoke) { $DownloadsInputSmoke = $true }
+if ($DownloadsInputSmoke) { $DownloadsReviewSmoke = $true }
+if ($DownloadsReviewSmoke) { $DashboardVisualFixture = $true; $DashboardFixtureCount = 5; $CaptureVisual = $true }
 if ($ClassicUiRecovery) { $DashboardSmoke = $true }
 if ($DashboardVisualFixture) { $DashboardFixture = $true; $DashboardSmoke = $true }
 if ($DashboardPopulatedFixture) { $DashboardVisualFixture = $true; $DashboardFixture = $true; $DashboardSmoke = $true }
@@ -366,6 +372,11 @@ public static class MtdAutomationWindowCloser {
         long packed = (ushort)point.X | ((long)(ushort)point.Y << 16);
         return PostMessage(window, message, buttonDown ? (IntPtr)1 : IntPtr.Zero, (IntPtr)packed);
     }
+    public static bool SendOwnedKey(int processId, IntPtr window, int key) {
+        GetWindowThreadProcessId(window, out uint owner);
+        return owner == processId && PostMessage(window, 0x0100, (IntPtr)key, (IntPtr)1)
+            && PostMessage(window, 0x0101, (IntPtr)key, (IntPtr)unchecked((int)0xC0000001));
+    }
     public static bool PlaceWindow(IntPtr window, int width, int height, int left, int top) =>
         InPhysicalCoordinates(() => SetWindowPos(window, IntPtr.Zero, left, top, width, height, 0x0004));
     public static bool ResizeWindow(IntPtr window, int width, int height) =>
@@ -580,6 +591,17 @@ try {
         $seededQueue[2].Status = 7; $seededQueue[2].ProgressPercent = 0
         $seededQueue[3].Status = 13; $seededQueue[3].ProgressPercent = 0
         $seededQueue[4].Status = 8; $seededQueue[4].ProgressPercent = 0
+        if ($DownloadsReviewSmoke) {
+            # Five canonical records. Only the first runs: actual worker/process/file
+            # progress with an explicit FakeTool release barrier, never UI telemetry injection.
+            $seededQueue[0].Status = 0; $seededQueue[0].ProgressPercent = 0
+            $seededQueue[0].StatusMessageKey = 'Queue.Detail.Queued'
+            $seededQueue[0].SourceUrl = 'https://example.test/watch/review-transfer'
+            $seededQueue[0].FinalFile = $null
+            $seededQueue[0].SelectedFormats = @{ VideoFormatId = '18'; AudioFormatId = $null; VideoExtension = 'mp4'; AudioExtension = $null; AudioOnly = $false; RequiresMerge = $false }
+            $seededQueue[4].Status = 6; $seededQueue[4].ProgressPercent = 100
+            $seededQueue[4].PreferredVideoContainer = 0 # genuine unknown format case
+        }
         $seededQueue | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Encoding utf8
     }
     if ($DashboardPopulatedFixture) {
@@ -701,6 +723,100 @@ try {
             $paged = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
             if (@($paged.nodes | Where-Object { $_.node.automationId -like 'QueueItem-*' }).Count -ne [Math]::Min(40, $DashboardFixtureCount)) { throw 'Dashboard queue did not honor its 40-row page limit.' }
         }
+        if ($DownloadsReviewSmoke) {
+            $queueLabels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
+            if ($DownloadsInputSmoke) {
+                $keyboardId = 'QueueItem-' + $seededQueue[1].Id.ToString('N')
+                Invoke-NodeAction (Find-Node $keyboardId $mainRoot) $mainRoot 'Focus' | Out-Null
+                Wait-Node $keyboardId $mainRoot 'Focused' | Out-Null
+                foreach ($key in @(32,13)) {
+                    if (-not [MtdAutomationWindowCloser]::SendOwnedKey($script:automationProcess.Id,$script:automationProcess.MainWindowHandle,$key)) { throw 'Owned HWND key dispatch failed.' }
+                    Wait-Node $keyboardId $mainRoot 'Selected' | Out-Null
+                }
+                Write-Output 'Native input PASS: Focus plus owned HWND Space/Enter selects the expected canonical row; no global keyboard injection.'
+                Invoke-NodeAction (Find-Node ('QueueItem-' + $seededQueue[0].Id.ToString('N')) $mainRoot) $mainRoot 'Select' | Out-Null
+            }
+            if ($DownloadsTooltipSmoke) {
+                $titleTree = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
+                $titleNode = @($titleTree.nodes | Where-Object { $_.node.name -eq $seededQueue[0].Title -and $_.node.role -eq 'StaticText' }) | Select-Object -First 1
+                if (-not $titleNode) { throw 'Native title node unavailable for tooltip target.' }
+                $bounds = $titleNode.node.bounds
+                [void][MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle,0x0200,[int]($bounds.x+8),[int]($bounds.y+8),$false)
+                Start-Sleep -Milliseconds 800
+                $popupWidth=0; $popupHeight=0
+                $popup = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id,$script:automationProcess.MainWindowHandle,[ref]$popupWidth,[ref]$popupHeight)
+                if ($popup -eq [IntPtr]::Zero) { throw 'Native tooltip did not open for the owned-window mouse event.' }
+                $popupBitmap = [Drawing.Bitmap]::new($popupWidth,$popupHeight); $popupGraphics = [Drawing.Graphics]::FromImage($popupBitmap)
+                $popupDc = $popupGraphics.GetHdc()
+                try { if (-not [MtdAutomationWindowCloser]::CaptureOwnPopup($script:automationProcess.Id,$popup,$popupDc)) { throw 'Owned tooltip capture failed.' } }
+                finally { $popupGraphics.ReleaseHdc($popupDc); $popupGraphics.Dispose() }
+                try { $popupBitmap.Save((Join-Path $dataRoot 'downloads-title-tooltip.png')) } finally { $popupBitmap.Dispose() }
+                [void][MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle,0x0200,240,205,$false)
+                Write-Output 'Native tooltip HWND captured; full title requires visual inspection of downloads-title-tooltip.png.'
+            }
+            Capture-Dashboard 'downloads-selected'
+            Invoke-NodeAction (Find-Node 'DashboardStartAll' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Wait-DashboardQueuePaused $false
+            $reviewClock = [Diagnostics.Stopwatch]::StartNew(); $readyFile = $null
+            do {
+                $readyFile = Get-ChildItem -LiteralPath (Join-Path $dataRoot 'temp') -Filter '.review-transfer-ready' -Recurse -File | Select-Object -First 1
+                if ($readyFile) { break }; Start-Sleep -Milliseconds 100
+            } while ($reviewClock.Elapsed.TotalSeconds -lt 15)
+            if (-not $readyFile) { throw 'Review transfer did not reach the actual FakeTool file/progress barrier.' }
+            $reviewId = $seededQueue[0].Id.ToString('N')
+            $reviewStatus = Find-Node ('QueueStatus-' + $reviewId) $mainRoot
+            if ($reviewStatus.name -notlike ($queueLabels.'Status.DownloadingVideo' + '*')) { throw 'Review fixture is not an active canonical transfer.' }
+            Capture-Dashboard 'downloads-active-transfer'
+            Invoke-NodeAction (Find-Node 'QueuePauseButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Wait-DashboardQueuePaused $true
+            if ((Find-Node ('QueueStatus-' + $reviewId) $mainRoot).name -notlike ($queueLabels.'Status.DownloadingVideo' + '*')) { throw 'Admission pause unexpectedly stopped the active transfer.' }
+            if ($DownloadsInputSmoke) {
+                Invoke-NodeAction (Find-Node ('QueuePrimaryAction-' + $reviewId) $mainRoot) $mainRoot 'Invoke' | Out-Null
+                $reviewClock.Restart()
+                do {
+                    $cancelled = (Find-Node ('QueueStatus-' + $reviewId) $mainRoot).name -eq $queueLabels.'Status.Cancelled'
+                    if ($cancelled) { break }; Start-Sleep -Milliseconds 100
+                } while ($reviewClock.Elapsed.TotalSeconds -lt 15)
+                if (-not $cancelled) { throw 'Cancel did not stop the active review transfer.' }
+                Capture-Dashboard 'downloads-stopped'
+                if (Test-Path -LiteralPath $readyFile.FullName) { Remove-Item -LiteralPath $readyFile.FullName }
+                Invoke-NodeAction (Find-Node ('QueuePrimaryAction-' + $reviewId) $mainRoot) $mainRoot 'Invoke' | Out-Null
+                if ((Find-Node ('QueueStatus-' + $reviewId) $mainRoot).name -ne $queueLabels.'Status.Queued') { throw 'Retry did not return the same record to Queued.' }
+                Invoke-NodeAction (Find-Node 'DashboardStartAll' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-DashboardQueuePaused $false
+                $reviewClock.Restart(); $readyFile = $null
+                do {
+                    $readyFile = Get-ChildItem -LiteralPath (Join-Path $dataRoot 'temp') -Filter '.review-transfer-ready' -Recurse -File | Select-Object -First 1
+                    if ($readyFile) { break }; Start-Sleep -Milliseconds 100
+                } while ($reviewClock.Elapsed.TotalSeconds -lt 15)
+                if (-not $readyFile) { throw 'Retry did not reach a new actual process progress barrier.' }
+                Capture-Dashboard 'downloads-retry-active'
+                Invoke-NodeAction (Find-Node 'QueuePauseButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-DashboardQueuePaused $true
+                Write-Output 'Native Cancel/Retry PASS: active process cancelled, same record retried through real pipeline, admission paused again.'
+            }
+            'release' | Set-Content -LiteralPath (Join-Path $readyFile.DirectoryName '.review-transfer-release') -Encoding utf8
+            $reviewClock.Restart()
+            do {
+                if ($DownloadsInputSmoke) {
+                    # Retry deliberately re-analyzes metadata and may select separate
+                    # video/audio streams. Release each real subprocess's own barrier.
+                    foreach ($barrier in Get-ChildItem -LiteralPath (Join-Path $dataRoot 'temp') -Filter '.review-transfer-ready' -Recurse -File) {
+                        $release = Join-Path $barrier.DirectoryName '.review-transfer-release'
+                        if (-not (Test-Path -LiteralPath $release)) { 'release' | Set-Content -LiteralPath $release -Encoding utf8 }
+                    }
+                }
+                $finished = (Find-Node ('QueueStatus-' + $reviewId) $mainRoot).name -like ($queueLabels.'Status.Completed' + '*')
+                if ($finished) { break }; Start-Sleep -Milliseconds 100
+            } while ($reviewClock.Elapsed.TotalSeconds -lt 15)
+            if (-not $finished) { throw 'Review transfer failed to finish after releasing its process barrier.' }
+            Capture-Dashboard 'downloads-completed'
+            Close-DashboardProcess
+            $reviewQueue = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)
+            if ($reviewQueue.Count -ne 5 -or $reviewQueue[0].Status -ne 6 -or $reviewQueue[1].Status -ne 0 -or -not (Test-Path -LiteralPath $reviewQueue[0].FinalFile)) { throw 'Review transfer did not preserve the pending record and final file.' }
+            Write-Output "Downloads review PASS: five canonical records; real FakeTool byte progress/file, active transfer survives admission pause, durable completion; profile=$dataRoot"
+            return
+        }
         if (-not $DashboardFixture -and -not $DashboardEmptyFixture) {
             Invoke-NodeAction (Find-Node 'DownloadUrlInput' $mainRoot) $mainRoot 'SetValue' $SampleUrl | Out-Null
             Invoke-NodeAction (Find-Node 'DashboardQuickQueue' $mainRoot) $mainRoot 'Invoke' | Out-Null
@@ -712,6 +828,9 @@ try {
             } while ($queueClock.Elapsed.TotalSeconds -lt 15)
             if ($prepared.Count -ne 1) { throw 'Dashboard QuickQueue did not prepare exactly one canonical queue item.' }
             $id = ([guid]$prepared[0].id).ToString('N')
+            # Master coalesces structural UI refreshes. Durable queue admission is
+            # not the native row's readiness barrier; wait for that exact identity.
+            Wait-Node ('QueueItem-' + $id) $mainRoot | Out-Null
             Invoke-NodeAction (Find-Node ('QueueItem-' + $id) $mainRoot) $mainRoot 'Select' | Out-Null
             $queueLabels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
             Wait-DashboardQueuePaused $true
@@ -1206,7 +1325,22 @@ try {
             try { Capture-OwnedBitmap $drawing ($InterfaceMode -ne 'ModernDashboard'); $capture = Join-Path $dataRoot 'batch-native.png'; $picture.Save($capture); Write-Output "Batch native capture: $capture" }
             finally { $drawing.Dispose(); $picture.Dispose() }
         }
-        Invoke-NodeAction (Find-Node 'BatchCancel' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+        # Master intentionally disables Cancel after an idle handoff. Verify that
+        # contract, then cancel a fresh bounded analysis while work is active.
+        if ((Find-Node 'BatchCancel' $batchRoot.rootId).states -notmatch 'Unavailable') { throw 'Idle Batch Cancel must be disabled.' }
+        if (-not $RealBatchSmoke) {
+            # This bounded cancellation fixture belongs only to FakeTool QA.
+            $cancelFile = Join-Path $dataRoot 'batch-cancel.txt'
+            @(1..100 | ForEach-Object { "https://example.test/watch/cancel$_" }) | Set-Content -LiteralPath $cancelFile -Encoding utf8
+            Invoke-NodeAction (Find-Node 'BatchFilePath' $batchRoot.rootId) $batchRoot.rootId 'SetValue' $cancelFile | Out-Null
+            Invoke-NodeAction (Find-Node 'BatchImport' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+            Wait-Node 'BatchAnalyze' $batchRoot.rootId 'Enabled' | Out-Null
+            Invoke-NodeAction (Find-Node 'BatchAnalyze' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+            Wait-Node 'BatchCancel' $batchRoot.rootId 'Enabled' | Out-Null
+            Invoke-NodeAction (Find-Node 'BatchCancel' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null
+            Wait-Node 'BatchAnalyze' $batchRoot.rootId 'Enabled' | Out-Null
+            if ((Find-Node 'BatchCancel' $batchRoot.rootId).states -notmatch 'Unavailable') { throw 'Batch cancellation did not return to idle.' }
+        }
         if ($InterfaceMode -ne 'ModernDashboard') { Invoke-NodeAction (Find-Node 'BatchClose' $batchRoot.rootId) $batchRoot.rootId 'Invoke' | Out-Null }
         Invoke-NodeAction (Find-Node 'NavDownloads' $mainRoot) $mainRoot 'Invoke' | Out-Null
         $savedQueue = Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json

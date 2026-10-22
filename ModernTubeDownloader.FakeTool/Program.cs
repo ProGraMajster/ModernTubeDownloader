@@ -318,6 +318,30 @@ if (arguments.Contains("-f"))
             await Task.Delay(20);
     }
     var output = Path.Combine(outputDirectory, $"Integration Sample [{videoId}].{extension}");
+    if (sourceUrl.Contains("/review-transfer", StringComparison.Ordinal))
+    {
+        // Isolated visual QA only: progress derives from bytes written by this
+        // process. The normal executor/parser/queue/widget paths consume it.
+        const int total = 6 * 1024 * 1024;
+        var block = new byte[256 * 1024];
+        var watch = Stopwatch.StartNew();
+        await using (var file = new FileStream(output, FileMode.Create, FileAccess.Write, FileShare.Read))
+        {
+            for (var step = 0; step < 16; step++)
+            {
+                await file.WriteAsync(block); await file.FlushAsync();
+                var count = file.Length; var speed = count / Math.Max(.001, watch.Elapsed.TotalSeconds);
+                Console.WriteLine(FormattableString.Invariant($"MTD_PROGRESS|downloading|{count}|{total}|{total}|{speed:F0}|2|{100d * count / total:F1}%"));
+                await Task.Delay(150);
+            }
+            await File.WriteAllTextAsync(Path.Combine(outputDirectory, ".review-transfer-ready"), Environment.ProcessId.ToString());
+            while (!File.Exists(Path.Combine(outputDirectory, ".review-transfer-release"))) await Task.Delay(20);
+            while (file.Length < total) await file.WriteAsync(block);
+        }
+        Console.WriteLine($"MTD_PROGRESS|finished|{total}|{total}|{total}|0|0|100.0%");
+        Console.WriteLine($"MTD_FILE|{output}");
+        return 0;
+    }
     Console.WriteLine("MTD_PROGRESS|downloading|50|100|100|25|2| 50.0%");
     if (int.TryParse(Environment.GetEnvironmentVariable("MTD_FAKE_DOWNLOAD_DELAY_MS"), out var downloadDelay) && downloadDelay > 0)
         await Task.Delay(Math.Min(downloadDelay, 10000));

@@ -1005,6 +1005,7 @@ internal sealed partial class DownloadsView : UserControl
         {
             if (disposed) return;
             pauseButton.Text = services.Queue.IsPaused ? text["Queue.Resume"] : text["Queue.Pause"];
+            if (dashboard) DashboardVisual.Icon(pauseButton, services.Queue.IsPaused ? AppIconKind.Play : AppIconKind.Pause);
             UpdateAdmissionCountdown();
             if (e.Kind is QueueChangeKind.Collection or QueueChangeKind.Order)
             {

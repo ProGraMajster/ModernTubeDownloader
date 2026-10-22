@@ -27,7 +27,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private readonly MediaRangeEditor range;
     private readonly ToolTip tips = new();
     private readonly CancellationTokenSource lifetime = new();
-    private string? source, thumbnailUrl, finalPath;
+    private string? source, thumbnailUrl, finalPath, folderPath;
     private Guid? queueId;
     private SubtitleOptions subtitles = new();
     private SponsorBlockOptions sponsors = new();
@@ -61,7 +61,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         };
         retry.Click += (_, _) => { if (source is { Length: > 0 }) RetryRequested?.Invoke(this, source); };
         openFile.Click += (_, _) => Utilities.ShellService.OpenFile(finalPath);
-        openFolder.Click += (_, _) => Utilities.ShellService.OpenFolderForFile(finalPath);
+        openFolder.Click += (_, _) => Utilities.ShellService.OpenFolderForFile(folderPath);
         apply.Click += (_, _) => ApplyOptions(); advanced.Click += async (_, _) => await AdvancedAsync();
         SizeChanged += (_, _) => LayoutInspector(); AppTypography.RegisterLayout(this, LayoutInspector);
         services.Localization.LanguageChanged += LanguageChanged;
@@ -69,7 +69,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     public void Clear()
     {
-        historyMode = false; hasSelection = false; queueId = null; source = finalPath = null; thumbnailUrl = null; image.Image = null;
+        historyMode = false; hasSelection = false; queueId = null; source = finalPath = folderPath = null; thumbnailUrl = null; image.Image = null;
         imageDuration.Text = "";
         title.Text = services.Localization["Dashboard.SelectItem"]; author.Text = link.Text = factText = ""; copy.Enabled = openFile.Enabled = openFolder.Enabled = false;
         queued = false; options.Visible = false; showOptions = false; RefreshText(); LayoutInspector();
@@ -77,9 +77,12 @@ internal sealed class DashboardInspector : AppScrollPanel
     public void ShowQueue(DownloadQueueItem item)
     {
         historyMode = false;
+        fields.SingleLineValues = true; // Full values remain in each native tooltip.
         var changed = queueId != item.Id || queued != (item.Status == DownloadStatus.Queued);
         queueId = item.Id; queued = item.Status == DownloadStatus.Queued; options.Visible = true;
         Present(item.Title, item.Channel, item.SourceUrl, item.ThumbnailUrl, item.FinalFile);
+        folderPath = item.FinalFile is { Length: > 0 } finalFile ? System.IO.Path.GetDirectoryName(finalFile) : services.Settings.Current.FinalOutputDirectory;
+        openFolder.Enabled = Directory.Exists(folderPath);
         imageDuration.Text = DashboardStyle.Duration(item.DurationSeconds);
         var t = services.Localization;
         factText = string.Join("\n\n", new[] {
@@ -114,6 +117,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     public void ShowHistory(DownloadHistoryEntry entry)
     {
         historyMode = true;
+        fields.SingleLineValues = false;
         queueId = null; options.Visible = false; showOptions = false;
         Present(entry.Title, entry.Channel, entry.SourceUrl, entry.ThumbnailUrl, entry.FinalPath);
         imageDuration.Text = entry.DurationSeconds is { } seconds ? DashboardStyle.Duration(seconds) : "";
@@ -131,6 +135,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     public void ShowLive(LiveSession session)
     {
         historyMode = false;
+        fields.SingleLineValues = false;
         queueId = null; options.Visible = false; showOptions = false;
         Present(session.Title, session.Channel, session.SourceUrl, session.ThumbnailUrl, session.Parts.LastOrDefault());
         imageDuration.Text = session.RecordedDuration > TimeSpan.Zero ? DashboardStyle.Duration(session.RecordedDuration.TotalSeconds) : "";
@@ -146,7 +151,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     private void Present(string name, string channel, string url, string? thumbnail, string? path)
     {
-        hasSelection = true; title.Text = name; author.Text = channel; source = url; finalPath = path; link.Text = url;
+        hasSelection = true; title.Text = name; author.Text = channel; source = url; finalPath = folderPath = path; link.Text = url;
         tips.SetToolTip(title, name); tips.SetToolTip(author, channel); tips.SetToolTip(link, url);
         openFile.Enabled = File.Exists(path); openFolder.Enabled = path is not null && Directory.Exists(System.IO.Path.GetDirectoryName(path));
         copy.Enabled = source.Length > 0;
@@ -236,6 +241,7 @@ internal sealed class DashboardInspector : AppScrollPanel
             return;
         }
         emptyIcon.SetBounds(0, 0, 0, 0); title.TextAlign = ContentAlignment.TopLeft;
+        AppTypography.Bind(title, queueId is not null ? 10.5f : 12, FontStyle.Bold);
         image.Visible = !string.IsNullOrWhiteSpace(thumbnailUrl) && !thumbnailFailed;
         image.SetBounds(12 + o.X, details.Bottom + 14, width, image.Visible ? width * 9 / 16 : 0);
         imageDuration.Visible = image.Visible && imageDuration.Text.Length > 0;
@@ -257,7 +263,13 @@ internal sealed class DashboardInspector : AppScrollPanel
         editor.SetBounds(12 + o.X, copy.Bottom + 14, width, editor.Height);
         qualityLabel.SetBounds(0, 0, width, AppTypography.TextHeight(24)); quality.SetBounds(0, qualityLabel.Bottom, width, line);
         containerLabel.SetBounds(0, quality.Bottom + 10, width, AppTypography.TextHeight(24)); container.SetBounds(0, containerLabel.Bottom, width, line);
-        range.SetBounds(0, container.Bottom + 12, width, range.Height);
+        var optionLabelWidth = Math.Max(DashboardVisual.TextWidth(qualityLabel, qualityLabel.Text), DashboardVisual.TextWidth(containerLabel, containerLabel.Text)) + 12;
+        if (queueId is not null && width - optionLabelWidth >= AppTypography.TextHeight(140))
+        {
+            containerLabel.SetBounds(0, 0, optionLabelWidth - 8, line); container.SetBounds(optionLabelWidth, 0, width - optionLabelWidth, line);
+            qualityLabel.SetBounds(0, container.Bottom + 8, optionLabelWidth - 8, line); quality.SetBounds(optionLabelWidth, qualityLabel.Top, width - optionLabelWidth, line);
+        }
+        range.SetBounds(0, Math.Max(container.Bottom, quality.Bottom) + 12, width, range.Height);
         advanced.SetBounds(0, range.Bottom + 8, width, line); apply.SetBounds(0, advanced.Bottom + 8, width, line);
         hint.SetBounds(0, apply.Bottom + 8, width, DashboardVisual.LabelHeight(hint, width, 5)); editor.Height = hint.Bottom + 4;
         var paired = width >= AppTypography.TextHeight(240);
