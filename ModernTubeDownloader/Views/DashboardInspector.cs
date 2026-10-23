@@ -16,13 +16,18 @@ internal sealed class DashboardInspector : AppScrollPanel
     private readonly Button retry = new DashboardButton() { AccessibleAutomationId = "HistoryRetry" };
     private readonly Button details = new DashboardButton(), options = new DashboardButton(), copy = new DashboardButton(), openFile = new DashboardButton(), openFolder = new DashboardButton(), apply = new DashboardButton(), advanced = new DashboardButton();
     private readonly AppVectorIcon copyGlyph = new(AppIconKind.Clipboard, 18);
+    private readonly SourceVectorIcon sourceGlyph = new() { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
     private readonly AppVectorIcon emptyIcon = new(AppIconKind.Info, 32, AppThemeTokens.TextSecondary) { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
-    private readonly PictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom };
+    private readonly DownloadsPictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom };
     private readonly Label imageDuration = AppUi.Muted();
-    private readonly Label title = AppUi.Heading("", 12), author = AppUi.Muted(), link = AppUi.Muted(), facts = AppUi.Muted(), hint = AppUi.Muted();
+    private readonly FullValueLabel title = new(), link = new();
+    private readonly Label author = AppUi.Muted(), facts = AppUi.Muted(), hint = AppUi.Muted();
     private readonly Panel editor = new();
     private readonly DashboardFields fields = new();
-    private readonly Button configure = new DashboardButton { AccessibleAutomationId = "InspectorConfigure" };
+    private readonly Button subtitleEditor = new DashboardButton { AccessibleAutomationId = "InspectorSubtitles" };
+    private readonly Button folderOpen = new DashboardButton { AccessibleAutomationId = "InspectorOpenFolder" };
+    private readonly Label subtitleLabel = AppUi.Muted(), audioLabel = AppUi.Muted(), folderLabel = AppUi.Muted();
+    private readonly TextBox audioValue = new() { ReadOnly = true, AccessibleAutomationId = "InspectorAudio" }, folderValue = new() { ReadOnly = true, AccessibleAutomationId = "InspectorFolder" };
     private readonly Label qualityLabel = AppUi.Muted(), containerLabel = AppUi.Muted();
     private readonly ComboBox quality = new() { AccessibleAutomationId = "InspectorQuality" }, container = new() { AccessibleAutomationId = "InspectorContainer" };
     private readonly MediaRangeEditor range;
@@ -36,12 +41,15 @@ internal sealed class DashboardInspector : AppScrollPanel
     private bool disposed, showOptions, queued, hasSelection, thumbnailFailed;
     private bool arranging;
     private string factText = "";
+    private bool CanEditOptions => queued && metadata?.Formats.Count > 0;
     internal int EmptyContentHeight => title.Bottom - DisplayRectangle.Y + 12;
     public DashboardInspector(AppServices services)
     {
         this.services = services; details.AccessibleAutomationId = "InspectorDetails"; options.AccessibleAutomationId = "InspectorOptions"; apply.AccessibleAutomationId = "InspectorApplyOptions";
         AutoScroll = true; AccessibleAutomationId = "DashboardInspector";
         DashboardStyle.Card(this); AppUi.BindBackground(image, AppThemeTokens.SurfaceSecondary); title.Multiline = facts.Multiline = hint.Multiline = true;
+        AppUi.BindForeground(title); AppTypography.Bind(title, 12, FontStyle.Bold); AppUi.BindForeground(link);
+        title.Style.BackgroundColor = link.Style.BackgroundColor = SkiaSharp.SKColors.Transparent;
         title.AutoEllipsis = author.AutoEllipsis = link.AutoEllipsis = true;
         AppUi.BindForeground(link, AppThemeTokens.Info);
         foreach (var button in new[] { details, options, copy, openFile, openFolder, advanced, retry }) AppUi.Secondary(button);
@@ -49,12 +57,20 @@ internal sealed class DashboardInspector : AppScrollPanel
         AppUi.Primary(apply); AppUi.Input(quality); AppUi.Input(container); AppUi.Surface(editor);
         range = new(services.Localization, "Inspector") { CompactLayout = true };
         range.ModeChanged += (_, _) => LayoutInspector();
-        editor.Controls.AddRange([qualityLabel, quality, containerLabel, container, range, advanced, apply, hint]);
-        Controls.AddRange([details, options, image, title, author, link, copy, facts, fields, editor, openFile, openFolder, retry, emptyIcon, configure]);
-        configure.Click += (_, _) => { showOptions = true; LayoutInspector(); };
+        AppUi.Input(audioValue); AppUi.Input(folderValue); AppUi.Secondary(subtitleEditor);
+        AppUi.Secondary(folderOpen); folderOpen.Click += (_, _) => Utilities.ShellService.OpenFolderForFile(folderPath);
+        subtitleEditor.Click += async (_, _) => await AdvancedAsync();
+        editor.Controls.AddRange([qualityLabel, quality, containerLabel, container, subtitleLabel, subtitleEditor, audioLabel, audioValue, folderLabel, folderValue, folderOpen, range, advanced, apply, hint]);
+        container.TabIndex = 0; quality.TabIndex = 1; subtitleEditor.TabIndex = 2;
+        audioValue.TabIndex = 3; folderValue.TabIndex = 4; folderOpen.TabIndex = 5;
+        range.TabIndex = 6; advanced.TabIndex = 7; apply.TabIndex = 8;
+        Controls.AddRange([details, options, image, title, author, link, sourceGlyph, copy, facts, fields, editor, openFile, openFolder, retry, emptyIcon]);
+        title.AccessibleAutomationId = "InspectorTitle"; link.AccessibleAutomationId = "InspectorSource";
+        BindFullValue(title, () => title.Text); BindFullValue(link, () => source ?? ""); BindFullValue(folderValue, () => folderPath ?? "");
         AppTypography.Bind(imageDuration, 9.5f); imageDuration.TextAlign = ContentAlignment.MiddleCenter;
         AppUi.BindBackground(imageDuration, AppThemeTokens.Background); Controls.Add(imageDuration);
         image.Style.Border.Radius = 6; image.Style.Border.Width = 0;
+        BindQueueTabNavigation(this);
         details.Click += (_, _) => { showOptions = false; LayoutInspector(); }; options.Click += (_, _) => { showOptions = true; LayoutInspector(); };
         copy.Click += async (_, _) =>
         {
@@ -68,6 +84,22 @@ internal sealed class DashboardInspector : AppScrollPanel
         SizeChanged += (_, _) => LayoutInspector(); AppTypography.RegisterLayout(this, LayoutInspector);
         services.Localization.LanguageChanged += LanguageChanged;
         Clear();
+    }
+    private void BindQueueTabNavigation(Control control)
+    {
+        // The pinned Windows backend drops control-character WM_CHAR messages, while its
+        // adapter traverses Tab on KeyPress. Reuse MFN's traversal on KeyDown for this
+        // queue inspector only; handled input also prevents a second move on surface hosts.
+        control.KeyDown += (_, e) =>
+        {
+            if (queueId is null || !AppTypography.IsDashboard(this) || e.Handled ||
+                e.KeyCode != Keys.Tab || e.Control || e.Alt) return;
+            Control root = this;
+            while (root.Parent is { } parent) root = parent;
+            e.Handled = e.SuppressKeyPress = true;
+            root.SelectNextControl(control, !e.Shift, true, true, true);
+        };
+        foreach (var child in control.Controls) BindQueueTabNavigation(child);
     }
     public void Clear()
     {
@@ -108,10 +140,12 @@ internal sealed class DashboardInspector : AppScrollPanel
             container.Items.Clear(); foreach (var value in Enum.GetValues<PreferredVideoContainer>()) container.Items.Add(new Localization.LocalizedOption<PreferredVideoContainer>(value, t["Container." + value]));
             container.SelectedIndex = (int)item.PreferredVideoContainer;
             range.SetRange(item.RequestedRange); subtitles = item.SubtitleOptions.Copy(); sponsors = item.SponsorBlockOptions.Copy();
-            hint.Text = t[queued ? "Dashboard.QueuedOptions" : "Dashboard.ReadOnlyOptions"];
+            hint.Text = t[CanEditOptions ? "Dashboard.QueuedOptions" : queued ? "Dashboard.MetadataRequired" : "Dashboard.InspectorReadOnly"];
         }
         var selectedAudio = metadata?.Formats.FirstOrDefault(f => f.Id == (item.SelectedFormats?.AudioFormatId ?? item.SelectedFormats?.VideoFormatId));
         var audio = selectedAudio?.HasAudio == true ? selectedAudio.AudioCodec : null;
+        audioValue.Text = audio ?? t["Common.NotAvailable"];
+        folderValue.Text = folderPath ?? "";
         fields.SetRows((t["Dashboard.Format"], DashboardStyle.OutputFormat(item)), (t["Downloads.Quality"], t["Quality." + item.QualityPresetId]),
             (t["Details.Subtitles"], item.SubtitleOptions.Enabled ? string.Join(", ", item.SubtitleOptions.Languages) + " · " + t["SubtitleFormat." + item.SubtitleOptions.Format] : t["Details.None"]),
             (t["Dashboard.Audio"], audio ?? t["Common.NotAvailable"]),
@@ -162,6 +196,9 @@ internal sealed class DashboardInspector : AppScrollPanel
         tips.SetToolTip(title, name); tips.SetToolTip(author, channel); tips.SetToolTip(link, url);
         openFile.Enabled = File.Exists(path); openFolder.Enabled = path is not null && Directory.Exists(System.IO.Path.GetDirectoryName(path));
         copy.Enabled = source.Length > 0;
+        var identity = SourceBrandLookup.Resolve(url);
+        sourceGlyph.Brand = identity.Brand;
+        link.AccessibleName = queueId is not null ? identity.Name + ": " + url : url;
         if (thumbnailUrl != thumbnail) { thumbnailUrl = thumbnail; thumbnailFailed = false; image.Image = null; _ = LoadAsync(thumbnail); }
     }
     private async Task LoadAsync(string? expected)
@@ -172,13 +209,13 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     private async Task AdvancedAsync()
     {
-        if (!queued || FindForm() is not { } owner || container.SelectedItem is not Localization.LocalizedOption<PreferredVideoContainer> selected) return;
+        if (!CanEditOptions || FindForm() is not { } owner || container.SelectedItem is not Localization.LocalizedOption<PreferredVideoContainer> selected) return;
         using var form = new AdvancedDownloadOptionsForm(services.Localization, services.Settings.Current, metadata, subtitles, sponsors, selected.Value);
-        if (await form.ShowDialog(owner) == DialogResult.OK) { subtitles = form.Subtitles; sponsors = form.SponsorBlock; }
+        if (await form.ShowDialog(owner) == DialogResult.OK) { subtitles = form.Subtitles; sponsors = form.SponsorBlock; RefreshText(); LayoutInspector(); }
     }
     private void ApplyOptions()
     {
-        if (!queued || metadata is null || queueId is not { } id || quality.SelectedItem is not Localization.LocalizedOption<QualityPreset> q || container.SelectedItem is not Localization.LocalizedOption<PreferredVideoContainer> c) return;
+        if (!CanEditOptions || metadata is null || queueId is not { } id || quality.SelectedItem is not Localization.LocalizedOption<QualityPreset> q || container.SelectedItem is not Localization.LocalizedOption<PreferredVideoContainer> c) return;
         try
         {
             if (!range.TryGetRange(metadata.DurationSeconds, false, out var requested, out var error)) { hint.Text = services.Localization[error!]; return; }
@@ -193,17 +230,40 @@ internal sealed class DashboardInspector : AppScrollPanel
             }, persist: true);
             hint.Text = services.Localization["Dashboard.OptionsSaved"];
         }
-        catch (Exception error) { services.Logger.Error("Queued inspector options could not be applied.", error); hint.Text = services.Localization["Dashboard.ReadOnlyOptions"]; }
+        catch (Exception error) { services.Logger.Error("Queued inspector options could not be applied.", error); hint.Text = services.Localization[services.Queue.Find(id)?.Status == DownloadStatus.Queued ? "Dashboard.OptionsUnavailable" : "Dashboard.ReadOnlyOptions"]; }
     }
     private void RefreshText()
     {
         var t = services.Localization; details.Text = t["Common.Details"]; options.Text = t["Dashboard.OptionsShort"];
         copy.Text = ""; copy.AccessibleName = t["Dashboard.CopyUrl"]; tips.SetToolTip(copy, copy.AccessibleName); openFile.Text = t["Common.OpenFile"]; openFolder.Text = t["Common.OpenFolder"];
-        qualityLabel.Text = t["Downloads.Quality"]; containerLabel.Text = t["Downloads.Container"];
+        qualityLabel.Text = t["Downloads.Quality"]; containerLabel.Text = t["Dashboard.Format"];
         quality.AccessibleName = qualityLabel.Text; container.AccessibleName = containerLabel.Text;
         retry.Text = t["Common.Retry"]; apply.Text = t["Dashboard.ApplyOptions"]; advanced.Text = t["Advanced.MoreOptions"]; facts.Text = factText;
-        configure.Text = t["Advanced.MoreOptions"];
-        quality.Enabled = container.Enabled = range.Enabled = advanced.Enabled = apply.Enabled = queued && metadata is not null;
+        subtitleLabel.Text = t["Details.Subtitles"]; audioLabel.Text = t["Dashboard.Audio"]; folderLabel.Text = t["Dashboard.Folder"];
+        subtitleEditor.Text = (subtitles.Enabled ? string.Join(", ", subtitles.Languages) : t["Details.None"]) + " …";
+        subtitleEditor.AccessibleName = t["Details.Subtitles"] + ": " + subtitleEditor.Text;
+        audioValue.AccessibleName = audioLabel.Text; folderValue.AccessibleName = folderLabel.Text;
+        folderOpen.AccessibleName = t["Common.OpenFolder"]; folderOpen.Enabled = Directory.Exists(folderPath);
+        tips.SetToolTip(folderOpen, folderPath);
+        tips.SetToolTip(audioValue, t["Dashboard.AudioAutomatic"]); tips.SetToolTip(folderValue, folderPath);
+        tips.SetToolTip(folderLabel, t["Dashboard.FolderGlobal"]);
+        tips.SetToolTip(subtitleEditor, t[queued ? "Advanced.MoreOptions" : "Dashboard.ReadOnlyOptions"]);
+        subtitleEditor.Enabled = CanEditOptions;
+        quality.Enabled = container.Enabled = range.Enabled = advanced.Enabled = apply.Enabled = CanEditOptions;
+    }
+    private void BindFullValue(Control control, Func<string> value)
+    {
+        control.KeyDown += async (_, e) =>
+        {
+            if (queueId is null) return;
+            if (e.KeyCode == Keys.F1) { tips.Show(value(), control, new System.Drawing.Point(0, control.Height), 5000); e.Handled = true; }
+            if (e.Control && e.KeyCode == Keys.C && control is not TextBox)
+            {
+                e.Handled = true;
+                try { await Clipboard.SetTextAsync(value()); }
+                catch (Exception error) { services.Logger.Error("Inspector value could not be copied.", error); }
+            }
+        };
     }
     private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() => { RefreshText(); LayoutInspector(); });
     protected override void OnLayout(LayoutEventArgs e)
@@ -237,12 +297,15 @@ internal sealed class DashboardInspector : AppScrollPanel
         // DisplayRectangle is the actual viewport after the native scroll rail.
         var viewport = DisplayRectangle; var o = viewport.Location; var width = Math.Max(0, viewport.Width - 24); var line = AppTypography.TextHeight(34);
         retry.Visible = historyMode && hasSelection;
+        image.RoundedPreview = queueId is not null;
+        title.EnableKeyboardValues(queueId is not null); link.EnableKeyboardValues(queueId is not null);
+        sourceGlyph.Visible = hasSelection && queueId is not null;
+        if (!sourceGlyph.Visible) sourceGlyph.SetBounds(0, 0, 0, 0);
         details.SetBounds(12 + o.X, 10 + o.Y, width / 2, line); options.SetBounds(details.Right + 4, details.Top, width / 2 - 4, line);
         DashboardVisual.Tab(details, !showOptions); DashboardVisual.Tab(options, showOptions);
         emptyIcon.Visible = !hasSelection;
         if (!hasSelection)
         {
-            configure.Visible = false; configure.SetBounds(0,0,0,0);
             emptyIcon.SetBounds(12 + o.X + (width - 32) / 2, details.Bottom + 44, 32, 32);
             title.TextAlign = ContentAlignment.MiddleCenter;
             title.SetBounds(24 + o.X, emptyIcon.Bottom + 16, Math.Max(0, width - 24), DashboardVisual.LabelHeight(title, Math.Max(1, width - 24), 3)); editor.Visible = fields.Visible = false;
@@ -274,6 +337,12 @@ internal sealed class DashboardInspector : AppScrollPanel
         link.SetBounds(12 + o.X, author.Bottom + 6, width - AppTypography.TextHeight(32) - 6, AppTypography.TextHeight(30));
         copy.SetBounds(link.Right + 6, link.Top, AppTypography.TextHeight(32), link.Height);
         copyGlyph.SetBounds((copy.Width - 18) / 2, (copy.Height - 18) / 2, 18, 18);
+        if (queueId is not null)
+        {
+            sourceGlyph.SetBounds(link.Left, link.Top + (link.Height - 16) / 2, 16, 16);
+            link.SetBounds(link.Left + 22, link.Top, Math.Max(1, link.Width - 22), link.Height);
+            ArrangeQueueEditor(width, o, line); return;
+        }
         var editing = showOptions && queueId is not null;
         editor.Visible = editing; facts.Visible = false; fields.Visible = !editing;
         fields.SetBounds(12 + o.X, copy.Bottom + 10, width, fields.Height);
@@ -300,22 +369,75 @@ internal sealed class DashboardInspector : AppScrollPanel
         DashboardVisual.Icon(openFile, AppIconKind.Play); DashboardVisual.Icon(openFolder, AppIconKind.Folder);
         if (paired) { DashboardVisual.SetPadding(openFile, new Padding(32, 0, 6, 0)); DashboardVisual.SetPadding(openFolder, new Padding(32, 0, 6, 0)); }
         DashboardVisual.Icon(retry, AppIconKind.Retry);
-        configure.Visible = queueId is not null && queued && metadata is not null && !editing;
-        if (configure.Visible)
-        {
-            // A queued item has no file to open yet. Use that action slot for its
-            // canonical options editor instead of adding a redundant bottom row.
-            configure.Bounds = openFile.Bounds; openFile.Visible = false; openFile.SetBounds(0,0,0,0);
-            DownloadsVisual.Button(configure); DashboardVisual.Icon(configure, AppIconKind.Settings);
-            AppTypography.Bind(configure, 9); DashboardVisual.SetPadding(configure, new Padding(30,0,6,0));
-        }
-        else configure.SetBounds(0,0,0,0);
         // Pinned MFN includes hidden default-layout children in its scroll extent.
         // Keep only the active section's bounds; the next layout rebuilds the other section.
         facts.SetBounds(0, 0, 0, 0);
         if (!editing) editor.SetBounds(0, 0, 0, 0); else fields.SetBounds(0, 0, 0, 0);
         if (!historyMode) retry.SetBounds(0, 0, 0, 0);
         if (!options.Visible) options.SetBounds(0, 0, 0, 0);
+    }
+    private void ArrangeQueueEditor(int width, System.Drawing.Point origin, int actionHeight)
+    {
+        // Both tabs use these exact controls and the same uncommitted draft. Only
+        // range / advanced disclosure changes; no rebind occurs on a tab switch.
+        editor.Visible = true; fields.Visible = facts.Visible = retry.Visible = false;
+        fields.SetBounds(0, 0, 0, 0); facts.SetBounds(0, 0, 0, 0); retry.SetBounds(0, 0, 0, 0);
+        editor.SetBounds(12 + origin.X, copy.Bottom + 10, width, editor.Height);
+        AppUi.BindGradient(editor, DownloadsVisual.Panel, DownloadsVisual.PanelEnd);
+        var labels = new[] { containerLabel, qualityLabel, subtitleLabel, audioLabel, folderLabel };
+        var values = new Control[] { container, quality, subtitleEditor, audioValue, folderValue };
+        var rowHeight = AppTypography.TextHeight(31);
+        AppTypography.Bind(hint, 9);
+        var labelWidth = Math.Max(AppTypography.TextHeight(68), labels.Max(c => DashboardVisual.TextWidth(c, c.Text)) + 10);
+        var inline = width - labelWidth >= AppTypography.TextHeight(130);
+        var y = 0;
+        for (var i = 0; i < labels.Length; i++)
+        {
+            var label = labels[i]; var value = values[i]; label.Visible = value.Visible = true;
+            AppTypography.Bind(label, 9); AppTypography.Bind(value, 9.5f);
+            if (value is TextBox or ComboBox)
+            {
+                AppUi.BindGradient(value, DownloadsVisual.ButtonTop, DownloadsVisual.ButtonEnd);
+                AppUi.BindBorder(value, DownloadsVisual.Border); value.Style.Border.Radius = 6;
+                if (value is TextBox) value.Padding = new Padding(9, 0, 6, 0);
+            }
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.SetBounds(0, y, inline ? labelWidth - 8 : width, inline ? rowHeight : AppTypography.TextHeight(23));
+            value.SetBounds(inline ? labelWidth : 0, inline ? y : label.Bottom, inline ? width - labelWidth : width, rowHeight);
+            y = value.Bottom + AppTypography.TextHeight(7);
+        }
+        DownloadsVisual.Button(subtitleEditor); AppTypography.Bind(subtitleEditor, 9.5f);
+        var folderButtonWidth = AppTypography.TextHeight(31);
+        folderValue.Width -= folderButtonWidth + 6;
+        folderOpen.SetBounds(folderValue.Right + 6, folderValue.Top, folderButtonWidth, folderValue.Height);
+        DownloadsVisual.Button(folderOpen); DashboardVisual.Icon(folderOpen, AppIconKind.Folder, true);
+        range.Visible = advanced.Visible = showOptions;
+        if (showOptions)
+        {
+            range.SetBounds(0, y + 4, width, range.Height);
+            advanced.SetBounds(0, range.Bottom + 8, width, actionHeight); y = advanced.Bottom + 8;
+        }
+        else { range.SetBounds(0, 0, 0, 0); advanced.SetBounds(0, 0, 0, 0); }
+        apply.Visible = queued;
+        if (queued) { apply.SetBounds(0, y, width, actionHeight); y = apply.Bottom + 6; }
+        else apply.SetBounds(0, 0, 0, 0);
+        hint.SetBounds(0, y, width, DashboardVisual.LabelHeight(hint, width, 5));
+        editor.Height = hint.Bottom;
+        openFile.Visible = !queued && openFile.Enabled;
+        if (openFile.Visible) openFile.SetBounds(editor.Left, editor.Bottom + 8, width, actionHeight);
+        else openFile.SetBounds(0, 0, 0, 0);
+        openFolder.Visible = false; openFolder.SetBounds(0, 0, 0, 0);
+        foreach (var button in new[] { copy, openFile, openFolder, advanced, apply }) DownloadsVisual.Button(button, button == apply);
+        DashboardVisual.Icon(openFile, AppIconKind.Play); DashboardVisual.Icon(openFolder, AppIconKind.Folder);
+    }
+    private sealed class FullValueLabel : DashboardLabel
+    {
+        public void EnableKeyboardValues(bool enabled)
+        {
+            SetControlBehavior(ControlBehaviors.Selectable, enabled); TabStop = enabled;
+            StyleFocused.Border.Width = enabled ? 1 : 0;
+            StyleFocused.Border.Color = AppUi.GetColor(AppThemeTokens.Accent);
+        }
     }
     protected override void Dispose(bool disposing) { if (disposing && !disposed) { disposed = true; lifetime.Cancel(); lifetime.Dispose(); tips.Dispose(); services.Localization.LanguageChanged -= LanguageChanged; } base.Dispose(disposing); }
 }

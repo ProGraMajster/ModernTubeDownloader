@@ -33,6 +33,12 @@ public static class AppTypography
     }
     public static void Bind(Control control, AppTextToken token) => Bind(control, LogicalSize(token), token is AppTextToken.BodyStrong or AppTextToken.Subtitle or AppTextToken.Title or AppTextToken.Hero ? FontStyle.Bold : FontStyle.Regular);
     internal static void BindSemibold(Control control, float size) => BindRecipe(control, new(size, FontStyle.Regular, Semibold: true));
+    // MFN infers Bold from a weight-600 typeface, then TextMeasurer promotes it to
+    // 700. These Downloads labels explicitly request 600, using the same public
+    // Unicode painter/measurement path with no extra Bold flag.
+    internal static FontStyle TextStyle(Control control) => IsDashboard(control) && bindings.TryGetValue(control, out var binding) && binding.Semibold
+        ? FontStyle.Regular : control.CurrentStyle.GetFontStyle();
+    internal static bool UsesSemibold(Control control) => IsDashboard(control) && bindings.TryGetValue(control, out var binding) && binding.Semibold;
     public static void BindDefault(Control control)
     { if (!bindings.TryGetValue(control, out _)) Bind(control, 10.5f); }
     private static void Reapply(object? sender, EventArgs e) { if (sender is Control c && bindings.TryGetValue(c, out var binding)) Apply(c, binding); }

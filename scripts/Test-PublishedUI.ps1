@@ -200,6 +200,37 @@ if ($CheckBothInterfaces) {
     if (-not $urlInput.Current.HasKeyboardFocus) { throw 'Published Modern URL input did not acquire keyboard focus through Windows UIA.' }
     $queueAction = Find-Element 'DashboardQuickQueue'
     if ([string]::IsNullOrWhiteSpace($queueAction.Current.Name)) { throw 'Published primary queue action has no accessible name.' }
+    # Select a real job admitted by the preceding Batch test, still held by the
+    # canonical queue pause. Exercise the inline editor through production UIA.
+    $rows = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    $selectedRow = @($rows | Where-Object { $_.Current.AutomationId -match '^QueueItem-[0-9a-f]{32}$' }) | Select-Object -First 1
+    if (-not $selectedRow) { throw 'Published Modern queue has no selectable admitted row.' }
+    $selectedId = $selectedRow.Current.AutomationId.Substring(10)
+    $selectedRow.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    foreach ($id in @('InspectorContainer','InspectorQuality','InspectorSubtitles','InspectorApplyOptions')) {
+        if (-not (Find-Element $id).Current.IsEnabled) { throw "Published queued editor is disabled: $id" }
+    }
+    foreach ($id in @('InspectorAudio','InspectorFolder')) {
+        if (-not (Find-Element $id).GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.IsReadOnly) { throw "Published value must be read-only: $id" }
+    }
+    foreach ($choice in @(@('InspectorContainer',2), @('InspectorQuality',4))) {
+        $items = (Find-Element $choice[0]).FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+        $items[$choice[1]].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    }
+    Invoke-Element 'InspectorOptions'
+    Invoke-Element 'InspectorDetails'
+    Invoke-Element 'InspectorApplyOptions'
+    Wait-Check {
+        $entry = @(Get-Content -LiteralPath $queueFile -Raw | ConvertFrom-Json) | Where-Object { $_.Id.Replace('-','') -eq $selectedId }
+        $entry.QualityPresetId -eq '720' -and $entry.PreferredVideoContainer -eq 2
+    } 'Published inline editor did not persist quality/container to the selected canonical job.'
+    Invoke-Element 'InspectorSubtitles'
+    $cancelCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ProcessId),
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'AdvancedOptionsCancel'))
+    Wait-Check { $script:advancedCancel = $windows.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cancelCondition); $null -ne $script:advancedCancel } 'Published subtitles action did not open the existing advanced editor.'
+    $script:advancedCancel.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Write-Output 'Published Downloads inspector PASS: native SelectionItem/Value/Invoke, shared Details/Options draft, persisted quality/container, read-only audio/folder, canonical advanced subtitle dialog opened/cancelled.'
     Invoke-Element 'NavSettings'
     Invoke-Element 'SettingsCategoryPersonalization'
     Invoke-Element 'InterfaceClassic'

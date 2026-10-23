@@ -20,7 +20,7 @@ internal sealed partial class DownloadsView
     private Label? dashboardPaging, dashboardStatus;
     private Panel? dashboardStatusDot;
     private AppVectorIcon? dashboardLink;
-    private readonly ContextMenu dashboardMenu = new();
+    private readonly DownloadsContextMenu dashboardMenu = new();
     internal Guid? SelectedItemId => selectedItemId;
 
     public void SetDashboard(bool value)
@@ -94,6 +94,7 @@ internal sealed partial class DownloadsView
         analyzeButton.Click -= AnalyzeClicked; analyzeButton.Click -= DashboardAddMenu;
         analyzeButton.Click += DashboardAddMenu;
         if (dashboardQueue is not null) return;
+        dashboardMenu.ExpansionChanged = expanded => ((DashboardButton)analyzeButton).Expanded = expanded;
         dashboardLink = new AppVectorIcon(AppIconKind.Link, 20); dashboardLink.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden; urlPanel.Controls.Add(dashboardLink);
         dashboardStatus = AppUi.Muted(); dashboardStatus.AutoEllipsis = true;
         dashboardStatusDot = new Panel { Width = 8, Height = 8 }; dashboardStatusDot.Style.Border.Radius = 4; dashboardStatusDot.Style.Border.Width = 0;
@@ -157,6 +158,12 @@ internal sealed partial class DownloadsView
         else if (e.KeyCode == Keys.Enter) { dashboardDrawer = true; UpdateLayout(); e.Handled = true; }
         else if (e.KeyCode == Keys.Delete) { RemoveSelected(); e.Handled = true; }
     }
+    private sealed class DownloadsContextMenu : ContextMenu
+    {
+        public Action<bool>? ExpansionChanged { get; set; }
+        public override void Show(Control parent, System.Drawing.Point location) { base.Show(parent, location); ExpansionChanged?.Invoke(Visible); }
+        protected override void OnParentVisibleChanged(EventArgs e) { base.OnParentVisibleChanged(e); ExpansionChanged?.Invoke(Visible); }
+    }
     private void RefreshDashboardSelection()
     {
         if (!dashboard || dashboardInspector is null) return;
@@ -212,7 +219,7 @@ internal sealed partial class DownloadsView
             if (chipX > 0 && chipX + chip.Width > width) { chipRows++; chipX = 0; }
             chipX += chip.Width + chip.Margin.Horizontal;
         }
-        dashboardChips.SetBounds(margin + origin.X, urlPanel.Bottom + 12, width, chipRows * (chipRowHeight + 4));
+        dashboardChips.SetBounds(margin + origin.X + 7, urlPanel.Bottom + 12, width - 7, chipRows * (chipRowHeight + 4));
         analysisProgress.Visible = false;
         var previewVisible = previewState != PreviewState.Empty;
         previewPanel.Visible = previewVisible && previewState != PreviewState.PlaylistAnalyzed;
@@ -287,7 +294,7 @@ internal sealed partial class DownloadsView
         queueToolbar.SetBounds(margin + origin.X + 12, top + 2, queueWidth - 24, toolbarHeight);
         AppUi.BindGradient(queueToolbar, DownloadsVisual.Panel, DownloadsVisual.PanelEnd);
         queueTitle.Text = text.Get("Dashboard.QueueTitle", services.Queue.Snapshot().Count);
-        AppTypography.BindSemibold(queueTitle, 13);
+        AppTypography.BindSemibold(queueTitle, 13.5f);
         var buttonTop = wideToolbar ? 11 : AppTypography.TextHeight(44);
         var measuredAction = new[] { dashboardStart!, pauseButton, dashboardClear! }.Max(b => DashboardVisual.ActionWidth(b, true));
         var buttonWidth = Math.Min(Math.Max(AppTypography.TextHeight(146), measuredAction), (queueWidth - 104) / (showDetails ? 4 : 3));
@@ -360,9 +367,9 @@ internal sealed partial class DownloadsView
                 style.Border.Radius = 0;
         moreButton.Text = ""; DashboardVisual.Icon(moreButton, AppIconKind.More, true);
         DownloadsVisual.Source((Button)dashboardChips.Controls[0], Services.SourceBrand.YouTube);
-        DownloadsVisual.Source((Button)dashboardChips.Controls[1], Services.SourceBrand.Playlist);
-        DownloadsVisual.Source((Button)dashboardChips.Controls[2], Services.SourceBrand.Channel);
-        DownloadsVisual.Source((Button)dashboardChips.Controls[3], Services.SourceBrand.Shorts);
+        DownloadsVisual.Source((Button)dashboardChips.Controls[1], Services.SourceBrand.Other, Services.SourceContentKind.Playlist);
+        DownloadsVisual.Source((Button)dashboardChips.Controls[2], Services.SourceBrand.Other, Services.SourceContentKind.Channel);
+        DownloadsVisual.Source((Button)dashboardChips.Controls[3], Services.SourceBrand.YouTube, Services.SourceContentKind.Shorts);
         DownloadsVisual.Source((Button)dashboardChips.Controls[4], Services.SourceBrand.Other);
         DashboardVisual.Flat(urlPanel); DashboardVisual.Flat(queueHost); DashboardVisual.Flat(queueToolbar);
         ResizeCards(); dashboardQueue.SendToBack();

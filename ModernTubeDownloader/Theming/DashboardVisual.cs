@@ -20,13 +20,13 @@ internal static class DashboardVisual
     {
         var style = control.CurrentStyle;
         return (int)Math.Ceiling(TextMeasurer.MeasureText(text, style.GetFont(), style.GetFontSize(),
-            new Size(int.MaxValue, int.MaxValue), style.GetFontStyle()).Width);
+            new Size(int.MaxValue, int.MaxValue), AppTypography.TextStyle(control)).Width);
     }
     public static int LabelHeight(Label label, int width, int maxLines)
     {
         var style = label.CurrentStyle;
-        var line = (int)Math.Ceiling(TextMeasurer.MeasureText("Ag", style.GetFont(), style.GetFontSize(), new Size(int.MaxValue, int.MaxValue), style.GetFontStyle()).Height) + 2;
-        var measured = (int)Math.Ceiling(TextMeasurer.MeasureText(label.Text, style.GetFont(), style.GetFontSize(), new Size(Math.Max(1, width), int.MaxValue), style.GetFontStyle()).Height) + 2;
+        var line = (int)Math.Ceiling(TextMeasurer.MeasureText("Ag", style.GetFont(), style.GetFontSize(), new Size(int.MaxValue, int.MaxValue), AppTypography.TextStyle(label)).Height) + 2;
+        var measured = (int)Math.Ceiling(TextMeasurer.MeasureText(label.Text, style.GetFont(), style.GetFontSize(), new Size(Math.Max(1, width), int.MaxValue), AppTypography.TextStyle(label)).Height) + 2;
         return Math.Clamp(measured, line, line * maxLines);
     }
     public static int ActionWidth(Button button, bool withIcon = false)
@@ -130,7 +130,11 @@ internal class DashboardLabel : Label
         var p = Padding;
         var bounds = new Rectangle(LogicalToDeviceUnits(p.Left), LogicalToDeviceUnits(p.Top),
             Math.Max(0, LogicalToDeviceUnits(Width - p.Horizontal)), Math.Max(0, LogicalToDeviceUnits(Height - p.Vertical)));
-        e.Canvas.DrawText(Text, bounds, this, TextAlign, maxLines: Multiline ? null : 1, ellipsis: AutoEllipsis);
+        if (AppTypography.UsesSemibold(this))
+            e.Canvas.DrawText(Text, CurrentStyle.GetFont(), LogicalToDeviceUnits(CurrentStyle.GetFontSize()), bounds,
+                Enabled ? CurrentStyle.GetForegroundColor() : Theme.ForegroundDisabledColor, TextAlign,
+                maxLines: Multiline ? null : 1, ellipsis: AutoEllipsis, fontStyle: ModernFormsNext.FontStyle.Regular);
+        else e.Canvas.DrawText(Text, bounds, this, TextAlign, maxLines: Multiline ? null : 1, ellipsis: AutoEllipsis);
     }
 }
 
@@ -140,6 +144,8 @@ internal class DashboardButton : Button
     static DashboardButton() => ModernFormsNext.Renderers.RenderManager.SetRenderer<DashboardButton>(new DashboardButtonRenderer());
     // 1 joins the right edge, 2 joins the left. Input, focus and Invoke stay native.
     private int joinedEdge;
+    private bool expanded;
+    public bool Expanded { get => expanded; set { if (expanded == value) return; expanded = value; Invalidate(); } }
     public int JoinedEdge { get => joinedEdge; set { if (joinedEdge == value) return; joinedEdge = value; Invalidate(); } }
     protected override void OnPaintBackground(PaintEventArgs e)
     {
@@ -152,12 +158,13 @@ internal class DashboardButton : Button
         // The retained MFN back buffer may contain the previous rectangular recipe.
         // Clear outside the new clip as well when switching presentation/styles.
         e.Canvas.Clear(SKColors.Transparent);
-        using var fill = new SKPaint { Color = CurrentStyle.GetBackgroundColor(), IsAntialias = true };
-        using var shader = CurrentStyle.BackgroundBrush is ModernFormsNext.Drawing.LinearGradientBrush gradient
+        var surface = Expanded ? StylePressed : CurrentStyle;
+        using var fill = new SKPaint { Color = surface.GetBackgroundColor(), IsAntialias = true };
+        using var shader = surface.BackgroundBrush is ModernFormsNext.Drawing.LinearGradientBrush gradient
             ? SKShader.CreateLinearGradient(new SKPoint(0,0), new SKPoint(0,LogicalToDeviceUnits(Height)),
                 gradient.GradientStops.Select(s => s.Color).ToArray(), gradient.GradientStops.Select(s => s.Offset).ToArray(), SKShaderTileMode.Clamp) : null;
         fill.Shader = shader; e.Canvas.DrawRoundRect(outline, fill);
-        using var border = new SKPaint { Color = CurrentStyle.Border.GetColor(), StrokeWidth = (float)Scaling, Style = SKPaintStyle.Stroke, IsAntialias = true };
+        using var border = new SKPaint { Color = surface.Border.GetColor(), StrokeWidth = (float)Scaling, Style = SKPaintStyle.Stroke, IsAntialias = true };
         e.Canvas.DrawRoundRect(outline, border);
     }
 }

@@ -168,6 +168,76 @@ public sealed class DownloadsDashboardPresentationTests
         finally { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
+    [Theory]
+    [InlineData(100, 288)] [InlineData(150, 380)] [InlineData(200, 440)]
+    public async Task InlineOptionsShareDraftValidateAndPersistWithoutEditingStartedItems(int scale, int width)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-inline-options-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            var item = new ModernTubeDownloader.Models.DownloadQueueItem
+            {
+                Title = "Queued inline test", SourceUrl = "https://www.youtube.com/watch?v=isolatedQA",
+                RawMetadataJson = """{"id":"inline","duration":120,"formats":[{"format_id":"18","ext":"mp4","height":720,"vcodec":"h264","acodec":"aac","url":"https://example.test/file"}]}"""
+            };
+            services.Queue.Add(item);
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize(); AppTypography.SetScale(scale);
+                var inspector = new DashboardInspector(services); AppTypography.SetDashboardPresentation(inspector, true);
+                inspector.ShowQueue(item); host.Show(inspector, width, 620); host.ProcessPendingWork();
+                var quality = Find<ComboBox>(inspector, "InspectorQuality");
+                var container = Find<ComboBox>(inspector, "InspectorContainer");
+                Assert.True(quality.Visible && quality.Enabled && container.Visible && container.Enabled);
+                container.Select(); host.Input.PressKey(Keys.Tab); Assert.True(quality.Selected);
+                host.Input.PressKey(Keys.Shift | Keys.Tab); Assert.True(container.Selected);
+                quality.Enabled = false; host.Input.PressKey(Keys.Tab);
+                Assert.True(Find<Button>(inspector, "InspectorSubtitles").Selected);
+                quality.Enabled = true;
+                quality.SelectedIndex = 4; container.SelectedIndex = 2;
+                Find<Button>(inspector, "InspectorOptions").PerformClick();
+                var mode = Find<ComboBox>(inspector, "InspectorRangeMode"); mode.SelectedIndex = 1;
+                var start = Find<TextBox>(inspector, "InspectorRangeStart"); var end = Find<TextBox>(inspector, "InspectorRangeEnd");
+                start.Text = "00:00:02"; end.Text = "00:00:10";
+                Find<Button>(inspector, "InspectorDetails").PerformClick();
+                inspector.ShowQueue(item); // Progress/selection refresh must not erase the draft.
+                Assert.Same(quality, Find<ComboBox>(inspector, "InspectorQuality"));
+                Assert.Equal(4, quality.SelectedIndex); Assert.Equal(2, container.SelectedIndex);
+                Assert.Equal(1, mode.SelectedIndex); Assert.Equal("00:00:02", start.Text);
+                Assert.Equal("best", item.QualityPresetId); // No writes before Apply.
+                Find<Button>(inspector, "InspectorApplyOptions").PerformClick();
+                Assert.Equal("720", item.QualityPresetId);
+                Assert.Equal(ModernTubeDownloader.Models.PreferredVideoContainer.Mkv, item.PreferredVideoContainer);
+                Assert.Equal(TimeSpan.FromSeconds(2), item.RequestedRange.Start);
+                Assert.Equal(TimeSpan.FromSeconds(10), item.RequestedRange.End);
+                Find<Button>(inspector, "InspectorOptions").PerformClick();
+                end.Text = "00:00:01"; Find<Button>(inspector, "InspectorApplyOptions").PerformClick();
+                Assert.Equal(TimeSpan.FromSeconds(10), item.RequestedRange.End); // Rejected range is not persisted.
+                end.Text = "00:00:10";
+                services.Queue.Update(item.Id, value => value.Status = ModernTubeDownloader.Models.DownloadStatus.DownloadingVideo);
+                quality.SelectedIndex = 1;
+                Find<Button>(inspector, "InspectorApplyOptions").PerformClick(); // Status changed before UI notification.
+                Assert.Equal("720", item.QualityPresetId);
+                foreach (var state in new[] { ModernTubeDownloader.Models.DownloadStatus.DownloadingVideo, ModernTubeDownloader.Models.DownloadStatus.Completed })
+                {
+                    services.Queue.Update(item.Id, value => value.Status = state); inspector.ShowQueue(item);
+                    Assert.False(quality.Enabled); Assert.False(container.Enabled);
+                    Assert.False(Find<Button>(inspector, "InspectorSubtitles").Enabled);
+                    Assert.True(Find<TextBox>(inspector, "InspectorFolder").ReadOnly);
+                    Assert.True(Find<TextBox>(inspector, "InspectorAudio").ReadOnly);
+                    host.ProcessPendingWork();
+                    Assert.False(Assert.IsType<AccessibleScrollInfo>(inspector.AccessibilityObject.ScrollInfo).Horizontal.IsScrollable);
+                }
+            }
+            await services.Queue.SaveAsync();
+            using var document = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(AppPaths.Create(directory).QueueFile));
+            Assert.Equal("720", document.RootElement[0].GetProperty("qualityPresetId").GetString());
+            await services.ShutdownAsync();
+        }
+        finally { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     private static T Find<T>(Control root, string id) where T : Control
     {
         if (root.AccessibleAutomationId == id) return (T)root;

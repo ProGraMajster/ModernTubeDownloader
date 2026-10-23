@@ -24,6 +24,8 @@ param(
     [switch]$DownloadsReviewSmoke,
     [switch]$DownloadsInputSmoke,
     [switch]$DownloadsTooltipSmoke,
+    [switch]$DownloadsProvidersSmoke,
+    [switch]$DownloadsFullValuesSmoke,
     [switch]$DashboardSwitchStress,
     [switch]$DashboardFixture,
     [switch]$DashboardVisualFixture,
@@ -73,6 +75,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if ($DownloadsTooltipSmoke) { $DownloadsInputSmoke = $true }
+if ($DownloadsFullValuesSmoke) { $DownloadsInputSmoke = $true }
+if ($DownloadsProvidersSmoke) { $DashboardVisualFixture = $true; $DashboardFixtureCount = 19; $CaptureVisual = $true }
 if ($DownloadsInputSmoke) { $DownloadsReviewSmoke = $true }
 if ($DownloadsReviewSmoke) { $DashboardVisualFixture = $true; $DashboardFixtureCount = 5; $CaptureVisual = $true }
 if ($ClassicUiRecovery) { $DashboardSmoke = $true }
@@ -614,6 +618,22 @@ try {
             $seededQueue[0].SelectedFormats = @{ VideoFormatId = '18'; AudioFormatId = $null; VideoExtension = 'mp4'; AudioExtension = $null; AudioOnly = $false; RequiresMerge = $false }
             $seededQueue[4].Status = 6; $seededQueue[4].ProgressPercent = 100
             $seededQueue[4].PreferredVideoContainer = 0 # genuine unknown format case
+            foreach ($record in $seededQueue[0..1]) {
+                $record.RawMetadataJson = '{"id":"isolated","duration":754,"formats":[{"format_id":"18","ext":"mp4","height":720,"vcodec":"h264","acodec":"aac","url":"https://example.test/media"}]}'
+            }
+        }
+        if ($DownloadsProvidersSmoke) {
+            $providerUrls = @('https://www.youtube.com/watch?v=isolatedQA', 'https://youtu.be/isolatedQA',
+                'https://m.youtube.com./shorts/isolatedQA', 'https://youtube.com/playlist?list=isolatedQA', 'https://youtube.com/@isolatedQA',
+                'https://www.twitch.tv/isolatedQA', 'https://kick.com/isolatedQA', 'https://vimeo.com/123',
+                'https://vm.tiktok.com/isolatedQA', 'https://instagram.com/reel/isolatedQA', 'https://m.facebook.com/watch/?v=123',
+                'https://vk.com/video123', 'https://x.com/isolatedQA/status/123', 'https://example.test/video', '', 'invalid',
+                'https://youtube.com.evil.example/watch', 'https://yоutube.com/watch', 'https://bücher.example/video')
+            for ($providerIndex = 0; $providerIndex -lt $providerUrls.Count; $providerIndex++) {
+                $seededQueue[$providerIndex].SourceUrl = $providerUrls[$providerIndex]
+                $seededQueue[$providerIndex].Status = 7 # Idle, never dispatch these URLs to any downloader.
+                $seededQueue[$providerIndex].Title = "Isolated provider identity $($providerIndex + 1)"
+            }
         }
         $seededQueue | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Encoding utf8
     }
@@ -739,12 +759,32 @@ try {
             $paged = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
             if (@($paged.nodes | Where-Object { $_.node.automationId -like 'QueueItem-*' }).Count -ne [Math]::Min(40, $DashboardFixtureCount)) { throw 'Dashboard queue did not honor its 40-row page limit.' }
         }
+        if ($DownloadsProvidersSmoke) {
+            foreach ($providerIndex in 0..18) {
+                $row = Find-Node ('QueueItem-' + $seededQueue[$providerIndex].Id.ToString('N')) $mainRoot
+                Invoke-NodeAction $row $mainRoot 'ScrollIntoView' | Out-Null
+                Invoke-NodeAction $row $mainRoot 'Select' | Out-Null
+                Capture-Dashboard ('provider-' + $providerIndex.ToString('00'))
+            }
+            Close-DashboardProcess
+            Write-Output "Provider identity native PASS: 19 isolated canonical records; no platform downloads; profile=$dataRoot"
+            return
+        }
         if ($DownloadsReviewSmoke) {
             $queueLabels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
             if ($DownloadsInputSmoke) {
                 # Qualify the direct-Modern startup path before any shell switch.
                 Invoke-NodeAction (Find-Node 'DownloadUrlInput' $mainRoot) $mainRoot 'SetValue' $SampleUrl | Out-Null
                 Invoke-NodeAction (Wait-Node 'AnalyzeButton' $mainRoot 'Enabled').snapshot $mainRoot 'Invoke' | Out-Null
+                Capture-Dashboard 'downloads-split-expanded'
+                $menuWidth=0; $menuHeight=0
+                $menuWindow = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id,$script:automationMainWindow,[ref]$menuWidth,[ref]$menuHeight)
+                if ($menuWindow -eq [IntPtr]::Zero) { throw 'Expanded split menu has no visible owned HWND.' }
+                $menuBitmap = [Drawing.Bitmap]::new($menuWidth,$menuHeight); $menuGraphics = [Drawing.Graphics]::FromImage($menuBitmap)
+                $menuDc = $menuGraphics.GetHdc()
+                try { if (-not [MtdAutomationWindowCloser]::CaptureOwnPopup($script:automationProcess.Id,$menuWindow,$menuDc)) { throw 'Owned split popup capture failed.' } }
+                finally { $menuGraphics.ReleaseHdc($menuDc); $menuGraphics.Dispose() }
+                try { $menuBitmap.Save((Join-Path $dataRoot 'downloads-split-popup.png')) } finally { $menuBitmap.Dispose() }
                 # Popup windows are outside the opt-in Debug bridge roots. Use the
                 # real Windows UIA provider, restricted to this owned process.
                 Invoke-OwnedAnalyzeMenu
@@ -779,6 +819,25 @@ try {
                 try { $popupBitmap.Save((Join-Path $dataRoot 'downloads-title-tooltip.png')) } finally { $popupBitmap.Dispose() }
                 [void][MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow,0x0200,240,205,$false)
                 Write-Output 'Native tooltip HWND captured; full title requires visual inspection of downloads-title-tooltip.png.'
+            }
+            if ($DownloadsFullValuesSmoke) {
+                foreach ($valueId in @('InspectorTitle','InspectorSource','InspectorFolder')) {
+                    $valueNode = Find-Node $valueId $mainRoot
+                    Invoke-NodeAction $valueNode $mainRoot 'ScrollIntoView' | Out-Null
+                    Invoke-NodeAction $valueNode $mainRoot 'Focus' | Out-Null
+                    Wait-Node $valueId $mainRoot 'Focused' | Out-Null
+                    if (-not [MtdAutomationWindowCloser]::SendOwnedKey($script:automationProcess.Id,$script:automationMainWindow,112)) { throw 'Owned F1 dispatch failed.' }
+                    Start-Sleep -Milliseconds 250
+                    $popupWidth=0; $popupHeight=0
+                    $popup = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id,$script:automationMainWindow,[ref]$popupWidth,[ref]$popupHeight)
+                    if ($popup -eq [IntPtr]::Zero) { throw "Native F1 tooltip did not open: $valueId" }
+                    $popupBitmap = [Drawing.Bitmap]::new($popupWidth,$popupHeight); $popupGraphics = [Drawing.Graphics]::FromImage($popupBitmap)
+                    $popupDc = $popupGraphics.GetHdc()
+                    try { if (-not [MtdAutomationWindowCloser]::CaptureOwnPopup($script:automationProcess.Id,$popup,$popupDc)) { throw 'Owned tooltip capture failed.' } }
+                    finally { $popupGraphics.ReleaseHdc($popupDc); $popupGraphics.Dispose() }
+                    try { $popupBitmap.Save((Join-Path $dataRoot ("full-value-$valueId.png"))) } finally { $popupBitmap.Dispose() }
+                    Write-Output "Native F1 popup captured: $valueId, ${popupWidth}x${popupHeight}. Content requires PNG inspection."
+                }
             }
             Capture-Dashboard 'downloads-selected'
             Invoke-NodeAction (Find-Node 'DashboardStartAll' $mainRoot) $mainRoot 'Invoke' | Out-Null
@@ -906,30 +965,43 @@ try {
                 if ($current -ne $expected) { throw 'Caption mouse input did not persist the expected theme.' }
                 Write-Output 'Caption theme changed through owned HWND mouse input; non-client caption UIA is not qualified.'
             }
-            function Select-RangeMode([string]$automationId, [bool]$custom) {
+            function Select-InspectorChoice([string]$automationId, [int]$index) {
                 $node = Find-Node $automationId $mainRoot
                 $state = Invoke-AutomationCli -CliArguments @('inspect','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--session',$node.handle.sessionId,'--node',$node.handle.runtimeId)
-                $index = if ($custom) { 1 } else { 0 }
                 $choice = Invoke-AutomationCli -CliArguments @('inspect','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--session',$node.handle.sessionId,'--node',$state.value.childRuntimeIds[$index])
                 Invoke-NodeAction $choice.value $mainRoot 'Select' | Out-Null
             }
+            function Select-RangeMode([string]$automationId, [bool]$custom) { Select-InspectorChoice $automationId $(if ($custom) { 1 } else { 0 }) }
             $pageTree = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
             $toggle = @($pageTree.nodes | Where-Object { $_.node.automationId -eq 'DashboardToggleInspector' }) | Select-Object -First 1
             if ($toggle) { Invoke-NodeAction $toggle.node $mainRoot 'Invoke' | Out-Null }
+            Capture-Dashboard 'inspector-details-queued'
+            Invoke-NodeAction (Find-Node 'InspectorContainer' $mainRoot) $mainRoot 'Focus' | Out-Null
+            [void][MtdAutomationWindowCloser]::SendOwnedKey($script:automationProcess.Id,$script:automationMainWindow,9)
+            $tabTree = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
+            $tabTree | ConvertTo-Json -Depth 30 | Set-Content (Join-Path $dataRoot 'inspector-after-tab-tree.json') -Encoding utf8
+            Write-Output ('Inspector Tab target: ' + ((@($tabTree.nodes | Where-Object { $_.node.states -match 'Focused' }) | ForEach-Object { $_.node.automationId + ':' + $_.node.name }) -join ', '))
+            Wait-Node 'InspectorQuality' $mainRoot 'Focused' | Out-Null
+            Select-InspectorChoice 'InspectorContainer' 2
+            Select-InspectorChoice 'InspectorQuality' 4
             Invoke-NodeAction (Find-Node 'InspectorOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
             Capture-Dashboard 'inspector-options-full'
             Select-RangeMode 'InspectorRangeMode' $true
             Invoke-NodeAction (Find-Node 'InspectorRangeStart' $mainRoot) $mainRoot 'SetValue' '00:00:02' | Out-Null
             Invoke-NodeAction (Find-Node 'InspectorRangeEnd' $mainRoot) $mainRoot 'SetValue' '00:00:10' | Out-Null
             Capture-Dashboard 'inspector-options-custom'
+            Invoke-NodeAction (Find-Node 'InspectorDetails' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Capture-Dashboard 'inspector-details-draft'
             Invoke-NodeAction (Find-Node 'InspectorApplyOptions' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
             Invoke-NodeAction (Find-Node 'InspectorApplyOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
             Capture-Dashboard 'inspector-options-actions'
             $savedOptions = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)[0]
             if ($savedOptions.requestedRange.mode -ne 1 -or $savedOptions.requestedRange.start -ne '00:00:02' -or $savedOptions.requestedRange.end -ne '00:00:10') { throw 'Inspector did not persist the custom range into the canonical queue.' }
+            if ($savedOptions.qualityPresetId -ne '720' -or $savedOptions.preferredVideoContainer -ne 2) { throw 'Inline Details did not preserve and persist quality/container across Options.' }
             Invoke-CaptionTheme
             Capture-Dashboard 'inspector-theme-changed'
             Invoke-CaptionTheme
+            Invoke-NodeAction (Find-Node 'InspectorOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
             Select-RangeMode 'InspectorRangeMode' $false
             Invoke-NodeAction (Find-Node 'InspectorApplyOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
             Invoke-NodeAction (Find-Node 'InspectorDetails' $mainRoot) $mainRoot 'Invoke' | Out-Null

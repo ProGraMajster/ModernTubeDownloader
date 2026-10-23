@@ -1,7 +1,9 @@
 namespace ModernTubeDownloader.Services;
 
 /// <summary>Presentation identity, never a supported-site or capability assertion.</summary>
-internal enum SourceBrand { Other, YouTube, Playlist, Channel, Shorts, Twitch, Facebook, Vimeo, Kick, TikTok, Instagram, Twitter, Vk, Odysee }
+internal enum SourceBrand { Other, YouTube, Twitch, Facebook, Vimeo, Kick, TikTok, Instagram, Twitter, Vk, Odysee }
+internal enum SourceContentKind { Video, Playlist, Channel, Shorts }
+internal readonly record struct SourceBrandIdentity(SourceBrand Brand, string Name, SourceContentKind Kind = SourceContentKind.Video);
 
 internal static class SourceBrandLookup
 {
@@ -15,21 +17,29 @@ internal static class SourceBrandLookup
         ("instagram.com", SourceBrand.Instagram, "Instagram"), ("twitter.com", SourceBrand.Twitter, "X / Twitter"),
         ("x.com", SourceBrand.Twitter, "X / Twitter"), ("vk.com", SourceBrand.Vk, "VK"), ("odysee.com", SourceBrand.Odysee, "Odysee")
     ];
-    internal static (SourceBrand Brand, string Name) Resolve(string? source)
+    internal static SourceBrandIdentity Resolve(string? source)
     {
-        if (!Uri.TryCreate(source, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return (SourceBrand.Other, "—");
+        if (!Uri.TryCreate(source, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return new(SourceBrand.Other, "—");
+        // Use the stored canonical URL, never an untrusted extractor display label.
+        // URI performs IDN conversion; compare ASCII labels including the DNS boundary.
+        // A single terminal DNS root dot is equivalent, multiple empty labels are not.
+        string host;
+        try { host = uri.IdnHost.ToLowerInvariant(); }
+        catch (UriFormatException) { return new(SourceBrand.Other, "—"); }
+        if (host.EndsWith('.')) host = host[..^1];
+        if (host.Length == 0 || host.Split('.').Any(label => label.Length == 0)) return new(SourceBrand.Other, "—");
         foreach (var item in Hosts)
         {
-            if (!uri.IdnHost.Equals(item.Host, StringComparison.OrdinalIgnoreCase) && !uri.IdnHost.EndsWith("." + item.Host, StringComparison.OrdinalIgnoreCase)) continue;
-            var brand = item.Brand;
-            if (brand == SourceBrand.YouTube)
+            if (!host.Equals(item.Host, StringComparison.Ordinal) && !host.EndsWith("." + item.Host, StringComparison.Ordinal)) continue;
+            var kind = SourceContentKind.Video;
+            if (item.Brand == SourceBrand.YouTube && (host == "youtube.com" || host.EndsWith(".youtube.com", StringComparison.Ordinal)))
             {
-                if (uri.AbsolutePath.StartsWith("/shorts/", StringComparison.OrdinalIgnoreCase)) brand = SourceBrand.Shorts;
-                else if (uri.AbsolutePath.Equals("/playlist", StringComparison.OrdinalIgnoreCase)) brand = SourceBrand.Playlist;
-                else if (uri.AbsolutePath.StartsWith("/@", StringComparison.Ordinal) || new[] { "/channel/", "/c/", "/user/" }.Any(p => uri.AbsolutePath.StartsWith(p, StringComparison.OrdinalIgnoreCase))) brand = SourceBrand.Channel;
+                if (uri.AbsolutePath.StartsWith("/shorts/", StringComparison.OrdinalIgnoreCase)) kind = SourceContentKind.Shorts;
+                else if (uri.AbsolutePath.TrimEnd('/').Equals("/playlist", StringComparison.OrdinalIgnoreCase)) kind = SourceContentKind.Playlist;
+                else if (uri.AbsolutePath.StartsWith("/@", StringComparison.Ordinal) || new[] { "/channel/", "/c/", "/user/" }.Any(p => uri.AbsolutePath.StartsWith(p, StringComparison.OrdinalIgnoreCase))) kind = SourceContentKind.Channel;
             }
-            return (brand, item.Name);
+            return new(item.Brand, item.Name, kind);
         }
-        return (SourceBrand.Other, uri.IdnHost);
+        return new(SourceBrand.Other, host);
     }
 }

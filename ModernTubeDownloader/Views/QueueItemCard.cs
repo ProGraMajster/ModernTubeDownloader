@@ -62,7 +62,7 @@ internal sealed partial class QueueItemCard : UserControl
         Padding = new Padding(18);
         AppUi.Card(this);
 
-        thumbnail = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom };
+        thumbnail = new DownloadsPictureBox { SizeMode = PictureBoxSizeMode.Zoom };
         thumbnail.Style.Border.Radius = 10;
         thumbnail.Style.Border.Width = 0;
         AppUi.BindBackground(thumbnail, AppThemeTokens.SurfaceSecondary);

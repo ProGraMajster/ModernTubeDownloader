@@ -84,12 +84,13 @@ internal sealed partial class QueueItemCard
         Margin = new Padding(0, 0, 0, 1);
         Padding = new Padding(8); thumbnail.Visible = imageWidth > 0;
         thumbnail.SetBounds(8, 8, imageWidth, imageWidth * 9 / 16); thumbnailPlaceholder.Padding = new Padding(16);
+        ((DownloadsPictureBox)thumbnail).RoundedPreview = true;
         if (duration is not null) { var badgeWidth = Math.Min(imageWidth, AppTypography.TextHeight(64)); var badgeHeight = AppTypography.TextHeight(22); duration.SetBounds(thumbnail.Right - badgeWidth, thumbnail.Bottom - badgeHeight, badgeWidth, badgeHeight); duration.BringToFront(); duration.Visible = imageWidth > 0 && duration.Text.Length > 0; }
         positionBadge.SetBounds(12, AppTypography.Scale > 1.25 && imageWidth > 0 ? thumbnail.Bottom + 8 : 12, AppTypography.TextHeight(28), AppTypography.TextHeight(24));
         positionBadge.Visible = false;
         var left = imageWidth == 0 ? positionBadge.Visible ? positionBadge.Right + 14 : 12 : imageWidth + 28; var right = Width - 108;
         var progressWidth = narrow ? right - left : Math.Clamp(Width * 35 / 100, 260, 332);
-        var progressLeft = narrow ? left : right - progressWidth;
+        var progressLeft = narrow ? left : right - progressWidth - 7;
         var textWidth = Math.Max(100, (narrow ? right : progressLeft - 12) - left);
         title.SetBounds(left, 8, textWidth, DashboardVisual.LabelHeight(title, textWidth, 2)); title.AutoEllipsis = true;
         dashboardAuthor!.Visible = !string.IsNullOrWhiteSpace(dashboardAuthor.Text);
@@ -126,6 +127,9 @@ internal sealed partial class QueueItemCard
         StyleFocused.Border.Width = 1; StyleFocused.Border.Color = AppUi.GetColor(AppThemeTokens.Accent).WithAlpha(160);
         StyleHover.BackgroundColor = AppUi.GetColor(selected ? AppThemeTokens.RowSelected : AppThemeTokens.SurfaceHover);
         DownloadsVisual.Button(primaryAction); DownloadsVisual.Button(moreAction);
+        // Theme refresh of the original Classic Card recipe must not restore its
+        // 16px radius after the Downloads row has selected the compact outline.
+        foreach (var style in new[] { Style, StyleHover, StylePressed, StyleFocused, StyleDisabled }) style.Border.Radius = selected ? 6 : 0;
     }
     private void UpdateDashboardRow(DownloadQueueItem item)
     {
