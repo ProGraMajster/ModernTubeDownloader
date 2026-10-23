@@ -11,7 +11,11 @@ internal sealed class SourceVectorIcon : Control
     private SourceContentKind kind;
     public SourceContentKind Kind { get => kind; set { if (kind != value) { kind = value; Invalidate(); } } }
     public SourceBrand Brand { get => brand; set { if (brand != value) { brand = value; Invalidate(); } } }
-    public SourceVectorIcon(SourceBrand brand = SourceBrand.Other) { this.brand = brand; Style.BackgroundColor = SKColors.Transparent; }
+    public SourceVectorIcon(SourceBrand brand = SourceBrand.Other)
+    {
+        this.brand = brand; Style.BackgroundColor = SKColors.Transparent;
+        TabStop = false; SetControlBehavior(ControlBehaviors.Selectable, false);
+    }
     protected override void OnPaint(PaintEventArgs e)
     {
         e.Canvas.Save();

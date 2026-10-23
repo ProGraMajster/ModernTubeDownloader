@@ -190,6 +190,8 @@ public sealed class DownloadsDashboardPresentationTests
                 var quality = Find<ComboBox>(inspector, "InspectorQuality");
                 var container = Find<ComboBox>(inspector, "InspectorContainer");
                 Assert.True(quality.Visible && quality.Enabled && container.Visible && container.Enabled);
+                Find<Control>(inspector, "InspectorSource").Select(); host.Input.PressKey(Keys.Tab);
+                Assert.True(Find<Button>(inspector, "InspectorCopyUrl").Selected);
                 container.Select(); host.Input.PressKey(Keys.Tab); Assert.True(quality.Selected);
                 host.Input.PressKey(Keys.Shift | Keys.Tab); Assert.True(container.Selected);
                 quality.Enabled = false; host.Input.PressKey(Keys.Tab);

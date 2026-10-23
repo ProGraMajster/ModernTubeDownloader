@@ -975,7 +975,11 @@ try {
             $pageTree = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
             $toggle = @($pageTree.nodes | Where-Object { $_.node.automationId -eq 'DashboardToggleInspector' }) | Select-Object -First 1
             if ($toggle) { Invoke-NodeAction $toggle.node $mainRoot 'Invoke' | Out-Null }
+            Invoke-NodeAction (Find-Node 'InspectorDetails' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
             Capture-Dashboard 'inspector-details-queued'
+            Invoke-NodeAction (Find-Node 'InspectorSource' $mainRoot) $mainRoot 'Focus' | Out-Null
+            [void][MtdAutomationWindowCloser]::SendOwnedKey($script:automationProcess.Id,$script:automationMainWindow,9)
+            Wait-Node 'InspectorCopyUrl' $mainRoot 'Focused' | Out-Null
             Invoke-NodeAction (Find-Node 'InspectorContainer' $mainRoot) $mainRoot 'Focus' | Out-Null
             [void][MtdAutomationWindowCloser]::SendOwnedKey($script:automationProcess.Id,$script:automationMainWindow,9)
             $tabTree = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
@@ -985,12 +989,15 @@ try {
             Select-InspectorChoice 'InspectorContainer' 2
             Select-InspectorChoice 'InspectorQuality' 4
             Invoke-NodeAction (Find-Node 'InspectorOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            if ($AppTextScale -gt 100) { Invoke-NodeAction (Find-Node 'InspectorRangeMode' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null }
             Capture-Dashboard 'inspector-options-full'
             Select-RangeMode 'InspectorRangeMode' $true
             Invoke-NodeAction (Find-Node 'InspectorRangeStart' $mainRoot) $mainRoot 'SetValue' '00:00:02' | Out-Null
             Invoke-NodeAction (Find-Node 'InspectorRangeEnd' $mainRoot) $mainRoot 'SetValue' '00:00:10' | Out-Null
+            if ($AppTextScale -gt 100) { Invoke-NodeAction (Find-Node 'InspectorRangeEnd' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null }
             Capture-Dashboard 'inspector-options-custom'
             Invoke-NodeAction (Find-Node 'InspectorDetails' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            Invoke-NodeAction (Find-Node 'InspectorDetails' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
             Capture-Dashboard 'inspector-details-draft'
             Invoke-NodeAction (Find-Node 'InspectorApplyOptions' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
             Invoke-NodeAction (Find-Node 'InspectorApplyOptions' $mainRoot) $mainRoot 'Invoke' | Out-Null

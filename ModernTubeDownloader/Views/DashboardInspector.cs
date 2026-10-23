@@ -46,6 +46,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     public DashboardInspector(AppServices services)
     {
         this.services = services; details.AccessibleAutomationId = "InspectorDetails"; options.AccessibleAutomationId = "InspectorOptions"; apply.AccessibleAutomationId = "InspectorApplyOptions";
+        copy.AccessibleAutomationId = "InspectorCopyUrl";
         AutoScroll = true; AccessibleAutomationId = "DashboardInspector";
         DashboardStyle.Card(this); AppUi.BindBackground(image, AppThemeTokens.SurfaceSecondary); title.Multiline = facts.Multiline = hint.Multiline = true;
         AppUi.BindForeground(title); AppTypography.Bind(title, 12, FontStyle.Bold); AppUi.BindForeground(link);
