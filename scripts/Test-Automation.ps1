@@ -165,6 +165,14 @@ function Invoke-NodeAction($node, [string]$rootId, [string]$action, [string]$val
     return Invoke-AutomationCli -CliArguments $arguments
 }
 
+function Invoke-OwnedAnalyzeMenu {
+    $labels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
+    $menuClient = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Invoke-OwnedMenuItem.ps1') -Raw
+    $menuCommand = '& { ' + $menuClient + ' } -ProcessId ' + $script:automationProcess.Id + " -Caption '" + $labels.'Common.Analyze'.Replace("'", "''") + "'"
+    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command $menuCommand
+    if ($LASTEXITCODE -ne 0) { throw 'Owned split menu click failed.' }
+}
+
 function Wait-Node([string]$id, [string]$rootId, [string]$condition = 'NodeExists') {
     $result = Invoke-AutomationCli -CliArguments @('wait', '--pid', "$($script:automationProcess.Id)", '--root', $rootId,
         '--condition', $condition, '--automation-id', $id, '--timeout-ms', '30000')
@@ -194,8 +202,8 @@ function Wait-MainWindow([System.Diagnostics.Process]$process) {
 
 function Confirm-OwnedWindowSize([string]$phase) {
     Start-Sleep -Milliseconds 250
-    $actual = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationProcess.MainWindowHandle)
-    $dpi = [MtdAutomationWindowCloser]::GetDpiForWindow($script:automationProcess.MainWindowHandle)
+    $actual = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationMainWindow)
+    $dpi = [MtdAutomationWindowCloser]::GetDpiForWindow($script:automationMainWindow)
     Write-Output "Native window geometry ($phase): requested=${WindowWidth}x${WindowHeight}; actual=$($actual[0])x$($actual[1]); HWND DPI=$dpi; app text scale=$AppTextScale%."
     if ($actual[0] -ne $WindowWidth -or $actual[1] -ne $WindowHeight) { throw "Owned window did not retain the requested physical size after 250 ms ($phase)." }
 }
@@ -205,7 +213,7 @@ function Capture-OwnedBitmap($graphics, [bool]$dialog = $false) {
     $dc = $graphics.GetHdc()
     try {
         if (-not [MtdAutomationWindowCloser]::CaptureOwnWindow($script:automationProcess.Id,
-            $script:automationProcess.MainWindowHandle, $dialog, $dc)) { throw 'Own application HWND capture failed.' }
+            $script:automationMainWindow, $dialog, $dc)) { throw 'Own application HWND capture failed.' }
     }
     finally { $graphics.ReleaseHdc($dc) }
 }
@@ -366,12 +374,12 @@ public static class MtdAutomationWindowCloser {
         }, IntPtr.Zero);
         return dialog != IntPtr.Zero && ResizeWindow(dialog, width, height);
     }
-    public static bool SendMouse(IntPtr window, uint message, int screenX, int screenY, bool buttonDown) {
+    public static bool SendMouse(IntPtr window, uint message, int screenX, int screenY, bool buttonDown) => InPhysicalCoordinates(() => {
         var point = new NativePoint { X = screenX, Y = screenY };
         if (!ScreenToClient(window, ref point)) return false;
         long packed = (ushort)point.X | ((long)(ushort)point.Y << 16);
         return PostMessage(window, message, buttonDown ? (IntPtr)1 : IntPtr.Zero, (IntPtr)packed);
-    }
+    });
     public static bool SendOwnedKey(int processId, IntPtr window, int key) {
         GetWindowThreadProcessId(window, out uint owner);
         return owner == processId && PostMessage(window, 0x0100, (IntPtr)key, (IntPtr)1)
@@ -598,6 +606,11 @@ try {
             $seededQueue[0].StatusMessageKey = 'Queue.Detail.Queued'
             $seededQueue[0].SourceUrl = 'https://example.test/watch/review-transfer'
             $seededQueue[0].FinalFile = $null
+            # Provider presentation coverage on idle synthetic records. All tools remain
+            # the owned FakeTool executables; these URLs never reach a network downloader.
+            $seededQueue[1].SourceUrl = 'https://www.youtube.com/watch?v=syntheticQA'
+            $seededQueue[2].SourceUrl = 'https://www.twitch.tv/synthetic-qa'
+            $seededQueue[3].SourceUrl = 'https://vimeo.com/synthetic-qa'
             $seededQueue[0].SelectedFormats = @{ VideoFormatId = '18'; AudioFormatId = $null; VideoExtension = 'mp4'; AudioExtension = $null; AudioOnly = $false; RequiresMerge = $false }
             $seededQueue[4].Status = 6; $seededQueue[4].ProgressPercent = 100
             $seededQueue[4].PreferredVideoContainer = 0 # genuine unknown format case
@@ -626,14 +639,17 @@ try {
     Write-Output "Owned automation profile: $dataRoot"
     Wait-Bridge $script:automationProcess.Id $true
     Wait-MainWindow $script:automationProcess
+    # Keep the actual main HWND: Process.Refresh may choose a later tooltip/menu
+    # as MainWindowHandle. Native helpers still validate this handle's owning PID.
+    $script:automationMainWindow = $script:automationProcess.MainWindowHandle
     if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
-        $placed = [MtdAutomationWindowCloser]::PlaceWindow($script:automationProcess.MainWindowHandle, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)
+        $placed = [MtdAutomationWindowCloser]::PlaceWindow($script:automationMainWindow, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)
         if (-not $placed) {
             throw 'Could not resize the application window.'
         }
         Confirm-OwnedWindowSize 'initial placement'
     }
-    if ($DashboardSmoke) { Write-Output "Native window DPI: $([MtdAutomationWindowCloser]::GetDpiForWindow($script:automationProcess.MainWindowHandle)); app text scale: $AppTextScale%." }
+    if ($DashboardSmoke) { Write-Output "Native window DPI: $([MtdAutomationWindowCloser]::GetDpiForWindow($script:automationMainWindow)); app text scale: $AppTextScale%." }
     $roots = Invoke-AutomationCli -CliArguments @('roots', '--pid', "$($script:automationProcess.Id)")
     $mainRoot = $roots.value[0].rootId
     $tree = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot, '--depth', '8')
@@ -642,8 +658,8 @@ try {
         function Capture-Dashboard([string]$name) {
             if (-not $CaptureVisual) { return }
             Start-Sleep -Milliseconds 250
-            $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationProcess.MainWindowHandle)
-            Write-Output "Native capture ${name}: requested=${WindowWidth}x${WindowHeight}; actual=$($size[0])x$($size[1]); HWND DPI=$([MtdAutomationWindowCloser]::GetDpiForWindow($script:automationProcess.MainWindowHandle))."
+            $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationMainWindow)
+            Write-Output "Native capture ${name}: requested=${WindowWidth}x${WindowHeight}; actual=$($size[0])x$($size[1]); HWND DPI=$([MtdAutomationWindowCloser]::GetDpiForWindow($script:automationMainWindow))."
             if ($WindowWidth -gt 0 -and $WindowHeight -gt 0 -and ($size[0] -ne $WindowWidth -or $size[1] -ne $WindowHeight)) { throw "Dashboard capture $name does not match the requested physical window size." }
             Add-Type -AssemblyName System.Drawing
             $bitmap = [Drawing.Bitmap]::new($size[0], $size[1]); $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -726,11 +742,21 @@ try {
         if ($DownloadsReviewSmoke) {
             $queueLabels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
             if ($DownloadsInputSmoke) {
+                # Qualify the direct-Modern startup path before any shell switch.
+                Invoke-NodeAction (Find-Node 'DownloadUrlInput' $mainRoot) $mainRoot 'SetValue' $SampleUrl | Out-Null
+                Invoke-NodeAction (Wait-Node 'AnalyzeButton' $mainRoot 'Enabled').snapshot $mainRoot 'Invoke' | Out-Null
+                # Popup windows are outside the opt-in Debug bridge roots. Use the
+                # real Windows UIA provider, restricted to this owned process.
+                Invoke-OwnedAnalyzeMenu
+                Wait-Node 'AddToQueueButton' $mainRoot 'Enabled' | Out-Null
+                Invoke-NodeAction (Find-Node 'ClearAnalyzedPreviewButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Invoke-NodeAction (Find-Node 'DownloadUrlInput' $mainRoot) $mainRoot 'SetValue' '' | Out-Null
+                Write-Output 'Direct Modern split menu PASS: UIA discovery and owned-HWND click, metadata analysis through FakeTool, preview cleared without queue handoff.'
                 $keyboardId = 'QueueItem-' + $seededQueue[1].Id.ToString('N')
                 Invoke-NodeAction (Find-Node $keyboardId $mainRoot) $mainRoot 'Focus' | Out-Null
                 Wait-Node $keyboardId $mainRoot 'Focused' | Out-Null
                 foreach ($key in @(32,13)) {
-                    if (-not [MtdAutomationWindowCloser]::SendOwnedKey($script:automationProcess.Id,$script:automationProcess.MainWindowHandle,$key)) { throw 'Owned HWND key dispatch failed.' }
+                    if (-not [MtdAutomationWindowCloser]::SendOwnedKey($script:automationProcess.Id,$script:automationMainWindow,$key)) { throw 'Owned HWND key dispatch failed.' }
                     Wait-Node $keyboardId $mainRoot 'Selected' | Out-Null
                 }
                 Write-Output 'Native input PASS: Focus plus owned HWND Space/Enter selects the expected canonical row; no global keyboard injection.'
@@ -741,17 +767,17 @@ try {
                 $titleNode = @($titleTree.nodes | Where-Object { $_.node.name -eq $seededQueue[0].Title -and $_.node.role -eq 'StaticText' }) | Select-Object -First 1
                 if (-not $titleNode) { throw 'Native title node unavailable for tooltip target.' }
                 $bounds = $titleNode.node.bounds
-                [void][MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle,0x0200,[int]($bounds.x+8),[int]($bounds.y+8),$false)
+                [void][MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow,0x0200,[int]($bounds.x+8),[int]($bounds.y+8),$false)
                 Start-Sleep -Milliseconds 800
                 $popupWidth=0; $popupHeight=0
-                $popup = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id,$script:automationProcess.MainWindowHandle,[ref]$popupWidth,[ref]$popupHeight)
+                $popup = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id,$script:automationMainWindow,[ref]$popupWidth,[ref]$popupHeight)
                 if ($popup -eq [IntPtr]::Zero) { throw 'Native tooltip did not open for the owned-window mouse event.' }
                 $popupBitmap = [Drawing.Bitmap]::new($popupWidth,$popupHeight); $popupGraphics = [Drawing.Graphics]::FromImage($popupBitmap)
                 $popupDc = $popupGraphics.GetHdc()
                 try { if (-not [MtdAutomationWindowCloser]::CaptureOwnPopup($script:automationProcess.Id,$popup,$popupDc)) { throw 'Owned tooltip capture failed.' } }
                 finally { $popupGraphics.ReleaseHdc($popupDc); $popupGraphics.Dispose() }
                 try { $popupBitmap.Save((Join-Path $dataRoot 'downloads-title-tooltip.png')) } finally { $popupBitmap.Dispose() }
-                [void][MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle,0x0200,240,205,$false)
+                [void][MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow,0x0200,240,205,$false)
                 Write-Output 'Native tooltip HWND captured; full title requires visual inspection of downloads-title-tooltip.png.'
             }
             Capture-Dashboard 'downloads-selected'
@@ -870,7 +896,7 @@ try {
                 $path = Join-Path $dataRoot 'appearance.json'
                 $before = (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).global.theme
                 $expected = if ($before -eq 2) { 1 } else { 2 }
-                if (-not [MtdAutomationWindowCloser]::ClickOwnedCaptionTheme($script:automationProcess.Id, $script:automationProcess.MainWindowHandle, $AppTextScale)) { throw 'Owned caption click failed.' }
+                if (-not [MtdAutomationWindowCloser]::ClickOwnedCaptionTheme($script:automationProcess.Id, $script:automationMainWindow, $AppTextScale)) { throw 'Owned caption click failed.' }
                 $watch = [Diagnostics.Stopwatch]::StartNew()
                 do {
                     $current = (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).global.theme
@@ -911,14 +937,7 @@ try {
             Write-Output 'Inspector custom range Apply persisted in canonical queue; theme roundtrip and Details/Options roundtrip exercised.'
             Invoke-NodeAction (Find-Node 'AnalyzeButton' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
             Invoke-NodeAction (Find-Node 'AnalyzeButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
-            $menuRoots = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
-            $invoked = $false
-            foreach ($root in $menuRoots.value) {
-                $menuTree = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$root.rootId,'--depth','12')
-                $entry = @($menuTree.nodes | Where-Object { $_.node.name -eq $queueLabels.'Common.Analyze' -and $_.node.supportedActions -match 'Invoke' }) | Select-Object -First 1
-                if ($entry) { Invoke-NodeAction $entry.node $root.rootId 'Invoke' | Out-Null; $invoked = $true; break }
-            }
-            if (-not $invoked) { throw 'Analyze menu command missing.' }
+            Invoke-OwnedAnalyzeMenu
             Wait-Node 'AddToQueueButton' $mainRoot 'Enabled' | Out-Null
             Capture-Dashboard 'analysis-full'
             Select-RangeMode 'VideoRangeMode' $true
@@ -1053,8 +1072,9 @@ try {
         $script:automationProcess = Start-Process -FilePath $app -ArgumentList $automationArguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $dataRoot 'restart-stderr.log')
         Wait-Bridge $script:automationProcess.Id $true
         Wait-MainWindow $script:automationProcess
+        $script:automationMainWindow = $script:automationProcess.MainWindowHandle
         if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
-            if (-not [MtdAutomationWindowCloser]::PlaceWindow($script:automationProcess.MainWindowHandle, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)) { throw 'Could not resize the restarted dashboard window.' }
+            if (-not [MtdAutomationWindowCloser]::PlaceWindow($script:automationMainWindow, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)) { throw 'Could not resize the restarted dashboard window.' }
             Confirm-OwnedWindowSize 'same-profile restart'
         }
         $instances = @(Get-Process -Name ModernTubeDownloader -ErrorAction SilentlyContinue)
@@ -1090,7 +1110,7 @@ try {
         Invoke-NodeAction (Find-Node 'ShutdownHide' $choiceRoot.rootId) $choiceRoot.rootId 'Invoke' | Out-Null
         Start-Sleep -Milliseconds 300
         $script:automationProcess.Refresh()
-        if ($script:automationProcess.HasExited -or $script:automationProcess.MainWindowHandle -ne [IntPtr]::Zero) {
+        if ($script:automationProcess.HasExited -or $script:automationMainWindow -ne [IntPtr]::Zero) {
             throw 'Hide-to-tray did not keep an accessible background instance without a visible main window.'
         }
         $secondary = Start-Process -FilePath $app -PassThru -WindowStyle Hidden
@@ -1098,6 +1118,7 @@ try {
             if (-not $secondary.WaitForExit(10000) -or $secondary.ExitCode -ne 0) { throw 'Manual secondary launch did not forward restore.' }
         } finally { $secondary.Dispose() }
         Wait-MainWindow $script:automationProcess
+        $script:automationMainWindow = $script:automationProcess.MainWindowHandle
         [void](Find-Node 'NavSettings' $mainRoot)
         $script:automationProcess.CloseMainWindow() | Out-Null
         $choiceRoots = Invoke-AutomationCli -CliArguments @('roots','--pid',"$($script:automationProcess.Id)")
@@ -1126,6 +1147,7 @@ try {
         if ($AppearanceSmoke) {
             Invoke-NodeAction (Find-Node 'DownloadUrlInput' $mainRoot) $mainRoot 'SetValue' $SampleUrl | Out-Null
             Invoke-NodeAction (Find-Node 'AnalyzeButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+            if ($InterfaceMode -eq 'ModernDashboard' -and -not $ClassicUiRecovery) { Invoke-OwnedAnalyzeMenu }
             Wait-Node 'DetailsButton' $mainRoot 'Enabled' | Out-Null
         }
         Invoke-NodeAction (Find-Node 'NavSettings' $mainRoot) $mainRoot 'Invoke' | Out-Null
@@ -1144,7 +1166,7 @@ try {
                     Start-Sleep -Milliseconds 350
                     # Size the PrintWindow destination from the same owned native HWND.
                     # Semantic peer bounds are not a reliable bitmap allocation rectangle.
-                    $captureSize = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationProcess.MainWindowHandle)
+                    $captureSize = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationMainWindow)
                     Add-Type -AssemblyName System.Drawing
                     $picture = [Drawing.Bitmap]::new($captureSize[0], $captureSize[1])
                     $drawing = [Drawing.Graphics]::FromImage($picture)
@@ -1161,7 +1183,7 @@ try {
                     $bounds = (Find-Node 'DetailsWindow' $detailsRoot.rootId).bounds
                     $picture = [Drawing.Bitmap]::new([int]$bounds.width,[int]$bounds.height); $drawing = [Drawing.Graphics]::FromImage($picture)
                     try { Capture-OwnedBitmap $drawing $true; $picture.Save((Join-Path $dataRoot "Details-$percent.png")) } finally { $drawing.Dispose(); $picture.Dispose() }
-                    [MtdAutomationWindowCloser]::CloseDetails($script:automationProcess.Id,$script:automationProcess.MainWindowHandle) | Out-Null
+                    [MtdAutomationWindowCloser]::CloseDetails($script:automationProcess.Id,$script:automationMainWindow) | Out-Null
                     Start-Sleep -Milliseconds 300
                     Invoke-NodeAction (Find-Node 'NavSettings' $mainRoot) $mainRoot 'Invoke' | Out-Null
                 }
@@ -1317,7 +1339,7 @@ try {
             $bounds = if ($InterfaceMode -eq 'ModernDashboard') { (Find-Node 'MainWindow' $mainRoot).bounds } else { (Find-Node 'BatchWindow' $batchRoot.rootId).bounds }
             if ($InterfaceMode -eq 'ModernDashboard') {
                 Start-Sleep -Milliseconds 250
-                $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationProcess.MainWindowHandle)
+                $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationMainWindow)
                 $bounds = @{ width=$size[0]; height=$size[1] }
             }
             Add-Type -AssemblyName System.Drawing
@@ -1370,7 +1392,7 @@ try {
         } while (-not $sourceRoot -and $sourceDeadline.Elapsed.TotalSeconds -lt 30)
         if (-not $sourceRoot) { throw 'Supported sources root did not appear.' }
         if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
-            if (-not [MtdAutomationWindowCloser]::ResizeDialog($script:automationProcess.Id,$script:automationProcess.MainWindowHandle,$WindowWidth,$WindowHeight)) {
+            if (-not [MtdAutomationWindowCloser]::ResizeDialog($script:automationProcess.Id,$script:automationMainWindow,$WindowWidth,$WindowHeight)) {
                 throw 'Could not resize the Supported services window.'
             }
         }
@@ -1389,7 +1411,7 @@ try {
         if (-not $beforeScroll.scrollInfo.vertical.isScrollable) { throw 'Source list is not scrollable.' }
         Invoke-NodeAction (Find-Node 'SupportedSourceRow0' $sourceRoot.rootId) $sourceRoot.rootId 'Focus' | Out-Null
         $scrollBounds = $beforeScroll.bounds
-        if (-not [MtdAutomationWindowCloser]::SendDialogWheel($script:automationProcess.Id,$script:automationProcess.MainWindowHandle,
+        if (-not [MtdAutomationWindowCloser]::SendDialogWheel($script:automationProcess.Id,$script:automationMainWindow,
             [int]($scrollBounds.x + $scrollBounds.width / 2),[int]($scrollBounds.y + 30),-120)) { throw 'Source dialog wheel event failed.' }
         $scrollTimer = [Diagnostics.Stopwatch]::StartNew()
         do { $afterScroll = Inspect-SourceNode 'SupportedSourcesList' }
@@ -1431,7 +1453,7 @@ try {
             $sourceGraphics = [Drawing.Graphics]::FromImage($sourcePicture)
             try {
                 $dc = $sourceGraphics.GetHdc()
-                try { if (-not [MtdAutomationWindowCloser]::CaptureOwnWindow($script:automationProcess.Id,$script:automationProcess.MainWindowHandle,$true,$dc)) { throw 'Source window capture failed.' } }
+                try { if (-not [MtdAutomationWindowCloser]::CaptureOwnWindow($script:automationProcess.Id,$script:automationMainWindow,$true,$dc)) { throw 'Source window capture failed.' } }
                 finally { $sourceGraphics.ReleaseHdc($dc) }
                 $sourcePicture.Save((Join-Path $dataRoot 'supported-sources.png'),[Drawing.Imaging.ImageFormat]::Png)
             } finally { $sourceGraphics.Dispose(); $sourcePicture.Dispose() }
@@ -1479,7 +1501,7 @@ try {
             for ($tick = 0; $tick -lt $count; $tick++) {
                 $x = [int]($bounds.x + 12 + ($tick % [Math]::Max(1, [int]$bounds.width - 24)))
                 $y = [int]($bounds.y + 12 + ($tick % [Math]::Max(1, [int]$bounds.height - 24)))
-                if (-not [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle,
+                if (-not [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow,
                     0x0200, $x, $y, $false)) { throw 'Could not post WM_MOUSEMOVE.' }
             }
         }
@@ -1498,7 +1520,7 @@ try {
         $remoteToggle = Find-Node 'WebRemoteEnable' $mainRoot
         $saveButton = Find-Node 'SettingsSaveButton' $mainRoot
         $settingsBounds = $settingsNode.bounds
-        [MtdAutomationWindowCloser]::StartMouseFlood($script:automationProcess.MainWindowHandle,
+        [MtdAutomationWindowCloser]::StartMouseFlood($script:automationMainWindow,
             [int]$settingsBounds.x, [int]$settingsBounds.y, [int]$settingsBounds.width, [int]$settingsBounds.height)
         try {
             for ($pass = 1; $pass -le $CrashStressPasses; $pass++) {
@@ -1546,7 +1568,7 @@ try {
         function Send-ReproWheel($list, [int]$count) {
             $bounds = $list.bounds
             for ($tick = 0; $tick -lt $count; $tick++) {
-                if (-not [MtdAutomationWindowCloser]::SendWheel($script:automationProcess.MainWindowHandle,
+                if (-not [MtdAutomationWindowCloser]::SendWheel($script:automationMainWindow,
                     [int]($bounds.x + $bounds.width / 2), [int]($bounds.y + $bounds.height / 2), -120)) {
                     throw 'Could not send queue/history wheel event.'
                 }
@@ -1717,8 +1739,8 @@ try {
                 $visibleAuth = Find-Node 'WebRemoteRequireAuthentication' $mainRoot
                 $clickX = [int]($visibleAuth.bounds.x + 15)
                 $clickY = [int]($visibleAuth.bounds.y + $visibleAuth.bounds.height / 2)
-                [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0201, $clickX, $clickY, $true) | Out-Null
-                [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0202, $clickX, $clickY, $false) | Out-Null
+                [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0201, $clickX, $clickY, $true) | Out-Null
+                [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0202, $clickX, $clickY, $false) | Out-Null
             }
             else { Invoke-NodeAction $auth $mainRoot 'Toggle' | Out-Null }
             $after = Get-SettingsScrollState "pass-$pass-after-toggle"
@@ -1734,7 +1756,7 @@ try {
         }
         if (-not $failure) {
             $bounds = $initial.panel.bounds
-            [MtdAutomationWindowCloser]::SendWheel($script:automationProcess.MainWindowHandle,
+            [MtdAutomationWindowCloser]::SendWheel($script:automationMainWindow,
                 [int]($bounds.x + $bounds.width / 2), [int]($bounds.y + $bounds.height / 2), -120) | Out-Null
             $wheel = Get-SettingsScrollState 'wheel-after-toggle'
             if (-not $wheel.aligned -or $wheel.panel.scrollInfo.vertical.offset -le $after.panel.scrollInfo.vertical.offset) {
@@ -1742,14 +1764,14 @@ try {
             }
             $trackX = [int]($bounds.x + $bounds.width - 7)
             $trackY = [int]($bounds.y + $bounds.height * 0.83)
-            [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0201, $trackX, $trackY, $true) | Out-Null
-            [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0202, $trackX, $trackY, $false) | Out-Null
+            [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0201, $trackX, $trackY, $true) | Out-Null
+            [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0202, $trackX, $trackY, $false) | Out-Null
             $track = Get-SettingsScrollState 'track-after-toggle'
             if (-not $track.aligned -or $track.panel.scrollInfo.vertical.offset -le $wheel.panel.scrollInfo.vertical.offset) {
                 throw 'Settings scrollbar track did not advance after changing Web Remote authentication.'
             }
             for ($tick = 0; $tick -lt 18; $tick++) {
-                [MtdAutomationWindowCloser]::SendWheel($script:automationProcess.MainWindowHandle,
+                [MtdAutomationWindowCloser]::SendWheel($script:automationMainWindow,
                     [int]($bounds.x + $bounds.width / 2), [int]($bounds.y + $bounds.height / 2), 120) | Out-Null
             }
             $fastWheel = Get-SettingsScrollState 'fast-wheel-after-toggle'
@@ -1760,15 +1782,15 @@ try {
             $top = $null
             for ($click = 0; $click -lt 16; $click++) {
                 $previousOffset = if ($top) { $top.panel.scrollInfo.vertical.offset } else { -1 }
-                [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0201, $trackX, $topTrackY, $true) | Out-Null
-                [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0202, $trackX, $topTrackY, $false) | Out-Null
+                [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0201, $trackX, $topTrackY, $true) | Out-Null
+                [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0202, $trackX, $topTrackY, $false) | Out-Null
                 $top = Get-SettingsScrollState "top-track-$click"
                 if ($top.panel.scrollInfo.vertical.offset -eq 0 -or
                     $top.panel.scrollInfo.vertical.offset -eq $previousOffset) { break }
             }
             if ($top.panel.scrollInfo.vertical.offset -gt 0) {
                 for ($tick = 0; $tick -lt 12; $tick++) {
-                    [MtdAutomationWindowCloser]::SendWheel($script:automationProcess.MainWindowHandle,
+                    [MtdAutomationWindowCloser]::SendWheel($script:automationMainWindow,
                         [int]($bounds.x + $bounds.width / 2), [int]($bounds.y + $bounds.height / 2), 120) | Out-Null
                 }
                 $top = Get-SettingsScrollState 'top-after-wheel'
@@ -1780,9 +1802,9 @@ try {
             $thumbHeight = [Math]::Max(8, 1 + [int](($axis.largeChange / ($axis.maximum - $axis.minimum + 1 + $axis.largeChange)) * ($bounds.height - 30)))
             $thumbY = [int]($bounds.y + 15 + $thumbHeight / 2)
             $dragY = [int]($bounds.y + $bounds.height * 0.62)
-            [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0201, $trackX, $thumbY, $true) | Out-Null
-            [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0200, $trackX, $dragY, $true) | Out-Null
-            [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0202, $trackX, $dragY, $false) | Out-Null
+            [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0201, $trackX, $thumbY, $true) | Out-Null
+            [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0200, $trackX, $dragY, $true) | Out-Null
+            [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0202, $trackX, $dragY, $false) | Out-Null
             $drag = Get-SettingsScrollState 'thumb-drag-after-toggle'
             if (-not $drag.aligned -or $drag.panel.scrollInfo.vertical.offset -le 0) {
                 throw 'Settings thumb drag did not move content after changing Web Remote authentication.'
@@ -1859,7 +1881,7 @@ try {
             if (-not $CaptureVisual) { return }
             if ($windowId -eq 'MainWindow') {
                 Start-Sleep -Milliseconds 250
-                $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationProcess.MainWindowHandle)
+                $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationMainWindow)
                 $bounds = @{ width=$size[0]; height=$size[1] }
             }
             else { $bounds = (Find-Node $windowId $rootId).bounds }
@@ -1870,7 +1892,7 @@ try {
                 $dc = $drawing.GetHdc()
                 try {
                     if (-not [MtdAutomationWindowCloser]::CaptureOwnWindow($script:automationProcess.Id,
-                        $script:automationProcess.MainWindowHandle, ($windowId -ne 'MainWindow'), $dc)) {
+                        $script:automationMainWindow, ($windowId -ne 'MainWindow'), $dc)) {
                         throw 'Could not capture the test application window.'
                     }
                 }
@@ -1951,7 +1973,7 @@ try {
             if (-not $detailsRoot) { throw 'LIVE details root was not registered.' }
             Wait-Node 'LiveDetailsContent' $detailsRoot.rootId | Out-Null
             Save-LiveVisual 'details' $detailsRoot.rootId 'LiveDetailsWindow'
-            [MtdAutomationWindowCloser]::CloseDetails($script:automationProcess.Id, $script:automationProcess.MainWindowHandle) | Out-Null
+            [MtdAutomationWindowCloser]::CloseDetails($script:automationProcess.Id, $script:automationMainWindow) | Out-Null
             if ($RealLiveSmoke) {
                 $probeJson = & $FfprobePath -v error -show_entries 'format=duration,format_name:stream=codec_type' -of json $finalFile | ConvertFrom-Json
                 if ($LASTEXITCODE -ne 0 -or [double]$probeJson.format.duration -le 0 -or
@@ -1992,6 +2014,7 @@ try {
     Invoke-NodeAction $url $mainRoot 'SetValue' $SampleUrl | Out-Null
     $analyze = Wait-Node 'AnalyzeButton' $mainRoot 'Enabled'
     Invoke-NodeAction $analyze.snapshot $mainRoot 'Invoke' | Out-Null
+    if ($InterfaceMode -eq 'ModernDashboard' -and -not $ClassicUiRecovery) { Invoke-OwnedAnalyzeMenu }
     if ($PlaylistSmoke -and $PreviewOnly) {
         Wait-Node 'PlaylistPreview' $mainRoot | Out-Null
         if ($CaptureVisual) {
@@ -2018,7 +2041,7 @@ try {
             }
             Invoke-NodeAction (Find-Node 'PlaylistEntryToggle1' $mainRoot) $mainRoot 'Focus' | Out-Null
             Wait-Node 'PlaylistEntryToggle1' $mainRoot 'Focused' | Out-Null
-            if (-not [MtdAutomationWindowCloser]::SendWheel($script:automationProcess.MainWindowHandle,
+            if (-not [MtdAutomationWindowCloser]::SendWheel($script:automationMainWindow,
                 [int]($bounds.x + $bounds.width / 2), [int]($bounds.y + $bounds.height / 2), -120)) {
                 throw 'Could not send a native mouse-wheel event to the playlist viewport.'
             }
@@ -2034,7 +2057,7 @@ try {
                 throw "One wheel notch should scroll exactly once to $expectedWheel; got $($listWheel.value.scrollInfo.vertical.offset)."
             }
             Invoke-NodeAction (Find-Node 'PlaylistQualitySelector' $mainRoot) $mainRoot 'Focus' | Out-Null
-            [MtdAutomationWindowCloser]::SendWheel($script:automationProcess.MainWindowHandle,
+            [MtdAutomationWindowCloser]::SendWheel($script:automationMainWindow,
                 [int]($bounds.x + $bounds.width / 2), [int]($bounds.y + $bounds.height / 2), -120) | Out-Null
             $listOutsideFocus = Invoke-AutomationCli -CliArguments @('inspect', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot,
                 '--session', $listNode.handle.sessionId, '--node', $listNode.handle.runtimeId)
@@ -2043,8 +2066,8 @@ try {
             }
             $trackX = [int]($bounds.x + $bounds.width - 7)
             $trackY = [int]($bounds.y + $bounds.height * 0.72)
-            [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0201, $trackX, $trackY, $true) | Out-Null
-            [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0202, $trackX, $trackY, $false) | Out-Null
+            [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0201, $trackX, $trackY, $true) | Out-Null
+            [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0202, $trackX, $trackY, $false) | Out-Null
             $listTrack = Invoke-AutomationCli -CliArguments @('inspect', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot,
                 '--session', $listNode.handle.sessionId, '--node', $listNode.handle.runtimeId)
             if ($listTrack.value.scrollInfo.vertical.offset -le $listOutsideFocus.value.scrollInfo.vertical.offset) {
@@ -2056,9 +2079,9 @@ try {
             $thumbHeight = [Math]::Max(8, 1 + [int](($axis.largeChange / ($axis.maximum - $axis.minimum + 1 + $axis.largeChange)) * ($bounds.height - 30)))
             $thumbY = [int]($bounds.y + 15 + $thumbHeight / 2)
             $dragY = [int]($bounds.y + $bounds.height * 0.65)
-            [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0201, $trackX, $thumbY, $true) | Out-Null
-            [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0200, $trackX, $dragY, $true) | Out-Null
-            [MtdAutomationWindowCloser]::SendMouse($script:automationProcess.MainWindowHandle, 0x0202, $trackX, $dragY, $false) | Out-Null
+            [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0201, $trackX, $thumbY, $true) | Out-Null
+            [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0200, $trackX, $dragY, $true) | Out-Null
+            [MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow, 0x0202, $trackX, $dragY, $false) | Out-Null
             $listDrag = Invoke-AutomationCli -CliArguments @('inspect', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot,
                 '--session', $listNode.handle.sessionId, '--node', $listNode.handle.runtimeId)
             if ($listDrag.value.scrollInfo.vertical.offset -le 0) { throw 'Dragging the scrollbar thumb did not scroll.' }
@@ -2160,7 +2183,7 @@ try {
             $dropdownTrace = Join-Path $dataRoot 'quality-dropdown-native-trace.jsonl'
             function Write-QualityDropdownTrace([string]$stage, $node, $actionResult) {
                 $popupWidth = 0; $popupHeight = 0
-                $mainHwnd = $script:automationProcess.MainWindowHandle
+                $mainHwnd = $script:automationMainWindow
                 $popup = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id,
                     $mainHwnd, [ref]$popupWidth, [ref]$popupHeight)
                 $nativeFocus = [MtdAutomationWindowCloser]::NativeFocusSnapshot($mainHwnd)
@@ -2192,7 +2215,7 @@ try {
                 if ($CaptureVisual -and $pass -eq 1) {
                     $popupWidth = 0; $popupHeight = 0
                     $popup = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id,
-                        $script:automationProcess.MainWindowHandle, [ref]$popupWidth, [ref]$popupHeight)
+                        $script:automationMainWindow, [ref]$popupWidth, [ref]$popupHeight)
                     if ($popup -eq [IntPtr]::Zero -or $popupWidth -le 0 -or $popupHeight -le 0) {
                         throw 'Expanded quality popup has no visible own native HWND.'
                     }
@@ -2385,7 +2408,7 @@ try {
             $sourceDetailsPicture.Save((Join-Path $dataRoot 'details-source.png'),[Drawing.Imaging.ImageFormat]::Png)
         } finally { $sourceDetailsGraphics.Dispose(); $sourceDetailsPicture.Dispose() }
     }
-    if (-not [MtdAutomationWindowCloser]::CloseDetails($script:automationProcess.Id, $script:automationProcess.MainWindowHandle)) {
+    if (-not [MtdAutomationWindowCloser]::CloseDetails($script:automationProcess.Id, $script:automationMainWindow)) {
         throw 'Could not close Details window through WM_CLOSE.'
     }
     $deadline.Restart()

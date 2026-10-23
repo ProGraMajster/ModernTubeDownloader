@@ -88,6 +88,11 @@ internal sealed partial class DownloadsView
     }
     private void EnsureDashboard()
     {
+        // Also runs for direct Modern construction, before SetDashboard(true)'s
+        // same-mode early return. Geometry and Invoke must match a shell switch.
+        ((DashboardButton)analyzeButton).JoinedEdge = 2;
+        analyzeButton.Click -= AnalyzeClicked; analyzeButton.Click -= DashboardAddMenu;
+        analyzeButton.Click += DashboardAddMenu;
         if (dashboardQueue is not null) return;
         dashboardLink = new AppVectorIcon(AppIconKind.Link, 20); dashboardLink.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden; urlPanel.Controls.Add(dashboardLink);
         dashboardStatus = AppUi.Muted(); dashboardStatus.AutoEllipsis = true;
@@ -175,6 +180,8 @@ internal sealed partial class DownloadsView
     {
         if (dashboardQueue is null) return;
         AutoScroll = true;
+        AppUi.BindGradient(this, DownloadsVisual.Background, DownloadsVisual.BackgroundEnd);
+        DownloadsVisual.Card(dashboardQueue);
         var origin = DisplayRectangle.Location; const int margin = 18; const int gap = 14;
         var width = Math.Max(0, DisplayRectangle.Width - margin * 2);
         var p = AppearancePresentation.Current.ModernDashboardShell;
@@ -187,7 +194,7 @@ internal sealed partial class DownloadsView
         var toolbarRows = wideToolbar ? 1 : 2;
         header.Visible = false; urlLabel.Visible = supportedSourcesButton.Visible = false;
         header.SetBounds(0, 0, 0, 0);
-        AppUi.BindBackground(urlPanel); urlPanel.Style.Border.Width = 0;
+        AppUi.BindGradient(urlPanel, DownloadsVisual.Background, DownloadsVisual.BackgroundEnd); urlPanel.Style.Border.Width = 0;
         var inputLeft = margin + origin.X + (inline ? 7 : 0);
         urlPanel.SetBounds(inputLeft, 38 + origin.Y, inputWidth, row);
         var addWidth = Math.Min(inputWidth / 3, AppTypography.TextHeight(214));
@@ -268,19 +275,19 @@ internal sealed partial class DownloadsView
         dashboardStatus!.Visible = dashboardStatusDot!.Visible = inline;
         if (inline)
         {
-            dashboardStatus.SetBounds(margin + origin.X + inputWidth + 28, urlPanel.Top, Math.Max(0, width - inputWidth - 28), row);
+            dashboardStatus.SetBounds(margin + origin.X + inputWidth + 28, urlPanel.Top - 22, Math.Max(0, width - inputWidth - 28), row);
             dashboardStatus.TextAlign = ContentAlignment.MiddleRight;
             var statusWidth = Math.Min(dashboardStatus.Width, DashboardVisual.TextWidth(dashboardStatus, dashboardStatus.Text));
-            dashboardStatusDot.SetBounds(dashboardStatus.Right - statusWidth - 18, urlPanel.Top + (row - 8) / 2, 8, 8);
+            dashboardStatusDot.SetBounds(dashboardStatus.Right - statusWidth - 18, dashboardStatus.Top + (row - 8) / 2, 8, 8);
         }
         else { dashboardStatus.SetBounds(0, 0, 0, 0); dashboardStatusDot.SetBounds(0, 0, 0, 0); }
         var showDetails = !inline && p.Inspector != DashboardInspectorMode.Hidden;
         var toolbarBaseHeight = AppTypography.TextHeight(toolbarRows == 1 ? 50 : 96);
         var toolbarHeight = toolbarBaseHeight + (admissionCountdown.Visible ? AppTypography.TextHeight(28) : 0);
         queueToolbar.SetBounds(margin + origin.X + 12, top + 2, queueWidth - 24, toolbarHeight);
-        AppUi.BindBackground(queueToolbar, AppThemeTokens.Surface);
+        AppUi.BindGradient(queueToolbar, DownloadsVisual.Panel, DownloadsVisual.PanelEnd);
         queueTitle.Text = text.Get("Dashboard.QueueTitle", services.Queue.Snapshot().Count);
-        AppTypography.Bind(queueTitle, 13, FontStyle.Bold);
+        AppTypography.BindSemibold(queueTitle, 13);
         var buttonTop = wideToolbar ? 11 : AppTypography.TextHeight(44);
         var measuredAction = new[] { dashboardStart!, pauseButton, dashboardClear! }.Max(b => DashboardVisual.ActionWidth(b, true));
         var buttonWidth = Math.Min(Math.Max(AppTypography.TextHeight(146), measuredAction), (queueWidth - 104) / (showDetails ? 4 : 3));
@@ -335,8 +342,9 @@ internal sealed partial class DownloadsView
         queueEmptyIcon.SetBounds((queueArea.Width - 42) / 2, emptyCenter - 72, 42, 42);
         queueEmptyTitle.SetBounds(20, queueEmptyIcon.Bottom + 10, queueArea.Width - 40, AppTypography.TextHeight(34));
         queueEmptyBody.SetBounds(20, queueEmptyTitle.Bottom + 6, queueArea.Width - 40, AppTypography.TextHeight(52));
-        queueEmpty.Style.Border.Width = 0; AppUi.BindBackground(queueEmpty, AppThemeTokens.Surface); AppUi.BindBackground(queueHost, AppThemeTokens.Surface);
-        foreach (var button in new[] { pasteButton, analyzeButton, dashboardAdd, dashboardStart, pauseButton, dashboardClear, dashboardDetails, moreButton, dashboardPrevious, dashboardNext }.Concat(dashboardChips.Controls.OfType<Button>())) DashboardVisual.Button(button!, button == dashboardAdd || button == analyzeButton || button == dashboardStart);
+        queueEmpty.Style.Border.Width = 0; AppUi.BindGradient(queueEmpty, DownloadsVisual.Panel, DownloadsVisual.PanelEnd); AppUi.BindGradient(queueHost, DownloadsVisual.Panel, DownloadsVisual.PanelEnd);
+        AppUi.BindGradient(dashboardChips, DownloadsVisual.Background, DownloadsVisual.BackgroundEnd);
+        foreach (var button in new[] { pasteButton, analyzeButton, dashboardAdd, dashboardStart, pauseButton, dashboardClear, dashboardDetails, moreButton, dashboardPrevious, dashboardNext }.Concat(dashboardChips.Controls.OfType<Button>())) DownloadsVisual.Button(button!, button == dashboardAdd || button == analyzeButton || button == dashboardStart);
         DashboardVisual.Icon(pasteButton, AppIconKind.Clipboard); DashboardVisual.Icon(dashboardAdd, AppIconKind.Plus);
         DashboardVisual.Icon(dashboardStart, AppIconKind.Play); DashboardVisual.Icon(pauseButton, services.Queue.IsPaused ? AppIconKind.Play : AppIconKind.Pause);
         DashboardVisual.Icon(dashboardClear, AppIconKind.Trash);
@@ -351,11 +359,11 @@ internal sealed partial class DownloadsView
             foreach (var style in new[] { button!.Style, button.StyleHover, button.StylePressed, button.StyleFocused, button.StyleDisabled })
                 style.Border.Radius = 0;
         moreButton.Text = ""; DashboardVisual.Icon(moreButton, AppIconKind.More, true);
-        DashboardVisual.Icon((Button)dashboardChips.Controls[0], AppIconKind.Play);
-        DashboardVisual.Icon((Button)dashboardChips.Controls[1], AppIconKind.Queue);
-        DashboardVisual.Icon((Button)dashboardChips.Controls[2], AppIconKind.Folder);
-        DashboardVisual.Icon((Button)dashboardChips.Controls[3], AppIconKind.Live);
-        DashboardVisual.Icon((Button)dashboardChips.Controls[4], AppIconKind.Link);
+        DownloadsVisual.Source((Button)dashboardChips.Controls[0], Services.SourceBrand.YouTube);
+        DownloadsVisual.Source((Button)dashboardChips.Controls[1], Services.SourceBrand.Playlist);
+        DownloadsVisual.Source((Button)dashboardChips.Controls[2], Services.SourceBrand.Channel);
+        DownloadsVisual.Source((Button)dashboardChips.Controls[3], Services.SourceBrand.Shorts);
+        DownloadsVisual.Source((Button)dashboardChips.Controls[4], Services.SourceBrand.Other);
         DashboardVisual.Flat(urlPanel); DashboardVisual.Flat(queueHost); DashboardVisual.Flat(queueToolbar);
         ResizeCards(); dashboardQueue.SendToBack();
     }

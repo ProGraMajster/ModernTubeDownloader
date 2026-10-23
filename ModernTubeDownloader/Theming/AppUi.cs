@@ -37,7 +37,13 @@ internal static class AppUi
         if (enabled && !state.DashboardButton)
             state.ClassicDisabledBrush = button.StyleDisabled.BackgroundBrush;
         state.DashboardButton = enabled;
+        if (!enabled) state.DownloadsButton = false;
         state.Refresh();
+    }
+    public static void SetDownloadsButtonSurface(Button button)
+    {
+        if (!ThemeBindings.TryGetValue(button, out var state)) return;
+        state.DownloadsButton = true; state.Refresh();
     }
     public static void ClearGradient(Control control)
     {
@@ -203,6 +209,16 @@ internal static class AppUi
 
     internal static SKColor GetColor(string token)
     {
+        if (AppearancePresentation.Current.Global.Theme == AppearanceTheme.Custom)
+            token = token switch
+            {
+                DownloadsVisual.Background or DownloadsVisual.BackgroundEnd => AppThemeTokens.Background,
+                DownloadsVisual.Panel or DownloadsVisual.PanelEnd => AppThemeTokens.Surface,
+                DownloadsVisual.Selected or DownloadsVisual.SelectedEnd => AppThemeTokens.RowSelected,
+                DownloadsVisual.Border => AppThemeTokens.Border,
+                DownloadsVisual.ButtonTop or DownloadsVisual.ButtonEnd => AppThemeTokens.SurfaceSecondary,
+                _ => token
+            };
         if (ThemeManager.Current.ActiveSnapshot?.Colors.TryGetValue(token, out var color) == true)
             return new SKColor(color.R, color.G, color.B, color.A);
         return SKColors.Transparent;
@@ -251,6 +267,7 @@ internal static class AppUi
         public bool IsComboBox { get; set; }
         public bool IsCard { get; set; }
         public bool DashboardButton { get; set; }
+        public bool DownloadsButton { get; set; }
         public Brush? ClassicDisabledBrush { get; set; }
         public (string Normal, string Hover)? InteractiveSurface { get; set; }
 
@@ -280,6 +297,11 @@ internal static class AppUi
                         var normal = style.GetBackgroundColor();
                         var top = normal;
                         normal = new SKColor((byte)Math.Max(0, normal.Red - 5), (byte)Math.Max(0, normal.Green - 5), (byte)Math.Max(0, normal.Blue - 5), normal.Alpha);
+                        if (DownloadsButton && AppearancePresentation.Current.Global.Theme != AppearanceTheme.Custom && style == button.Style)
+                        {
+                            top = primary ? SKColor.Parse("#0567E7") : GetColor(DownloadsVisual.ButtonTop);
+                            normal = primary ? SKColor.Parse("#0567E3") : GetColor(DownloadsVisual.ButtonEnd);
+                        }
                         if (!buttonGradients.TryGetValue(style, out var cached) || cached.Top != top || cached.Bottom != normal)
                         {
                             var brush = new LinearGradientBrush { End = new System.Drawing.PointF(0, 1) };

@@ -139,7 +139,8 @@ internal class DashboardButton : Button
 {
     static DashboardButton() => ModernFormsNext.Renderers.RenderManager.SetRenderer<DashboardButton>(new DashboardButtonRenderer());
     // 1 joins the right edge, 2 joins the left. Input, focus and Invoke stay native.
-    public int JoinedEdge { get; set; }
+    private int joinedEdge;
+    public int JoinedEdge { get => joinedEdge; set { if (joinedEdge == value) return; joinedEdge = value; Invalidate(); } }
     protected override void OnPaintBackground(PaintEventArgs e)
     {
         if (JoinedEdge == 0 || !AppTypography.IsDashboard(this)) { base.OnPaintBackground(e); return; }
@@ -151,9 +152,11 @@ internal class DashboardButton : Button
         // The retained MFN back buffer may contain the previous rectangular recipe.
         // Clear outside the new clip as well when switching presentation/styles.
         e.Canvas.Clear(SKColors.Transparent);
-        e.Canvas.Save();
-        try { e.Canvas.ClipRoundRect(outline, SKClipOperation.Intersect, true); base.OnPaintBackground(e); }
-        finally { e.Canvas.Restore(); }
+        using var fill = new SKPaint { Color = CurrentStyle.GetBackgroundColor(), IsAntialias = true };
+        using var shader = CurrentStyle.BackgroundBrush is ModernFormsNext.Drawing.LinearGradientBrush gradient
+            ? SKShader.CreateLinearGradient(new SKPoint(0,0), new SKPoint(0,LogicalToDeviceUnits(Height)),
+                gradient.GradientStops.Select(s => s.Color).ToArray(), gradient.GradientStops.Select(s => s.Offset).ToArray(), SKShaderTileMode.Clamp) : null;
+        fill.Shader = shader; e.Canvas.DrawRoundRect(outline, fill);
         using var border = new SKPaint { Color = CurrentStyle.Border.GetColor(), StrokeWidth = (float)Scaling, Style = SKPaintStyle.Stroke, IsAntialias = true };
         e.Canvas.DrawRoundRect(outline, border);
     }

@@ -255,6 +255,15 @@ public sealed class AppAppearanceService : IDisposable
         Set(theme, "Legacy.ForegroundColorOnAccent", dark ? "#F2F6FA" : "#172637");
         Set(theme, "Legacy.AccentColor2", "#076DE2");
         Set(theme, AppThemeTokens.RowSelected, dark ? "#1A2B3A" : "#DDEBFA");
+        Set(theme, DownloadsVisual.Background, dark ? "#10171D" : "#F2F5F8");
+        Set(theme, DownloadsVisual.BackgroundEnd, dark ? "#0F171E" : "#EDF2F7");
+        Set(theme, DownloadsVisual.Panel, dark ? "#151E26" : "#FAFBFD");
+        Set(theme, DownloadsVisual.PanelEnd, dark ? "#161F26" : "#F4F7FA");
+        Set(theme, DownloadsVisual.Selected, dark ? "#182635" : "#E4EFFB");
+        Set(theme, DownloadsVisual.SelectedEnd, dark ? "#192736" : "#DDEBFA");
+        Set(theme, DownloadsVisual.Border, dark ? "#263440" : "#CBD7E3");
+        Set(theme, DownloadsVisual.ButtonTop, dark ? "#202934" : "#F0F4F8");
+        Set(theme, DownloadsVisual.ButtonEnd, dark ? "#212B36" : "#E8EEF5");
         return theme;
     }
 

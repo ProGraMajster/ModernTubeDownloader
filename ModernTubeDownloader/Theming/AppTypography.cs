@@ -8,7 +8,8 @@ public enum AppTextToken { BaseText, SmallText, Caption, Body, BodyStrong, Subti
 /// <summary>Absolute logical point sizes. This class never changes DPI, RenderScaling, transforms or icon size.</summary>
 public static class AppTypography
 {
-    private sealed record Binding(float Size, FontStyle Style);
+    private static readonly SkiaSharp.SKTypeface semibold = SkiaSharp.SKTypeface.FromFamilyName("Segoe UI", new SkiaSharp.SKFontStyle(600, 5, SkiaSharp.SKFontStyleSlant.Upright));
+    private sealed record Binding(float Size, FontStyle Style, bool Semibold = false);
     private static readonly ConditionalWeakTable<Control, Binding> bindings = new();
     private static readonly ConditionalWeakTable<Control, int?[]> classicStateSizes = new();
     private sealed record Presentation(bool Dashboard);
@@ -24,12 +25,14 @@ public static class AppTypography
     { AppTextToken.SmallText => 9.5f, AppTextToken.Caption => 10, AppTextToken.Subtitle => 15, AppTextToken.Title => 22, AppTextToken.Hero => 28, _ => 10.5f };
     public static Font Font(float baseSize, FontStyle style = FontStyle.Regular) => new("Segoe UI", baseSize * Scale, style);
     public static Font Font(AppTextToken token) => Font(LogicalSize(token), token is AppTextToken.BodyStrong or AppTextToken.Subtitle or AppTextToken.Title or AppTextToken.Hero ? FontStyle.Bold : FontStyle.Regular);
-    public static void Bind(Control control, float size, FontStyle style = FontStyle.Regular)
+    public static void Bind(Control control, float size, FontStyle style = FontStyle.Regular) => BindRecipe(control, new(size, style));
+    private static void BindRecipe(Control control, Binding binding)
     {
         if (!bindings.TryGetValue(control, out _)) { targets.Add(new(control)); control.Disposed += Remove; control.ParentChanged += Reapply; }
-        bindings.Remove(control); bindings.Add(control, new(size, style)); Apply(control, new(size, style));
+        bindings.Remove(control); bindings.Add(control, binding); Apply(control, binding);
     }
     public static void Bind(Control control, AppTextToken token) => Bind(control, LogicalSize(token), token is AppTextToken.BodyStrong or AppTextToken.Subtitle or AppTextToken.Title or AppTextToken.Hero ? FontStyle.Bold : FontStyle.Regular);
+    internal static void BindSemibold(Control control, float size) => BindRecipe(control, new(size, FontStyle.Regular, Semibold: true));
     public static void BindDefault(Control control)
     { if (!bindings.TryGetValue(control, out _)) Bind(control, 10.5f); }
     private static void Reapply(object? sender, EventArgs e) { if (sender is Control c && bindings.TryGetValue(c, out var binding)) Apply(c, binding); }
@@ -50,7 +53,11 @@ public static class AppTypography
         classicStateSizes.TryGetValue(control, out var savedSizes);
         for (var index = 0; index < styles.Length; index++)
         {
-            if (!Equals(styles[index].TextFont, font)) { styles[index].TextFont = font; changed = true; }
+            if (binding.Semibold)
+            {
+                if (!ReferenceEquals(styles[index].Font, semibold)) { styles[index].Font = semibold; changed = true; }
+            }
+            else if (!Equals(styles[index].TextFont, font)) { styles[index].TextFont = font; changed = true; }
             var size = dashboard ? (int?)font.SizeInPoints : index > 0 && savedSizes is not null ? savedSizes[index] : styles[index].FontSize;
             if (styles[index].FontSize != size) { styles[index].FontSize = size; changed = true; }
         }
@@ -68,7 +75,7 @@ public static class AppTypography
         var recipes = new List<(Control Target, Binding Recipe)>();
         void Visit(Control c) { if (bindings.TryGetValue(c, out var recipe)) recipes.Add((c, recipe)); foreach (var child in c.Controls) Visit(child); }
         Visit(root);
-        return () => { foreach (var (target, recipe) in recipes) if (bindings.TryGetValue(target, out _)) Bind(target, recipe.Size, recipe.Style); };
+        return () => { foreach (var (target, recipe) in recipes) if (bindings.TryGetValue(target, out _)) BindRecipe(target, recipe); };
     }
     internal static void SetDashboardPresentation(Control root, bool dashboard)
     {

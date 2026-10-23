@@ -210,15 +210,15 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         var compact = p.Sidebar == DashboardSidebarMode.Compact || p.Sidebar == DashboardSidebarMode.Auto && (Root.Width < 1280 || AppTypography.Scale > 1.25);
         Sidebar.Width = compact ? 66 : Math.Max(212, AppTypography.TextHeight(170));
         Brand.Visible = Logo.Visible = false; Logo.Left = compact ? 19 : 16; Brand.Width = Math.Max(0, Sidebar.Width - 60);
-        var row = AppTypography.TextHeight(44); var y = 34;
+        var row = AppTypography.TextHeight(42); var y = 32;
         foreach (var page in new[] { AppPageId.Downloads, AppPageId.Live, AppPageId.Other, AppPageId.Batch, AppPageId.History, AppPageId.Settings })
         {
             if (page == AppPageId.Settings) y += 22;
-            SetButton(page, compact, 10, y, Sidebar.Width - 20, row); y += row + 6;
+            SetButton(page, compact, 12, y, Sidebar.Width - 26, row); y += row + 8;
         }
-        var bottom = Math.Max(y + 20, Sidebar.Height - 2 * (row + 6) - 14);
-        SetButton(AppPageId.Help, compact, 10, bottom, Sidebar.Width - 20, row);
-        SetButton(AppPageId.About, compact, 10, bottom + row + 6, Sidebar.Width - 20, row);
+        var bottom = Math.Max(y + 20, Sidebar.Height - 2 * (row + 6) - 36);
+        SetButton(AppPageId.Help, compact, 12, bottom, Sidebar.Width - 26, row);
+        SetButton(AppPageId.About, compact, 12, bottom + row + 6, Sidebar.Width - 26, row);
         sectionRule.SetBounds(18, Buttons[AppPageId.Settings].Top - 16, Sidebar.Width - 36, 1);
         Footer.Height = AppTypography.TextHeight(32); identity.Width = Math.Min(DashboardVisual.TextWidth(identity, identity.Text) + 30, Root.Width / 2);
         statusDot.SetBounds(identity.Width + 8, (Footer.Height - 8) / 2, 8, 8);

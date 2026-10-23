@@ -22,6 +22,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private readonly Label title = AppUi.Heading("", 12), author = AppUi.Muted(), link = AppUi.Muted(), facts = AppUi.Muted(), hint = AppUi.Muted();
     private readonly Panel editor = new();
     private readonly DashboardFields fields = new();
+    private readonly Button configure = new DashboardButton { AccessibleAutomationId = "InspectorConfigure" };
     private readonly Label qualityLabel = AppUi.Muted(), containerLabel = AppUi.Muted();
     private readonly ComboBox quality = new() { AccessibleAutomationId = "InspectorQuality" }, container = new() { AccessibleAutomationId = "InspectorContainer" };
     private readonly MediaRangeEditor range;
@@ -49,7 +50,8 @@ internal sealed class DashboardInspector : AppScrollPanel
         range = new(services.Localization, "Inspector") { CompactLayout = true };
         range.ModeChanged += (_, _) => LayoutInspector();
         editor.Controls.AddRange([qualityLabel, quality, containerLabel, container, range, advanced, apply, hint]);
-        Controls.AddRange([details, options, image, title, author, link, copy, facts, fields, editor, openFile, openFolder, retry, emptyIcon]);
+        Controls.AddRange([details, options, image, title, author, link, copy, facts, fields, editor, openFile, openFolder, retry, emptyIcon, configure]);
+        configure.Click += (_, _) => { showOptions = true; LayoutInspector(); };
         AppTypography.Bind(imageDuration, 9.5f); imageDuration.TextAlign = ContentAlignment.MiddleCenter;
         AppUi.BindBackground(imageDuration, AppThemeTokens.Background); Controls.Add(imageDuration);
         image.Style.Border.Radius = 6; image.Style.Border.Width = 0;
@@ -78,6 +80,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     {
         historyMode = false;
         fields.SingleLineValues = true; // Full values remain in each native tooltip.
+        fields.InsetValues = true;
         var changed = queueId != item.Id || queued != (item.Status == DownloadStatus.Queued);
         queueId = item.Id; queued = item.Status == DownloadStatus.Queued; options.Visible = true;
         Present(item.Title, item.Channel, item.SourceUrl, item.ThumbnailUrl, item.FinalFile);
@@ -107,10 +110,12 @@ internal sealed class DashboardInspector : AppScrollPanel
             range.SetRange(item.RequestedRange); subtitles = item.SubtitleOptions.Copy(); sponsors = item.SponsorBlockOptions.Copy();
             hint.Text = t[queued ? "Dashboard.QueuedOptions" : "Dashboard.ReadOnlyOptions"];
         }
-        fields.SetRows((t["Downloads.Container"], DashboardStyle.OutputFormat(item)), (t["Downloads.Quality"], t["Quality." + item.QualityPresetId]),
-            (t["Dashboard.AddedAt"], item.AddedAt.ToLocalTime().ToString("g", t.Culture)), (t["Dashboard.Duration"], DashboardStyle.Duration(item.DurationSeconds)),
-            (t["Dashboard.Status"], t["Status." + item.Status]), (t["Dashboard.Size"], item.TotalBytes is { } totalSize ? DashboardStyle.Bytes(totalSize) : null),
-            (t["Dashboard.Output"], item.FinalFile ?? services.Settings.Current.FinalOutputDirectory),
+        var selectedAudio = metadata?.Formats.FirstOrDefault(f => f.Id == (item.SelectedFormats?.AudioFormatId ?? item.SelectedFormats?.VideoFormatId));
+        var audio = selectedAudio?.HasAudio == true ? selectedAudio.AudioCodec : null;
+        fields.SetRows((t["Dashboard.Format"], DashboardStyle.OutputFormat(item)), (t["Downloads.Quality"], t["Quality." + item.QualityPresetId]),
+            (t["Details.Subtitles"], item.SubtitleOptions.Enabled ? string.Join(", ", item.SubtitleOptions.Languages) + " · " + t["SubtitleFormat." + item.SubtitleOptions.Format] : t["Details.None"]),
+            (t["Dashboard.Audio"], audio ?? t["Common.NotAvailable"]),
+            (t["Dashboard.Folder"], folderPath),
             (t["Dashboard.Message"], item.FailureMessageKey is { } key ? t[key] : null));
         RefreshText(); LayoutInspector();
     }
@@ -118,6 +123,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     {
         historyMode = true;
         fields.SingleLineValues = false;
+        fields.InsetValues = false;
         queueId = null; options.Visible = false; showOptions = false;
         Present(entry.Title, entry.Channel, entry.SourceUrl, entry.ThumbnailUrl, entry.FinalPath);
         imageDuration.Text = entry.DurationSeconds is { } seconds ? DashboardStyle.Duration(seconds) : "";
@@ -136,6 +142,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     {
         historyMode = false;
         fields.SingleLineValues = false;
+        fields.InsetValues = false;
         queueId = null; options.Visible = false; showOptions = false;
         Present(session.Title, session.Channel, session.SourceUrl, session.ThumbnailUrl, session.Parts.LastOrDefault());
         imageDuration.Text = session.RecordedDuration > TimeSpan.Zero ? DashboardStyle.Duration(session.RecordedDuration.TotalSeconds) : "";
@@ -195,6 +202,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         qualityLabel.Text = t["Downloads.Quality"]; containerLabel.Text = t["Downloads.Container"];
         quality.AccessibleName = qualityLabel.Text; container.AccessibleName = containerLabel.Text;
         retry.Text = t["Common.Retry"]; apply.Text = t["Dashboard.ApplyOptions"]; advanced.Text = t["Advanced.MoreOptions"]; facts.Text = factText;
+        configure.Text = t["Advanced.MoreOptions"];
         quality.Enabled = container.Enabled = range.Enabled = advanced.Enabled = apply.Enabled = queued && metadata is not null;
     }
     private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() => { RefreshText(); LayoutInspector(); });
@@ -234,6 +242,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         emptyIcon.Visible = !hasSelection;
         if (!hasSelection)
         {
+            configure.Visible = false; configure.SetBounds(0,0,0,0);
             emptyIcon.SetBounds(12 + o.X + (width - 32) / 2, details.Bottom + 44, 32, 32);
             title.TextAlign = ContentAlignment.MiddleCenter;
             title.SetBounds(24 + o.X, emptyIcon.Bottom + 16, Math.Max(0, width - 24), DashboardVisual.LabelHeight(title, Math.Max(1, width - 24), 3)); editor.Visible = fields.Visible = false;
@@ -242,8 +251,16 @@ internal sealed class DashboardInspector : AppScrollPanel
         }
         emptyIcon.SetBounds(0, 0, 0, 0); title.TextAlign = ContentAlignment.TopLeft;
         AppTypography.Bind(title, queueId is not null ? 10.5f : 12, FontStyle.Bold);
+        if (queueId is not null)
+        {
+            DownloadsVisual.Card(this); AppTypography.BindSemibold(title, 11);
+            AppTypography.Bind(details, 9.5f); AppTypography.Bind(options, 9.5f);
+            details.Width = Math.Min(width / 2, DashboardVisual.TextWidth(details, details.Text) + 32);
+            options.Left = details.Right + 4; options.Width = width - details.Width - 4;
+        }
+        else DashboardStyle.Card(this);
         image.Visible = !string.IsNullOrWhiteSpace(thumbnailUrl) && !thumbnailFailed;
-        image.SetBounds(12 + o.X, details.Bottom + 14, width, image.Visible ? width * 9 / 16 : 0);
+        image.SetBounds(12 + o.X, details.Bottom + (queueId is not null ? 19 : 14), width, image.Visible ? width * 9 / 16 : 0);
         imageDuration.Visible = image.Visible && imageDuration.Text.Length > 0;
         if (imageDuration.Visible)
         {
@@ -277,11 +294,22 @@ internal sealed class DashboardInspector : AppScrollPanel
         openFolder.SetBounds(paired ? openFile.Right + 8 : openFile.Left, paired ? openFile.Top : openFile.Bottom + 8, openFile.Width, line);
         retry.SetBounds(openFile.Left, openFolder.Bottom + 8, width, line);
         DashboardVisual.Tab(details, !editing); DashboardVisual.Tab(options, editing);
+        if (queueId is not null) { AppTypography.Bind(details, 9.5f); AppTypography.Bind(options, 9.5f); }
         foreach (var button in new[] { copy, openFile, openFolder, retry, advanced, apply }) DashboardVisual.Button(button, button == apply);
         if (paired) { AppTypography.Bind(openFile, 9); AppTypography.Bind(openFolder, 9); }
         DashboardVisual.Icon(openFile, AppIconKind.Play); DashboardVisual.Icon(openFolder, AppIconKind.Folder);
         if (paired) { DashboardVisual.SetPadding(openFile, new Padding(32, 0, 6, 0)); DashboardVisual.SetPadding(openFolder, new Padding(32, 0, 6, 0)); }
         DashboardVisual.Icon(retry, AppIconKind.Retry);
+        configure.Visible = queueId is not null && queued && metadata is not null && !editing;
+        if (configure.Visible)
+        {
+            // A queued item has no file to open yet. Use that action slot for its
+            // canonical options editor instead of adding a redundant bottom row.
+            configure.Bounds = openFile.Bounds; openFile.Visible = false; openFile.SetBounds(0,0,0,0);
+            DownloadsVisual.Button(configure); DashboardVisual.Icon(configure, AppIconKind.Settings);
+            AppTypography.Bind(configure, 9); DashboardVisual.SetPadding(configure, new Padding(30,0,6,0));
+        }
+        else configure.SetBounds(0,0,0,0);
         // Pinned MFN includes hidden default-layout children in its scroll extent.
         // Keep only the active section's bounds; the next layout rebuilds the other section.
         facts.SetBounds(0, 0, 0, 0);

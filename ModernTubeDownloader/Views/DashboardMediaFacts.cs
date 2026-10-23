@@ -9,13 +9,16 @@ internal sealed class DashboardMediaFacts : UserControl
 {
     private readonly List<(AppVectorIcon Icon, Label Label)> items = [];
     private readonly ToolTip tips = new();
+    private readonly SourceVectorIcon sourceIcon = new() { AccessibilityView = AccessibilityView.Hidden, Visible = false };
     public event EventHandler? Activated;
 
     public DashboardMediaFacts()
     {
         Style.BackgroundColor = SkiaSharp.SKColors.Transparent;
         Style.Border.Width = 0;
+        sourceIcon.Click += Activate; Controls.Add(sourceIcon);
     }
+    public void SetSource(Services.SourceBrand? brand) { if (brand is { } value) sourceIcon.Brand = value; sourceIcon.Visible = brand is not null && items.Count > 0; }
 
     public void SetFacts(params (AppIconKind Icon, string Text)[] facts)
     {
@@ -46,6 +49,7 @@ internal sealed class DashboardMediaFacts : UserControl
             label.SetBounds(x + 20, y, Math.Max(1, desired - 20), line);
             x += desired + 14;
         }
+        if (sourceIcon.Visible && items.Count > 0) { sourceIcon.Bounds = items[0].Icon.Bounds; items[0].Icon.Visible = false; sourceIcon.BringToFront(); }
         Height = items.Any(i => i.Label.Visible) ? y + line : 0;
     }
 
