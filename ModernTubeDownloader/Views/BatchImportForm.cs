@@ -7,7 +7,7 @@ using ModernTubeDownloader.Theming;
 namespace ModernTubeDownloader.Views;
 
 /// <summary>A bounded page of controls, irrespective of session size. Closing the window does not stop preparation.</summary>
-internal sealed class BatchImportForm : Form
+internal sealed partial class BatchImportView : UserControl
 {
     private readonly AppServices services;
     private readonly AppScrollPanel body = new() { Dock = DockStyle.Fill, AutoScroll = true };
@@ -17,7 +17,7 @@ internal sealed class BatchImportForm : Form
     private readonly TextBox path = new() { AccessibleAutomationId = "BatchFilePath" }, search = new() { AccessibleAutomationId = "BatchSearch" };
     private readonly ComboBox quality = new() { AccessibleAutomationId = "BatchQuality" }, container = new() { AccessibleAutomationId = "BatchContainer" }, filter = new() { AccessibleAutomationId = "BatchFilter" };
     private readonly NumericUpDown workers = new() { Minimum = 1, Maximum = 8, Value = 1, AccessibleAutomationId = "BatchWorkers" };
-    private readonly ProgressBar progress = new() { Minimum = 0, Maximum = 100, AccessibleAutomationId = "BatchAnalysisProgress" };
+    private readonly ProgressBar progress = new DashboardProgress { Minimum = 0, Maximum = 100, AccessibleAutomationId = "BatchAnalysisProgress" };
     private readonly ProgressBar downloadProgress = new() { Minimum = 0, Maximum = 100, AccessibleAutomationId = "BatchDownloadProgress" };
     private readonly Label overall = AppUi.Muted();
     private readonly ToolTip overallTip = new() { InitialDelay = 350, AutoPopDelay = 15000 };
@@ -36,12 +36,11 @@ internal sealed class BatchImportForm : Form
     private CancellationTokenSource? operationCancellation;
     private CancellationToken OperationToken => operationCancellation?.Token ?? lifetime.Token;
     public Func<Form, IDisposable?>? RegisterDialog { get; set; }
-    public BatchImportForm(AppServices services, BatchImportSession? session = null)
+    public BatchImportView(AppServices services, BatchImportSession? session = null)
     {
         this.services = services; this.session = session;
         workers.Value = session?.AnalysisWorkers ?? 1;
-        AccessibilityObject.AutomationId = "BatchWindow"; AppBranding.Apply(this);
-        Size = new System.Drawing.Size(1420, 950); MinimumSize = new System.Drawing.Size(1050, 740);
+        AccessibleAutomationId = "BatchView"; Dock = DockStyle.Fill;
         heading.AccessibleAutomationId = "BatchTitle"; status.AccessibleAutomationId = "BatchStatus";
         range = new(services.Localization, "Batch") { Width = 500 };
         foreach (var control in new Control[] { path, search, quality, container, filter, workers }) AppUi.Input(control);
@@ -50,7 +49,7 @@ internal sealed class BatchImportForm : Form
         quality.SelectedIndex = 0;
         foreach (var value in Enum.GetValues<PreferredVideoContainer>()) container.Items.Add(value.ToString()); container.SelectedIndex = 0;
         foreach (var value in Enum.GetValues<BatchFilter>()) filter.Items.Add(services.Localization["Batch.Filter." + value]); filter.SelectedIndex = 0;
-        void Add(string key, Action action) { var button = new Button { Width = 160, Height = 38, Margin = new Padding(0, 0, 8, 8), AccessibleAutomationId = "Batch" + key }; AppUi.Secondary(button); button.Click += (_, _) => action(); toolbar.Controls.Add(button); buttons.Add(key, button); }
+        void Add(string key, Action action) { var button = new DashboardButton { Width = 160, Height = 38, Margin = new Padding(0, 0, 8, 8), AccessibleAutomationId = "Batch" + key }; AppUi.Secondary(button); button.Click += (_, _) => action(); toolbar.Controls.Add(button); buttons.Add(key, button); }
         Add("Browse", () => _ = RunAsync(BrowseAsync)); Add("Import", () => _ = RunAsync(ImportAsync));
         Add("Examples", () => _ = RunAsync(ShowExamplesAsync));
         Add("Analyze", () => _ = RunAsync(AnalyzeAsync)); Add("Pause", () => _ = RunAsync(async () => { if (this.session is { } s) await services.Batch.SetPausedAsync(s, !s.Paused); }));
@@ -61,15 +60,23 @@ internal sealed class BatchImportForm : Form
         Add("Apply", () => _ = RunAsync(async () => { if (this.session is { } s) { if (!range.TryGetRange(null, false, out var value, out var error)) throw new InvalidDataException(error); await services.Batch.EditAsync(s, ActionSelection(s).Intersect(selection).ToHashSet(), QualityPreset.All[quality.SelectedIndex].Id, (PreferredVideoContainer)container.SelectedIndex, value); } }));
         Add("Remove", () => _ = RunAsync(async () => { if (this.session is { } s) await services.Batch.EditAsync(s, ActionSelection(s).Intersect(selection).ToHashSet(), remove: true); selection.Clear(); }));
         Add("Previous", () => { page--; signature = ""; Render(); }); Add("Next", () => { page++; signature = ""; Render(); });
-        Add("Close", Close);
+        Add("Close", () => CloseRequested?.Invoke(this, EventArgs.Empty));
         overall.Multiline = true; overall.AccessibleAutomationId = "BatchOverallSummary";
         body.Controls.AddRange([heading, path, quality, container, workers, toolbar, filter, search, range, status, progress, downloadProgress, overall, rows, pageText]); Controls.Add(body);
         search.TextChanged += (_, _) => { page = 0; signature = ""; Render(); }; filter.SelectedIndexChanged += (_, _) => { page = 0; signature = ""; Render(); };
         SizeChanged += (_, _) => LayoutPage(); services.Localization.LanguageChanged += LanguageChanged;
         timer.Tick += async (_, _) => { if (!busy && this.session is { } s) await RunAsync(async () => await services.Batch.RefreshQueueAsync(s), false); else Render(); };
-        Shown += (_, _) => timer.Start(); ApplyText(); LayoutPage(); Render();
+        VisibleChanged += (_, _) => { if (Visible) timer.Start(); else timer.Stop(); }; timer.Start(); ApplyText(); LayoutPage(); Render();
         AppTypography.RegisterLayout(body, () => { signature = ""; LayoutPage(); Render(); });
     }
+    public event EventHandler? CloseRequested;
+    public Task ImportDroppedFilesAsync(IReadOnlyList<string> files) => RunAsync(async () =>
+    {
+        if (files.Count != 1) throw new InvalidDataException("Batch.Error.SingleFile");
+        path.Text = files[0];
+        await ImportAsync();
+    });
+    public void Present(BatchImportSession value) { session = value; workers.Value = value.AnalysisWorkers; page = 0; selection.Clear(); signature = ""; Render(); }
     private BatchPage CurrentPage(BatchImportSession value) => services.Batch.Page(value, (BatchFilter)Math.Max(0, filter.SelectedIndex), search.Text, page);
     private IReadOnlySet<Guid> ActionSelection(BatchImportSession value)
         => services.Batch.ActionSelection(value, (BatchFilter)Math.Max(0, filter.SelectedIndex), search.Text, selection);
@@ -114,7 +121,8 @@ internal sealed class BatchImportForm : Form
     private async Task BrowseAsync()
     {
         var dialog = new OpenFileDialog(); dialog.AddFilter("TXT / CSV / JSON", "*.txt", "*.csv", "*.json");
-        if (await dialog.ShowDialog(this) == DialogResult.OK && dialog.FileName is { } file) path.Text = file;
+        if (await dialog.ShowDialog(FindForm()!) == DialogResult.OK && dialog.FileName is { } file)
+        { path.Text = file; if (dashboard) await ImportAsync(); }
     }
     private async Task ShowExamplesAsync()
     {
@@ -132,7 +140,7 @@ internal sealed class BatchImportForm : Form
         close.Click += (_, _) => dialog.Close();
         scroll.Controls.Add(help); dialog.Controls.AddRange([scroll, close]);
         using var registration = RegisterDialog?.Invoke(dialog);
-        await dialog.ShowDialog(this);
+        await dialog.ShowDialog(FindForm()!);
     }
     private async Task ImportAsync()
     {
@@ -154,11 +162,12 @@ internal sealed class BatchImportForm : Form
     {
         if (session is not { } s) return;
         var dialog = new SaveFileDialog { DefaultExtension = "json", FileName = "batch-export.json" }; dialog.AddFilter("JSON", "*.json"); dialog.AddFilter("CSV", "*.csv");
-        if (await dialog.ShowDialog(this) == DialogResult.OK) await services.Batch.ExportAsync(s, dialog.FileName, lifetime.Token);
+        if (await dialog.ShowDialog(FindForm()!) == DialogResult.OK) await services.Batch.ExportAsync(s, dialog.FileName, lifetime.Token);
     }
     private void Render()
     {
         if (disposed) return;
+        RefreshDashboardCounters();
         foreach (var (key, button) in buttons) button.Enabled = !busy && (session is not null || key is "Browse" or "Import" or "Examples" or "Close");
         buttons["Cancel"].Enabled = busy || services.Batch.IsAnalyzing;
         buttons["Close"].Enabled = true;
@@ -168,7 +177,7 @@ internal sealed class BatchImportForm : Form
             status.Text = operation is { } active ? services.Localization.Get("Batch.Operation." + active.Phase, active.Completed, active.Total?.ToString() ?? "—") :
                 services.Localization[lastErrorKey ?? (busy ? "Batch.Busy" : "Batch.Empty")];
             overall.Text = services.Localization[busy ? "Batch.Busy" : "Batch.Empty"];
-            return;
+            RefreshDashboardStatus(); return;
         }
         var data = CurrentPage(s); page = data.Page; pageText.Text = services.Localization.Get("Sources.Page", page + 1, data.Pages, data.Total);
         progress.Visible = AppearancePresentation.Current.BatchImport.Progress != ProgressPresentation.Hidden;
@@ -193,6 +202,7 @@ internal sealed class BatchImportForm : Form
             (knownBytes / 1073741824d).ToString("N2", services.Localization.Culture), unknown,
             summary.TransferRemaining is { } eta ? eta.ToString(@"d\.hh\:mm\:ss") : "—");
         buttons["Pause"].Text = services.Localization[s.Paused ? "Batch.Resume" : "Batch.Pause"];
+        RefreshDashboardStatus();
         var nextSignature = string.Join(';', data.Entries.Select(entry => $"{entry.Id}/{entry.Status}/{entry.Quality}/{entry.Container}/{entry.Title}/{entry.Range}"));
         if (signature == nextSignature) return; signature = nextSignature;
         foreach (var child in rows.Controls.ToArray()) { rows.Controls.Remove(child); child.Dispose(); }
@@ -206,17 +216,18 @@ internal sealed class BatchImportForm : Form
             var url = AppUi.Muted(entry.Url); url.Visible = appearance.ShowUrl;
             var state = AppUi.Muted(services.Localization["Batch.Status." + entry.Status] + (appearance.ShowQuality ? " • " + entry.Quality : "") + (appearance.ShowContainer ? " • " + entry.Container : "") + " " + entry.Range.DisplayText + (appearance.StatusDetails && entry.ErrorKey is { } errorKey ? " • " + services.Localization[errorKey] : ""));
             state.AccessibleAutomationId = "BatchEntryStatus" + entry.Ordinal;
-            var analyze = new Button { Text = services.Localization["Batch.Analyze"], Enabled = !services.Batch.IsAnalyzing && entry.QueueItemId is null };
-            var add = new Button { Text = services.Localization["Batch.Add"], Enabled = entry.Status == BatchEntryStatus.Ready };
-            var details = new Button { Text = services.Localization["Downloads.Details"], Enabled = entry.HasMetadata };
-            var remove = new Button { Text = services.Localization["Batch.Remove"], Enabled = entry.QueueItemId is null && entry.Status != BatchEntryStatus.Analyzing };
+            var analyze = new DashboardButton { Text = services.Localization["Batch.Analyze"], Enabled = !services.Batch.IsAnalyzing && entry.QueueItemId is null };
+            var add = new DashboardButton { Text = services.Localization["Batch.Add"], Enabled = entry.Status == BatchEntryStatus.Ready };
+            var details = new DashboardButton { Text = services.Localization["Downloads.Details"], Enabled = entry.HasMetadata };
+            var remove = new DashboardButton { Text = services.Localization["Batch.Remove"], Enabled = entry.QueueItemId is null && entry.Status != BatchEntryStatus.Analyzing };
             foreach (var button in new[] { analyze, add, details, remove }) AppUi.Secondary(button);
             analyze.Click += (_, _) => _ = RunAsync(() => { _ = ObserveAnalysis(services.Batch.StartAsync(s, new HashSet<Guid> { entry.Id })); return Task.CompletedTask; });
             add.Click += (_, _) => _ = RunAsync(async () => await services.Batch.AddReadyAsync(s, new HashSet<Guid> { entry.Id }));
             remove.Click += (_, _) => _ = RunAsync(() => services.Batch.EditAsync(s, new HashSet<Guid> { entry.Id }, remove: true));
-            details.Click += (_, _) => _ = RunAsync(async () => { if (await services.Batch.MetadataAsync(s, entry.Id, lifetime.Token) is { } metadata) { using var window = new VideoDetailsForm(metadata, services.Localization, services.Thumbnails); using var registration = RegisterDialog?.Invoke(window); await window.ShowDialog(this); } });
+            details.Click += (_, _) => _ = RunAsync(async () => { if (await services.Batch.MetadataAsync(s, entry.Id, lifetime.Token) is { } metadata) { using var window = new VideoDetailsForm(metadata, services.Localization, services.Thumbnails); using var registration = RegisterDialog?.Invoke(window); await window.ShowDialog(FindForm()!); } });
             panel.Controls.AddRange([checkbox, title, url, state, analyze, add, details, remove]); rows.Controls.Add(panel);
             if (appearance.Thumbnail && entry.HasMetadata) { var image = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom, Tag = "BatchThumbnail" }; panel.Controls.Add(image); _ = LoadThumbnailAsync(s, entry.Id, image); }
+            if (dashboard) PrepareDashboardRow(panel, entry);
         }
         LayoutRows();
     }
@@ -224,6 +235,7 @@ internal sealed class BatchImportForm : Form
     {
         foreach (var panel in rows.Controls)
         {
+            if (dashboard) { LayoutDashboardRow(panel); continue; }
             panel.Width = Math.Max(930, rows.DisplayRectangle.Width - 4); var c = panel.Controls.ToArray();
             var density = AppearancePresentation.Current.BatchImport.RowDensity;
             var gap = density == AppearanceDensity.Compact ? 2 : density == AppearanceDensity.Comfortable ? 10 : 6;
@@ -250,6 +262,7 @@ internal sealed class BatchImportForm : Form
     }
     private void LayoutPage()
     {
+        if (dashboard) { LayoutDashboard(); return; }
         var width = Math.Max(970, body.ClientSize.Width - 40); var origin = body.DisplayRectangle.Location;
         heading.SetBounds(20, 12, width, 38); path.SetBounds(20, 58, width - 426, 36);
         quality.SetBounds(path.Right + 10, 58, 160, 36); container.SetBounds(quality.Right + 10, 58, 150, 36); workers.SetBounds(container.Right + 10, 58, 86, 36);
@@ -277,7 +290,22 @@ internal sealed class BatchImportForm : Form
     private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() => { if (!disposed) { ApplyText(); signature = ""; Render(); LayoutPage(); } });
     protected override void Dispose(bool disposing)
     {
-        if (disposing && !disposed) { disposed = true; lifetime.Cancel(); timer.Stop(); timer.Dispose(); overallTip.Dispose(); services.Localization.LanguageChanged -= LanguageChanged; lifetime.Dispose(); }
+        if (disposing && !disposed) { disposed = true; dashboardTips.Dispose(); lifetime.Cancel(); timer.Stop(); timer.Dispose(); overallTip.Dispose(); services.Localization.LanguageChanged -= LanguageChanged; lifetime.Dispose(); }
         base.Dispose(disposing);
+    }
+}
+
+/// <summary>Classic modal host and dashboard page share precisely the same Batch presentation.</summary>
+internal sealed class BatchImportForm : Form
+{
+    private readonly BatchImportView view;
+    public Func<Form, IDisposable?>? RegisterDialog { get => view.RegisterDialog; set => view.RegisterDialog = value; }
+    public BatchImportForm(AppServices services, BatchImportSession? session = null)
+    {
+        AccessibilityObject.AutomationId = "BatchWindow"; AppBranding.Apply(this);
+        Text = services.Localization["Other.Batch.Title"];
+        Size = new System.Drawing.Size(1420, 950); MinimumSize = new System.Drawing.Size(1050, 740);
+        view = new BatchImportView(services, session); Controls.Add(view);
+        view.CloseRequested += (_, _) => Close();
     }
 }

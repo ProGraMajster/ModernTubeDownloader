@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using ModernFormsNext;
 using ModernFormsNext.Animations;
+using ModernFormsNext.Drawing;
 using SkiaSharp;
 
 namespace ModernTubeDownloader.Theming;
@@ -18,16 +19,49 @@ internal static class AppUi
     public static void BindBackground(Control control, string token = AppThemeTokens.Background)
     {
         var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
-        state.BackgroundToken = token;
+        state.BackgroundToken = token; state.Gradient = null;
         state.Refresh();
     }
 
+    public static void BindGradient(Control control, string first, string second)
+    {
+        var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
+        control.ClearResourceReference(nameof(Control.BackgroundBrush));
+        state.Gradient = (first, second); state.Refresh();
+    }
+    public static void SetDashboardButtonSurface(Button button, bool enabled)
+    {
+        if (!ThemeBindings.TryGetValue(button, out var state)) return;
+        if (!enabled && state.DashboardButton)
+            button.StyleDisabled.BackgroundBrush = state.ClassicDisabledBrush;
+        if (enabled && !state.DashboardButton)
+            state.ClassicDisabledBrush = button.StyleDisabled.BackgroundBrush;
+        state.DashboardButton = enabled;
+        if (!enabled) state.DownloadsButton = false;
+        state.Refresh();
+    }
+    public static void SetDownloadsButtonSurface(Button button)
+    {
+        if (!ThemeBindings.TryGetValue(button, out var state)) return;
+        state.DownloadsButton = true; state.Refresh();
+    }
+    public static void ClearGradient(Control control)
+    {
+        if (!ThemeBindings.TryGetValue(control, out var state) || state.Gradient is null) return;
+        state.Gradient = null; control.BackgroundBrush = null; state.Refresh();
+    }
     public static void BindForeground(Control control, string token = AppThemeTokens.TextPrimary)
     {
         AppTypography.BindDefault(control);
         var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
         state.ForegroundToken = token;
         state.Refresh();
+    }
+
+    public static void BindBorder(Control control, string token)
+    {
+        var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
+        state.BorderToken = token; state.Refresh();
     }
 
     public static void BindInteractiveSurface(Control control, string normalToken, string hoverToken)
@@ -150,7 +184,7 @@ internal static class AppUi
 
     public static Label Heading(string text, float size = 22f)
     {
-        var label = new Label
+        var label = new DashboardLabel
         {
             Text = text,
             AutoEllipsis = false
@@ -163,7 +197,7 @@ internal static class AppUi
 
     public static Label Muted(string text = "")
     {
-        var label = new Label
+        var label = new DashboardLabel
         {
             Text = text,
             AutoEllipsis = false,
@@ -175,6 +209,16 @@ internal static class AppUi
 
     internal static SKColor GetColor(string token)
     {
+        if (AppearancePresentation.Current.Global.Theme == AppearanceTheme.Custom)
+            token = token switch
+            {
+                DownloadsVisual.Background or DownloadsVisual.BackgroundEnd => AppThemeTokens.Background,
+                DownloadsVisual.Panel or DownloadsVisual.PanelEnd => AppThemeTokens.Surface,
+                DownloadsVisual.Selected or DownloadsVisual.SelectedEnd => AppThemeTokens.RowSelected,
+                DownloadsVisual.Border => AppThemeTokens.Border,
+                DownloadsVisual.ButtonTop or DownloadsVisual.ButtonEnd => AppThemeTokens.SurfaceSecondary,
+                _ => token
+            };
         if (ThemeManager.Current.ActiveSnapshot?.Colors.TryGetValue(token, out var color) == true)
             return new SKColor(color.R, color.G, color.B, color.A);
         return SKColors.Transparent;
@@ -195,6 +239,10 @@ internal static class AppUi
 
     private sealed class ThemeBindingState
     {
+        public (string First, string Second)? Gradient;
+        private LinearGradientBrush? gradientBrush;
+        private (SKColor, SKColor)? gradientColors;
+        private readonly Dictionary<ControlStyle, (SKColor Top, SKColor Bottom, LinearGradientBrush Brush)> buttonGradients = new();
         private readonly WeakReference<Control> target;
         private readonly EventHandler<ThemeChangedEventArgs> handler;
 
@@ -203,13 +251,24 @@ internal static class AppUi
             target = new WeakReference<Control>(control);
             handler = ThemeChanged;
             ThemeManager.Current.ThemeChanged += handler;
+            control.Disposed += TargetDisposed;
+        }
+
+        private void TargetDisposed(object? sender, EventArgs e)
+        {
+            ThemeManager.Current.ThemeChanged -= handler;
+            if (sender is Control control) control.Disposed -= TargetDisposed;
         }
 
         public string? BackgroundToken { get; set; }
         public string? ForegroundToken { get; set; }
+        public string? BorderToken { get; set; }
         public ButtonVariant? ButtonVariant { get; set; }
         public bool IsComboBox { get; set; }
         public bool IsCard { get; set; }
+        public bool DashboardButton { get; set; }
+        public bool DownloadsButton { get; set; }
+        public Brush? ClassicDisabledBrush { get; set; }
         public (string Normal, string Hover)? InteractiveSurface { get; set; }
 
         public void Refresh()
@@ -217,17 +276,45 @@ internal static class AppUi
             if (!target.TryGetTarget(out var control))
                 return;
             if (IsCard) control.Style.Border.Radius = AppearancePresentation.Current.Global.CornerRadius;
+            if (BorderToken is not null) { control.Style.Border.Width = 1; control.Style.Border.Color = GetColor(BorderToken); }
             if (control is Button effectsButton)
             {
                 if (effectsButton.Ripple is { } ripple) ripple.Enabled = AppearancePresentation.Current.Global.Animations;
                 if (effectsButton.PressEffect is { } press) press.Enabled = AppearancePresentation.Current.Global.Animations;
             }
-            if (BackgroundToken is not null)
+            if (BackgroundToken is not null && Gradient is null)
                 control.SetResourceReference(nameof(Control.BackgroundBrush), AppThemeTokens.BrushResource(BackgroundToken));
             if (ForegroundToken is not null)
                 control.SetResourceReference(nameof(Control.TextBrush), AppThemeTokens.BrushResource(ForegroundToken));
             if (control is Button button && ButtonVariant is { } variant)
+            {
                 RefreshButtonStates(button, variant);
+                if (DashboardButton)
+                {
+                    var primary = variant == AppUi.ButtonVariant.Primary;
+                    foreach (var style in new[] { button.Style, button.StyleHover, button.StylePressed, button.StyleFocused, button.StyleDisabled })
+                    {
+                        var normal = style.GetBackgroundColor();
+                        var top = normal;
+                        normal = new SKColor((byte)Math.Max(0, normal.Red - 5), (byte)Math.Max(0, normal.Green - 5), (byte)Math.Max(0, normal.Blue - 5), normal.Alpha);
+                        if (DownloadsButton && AppearancePresentation.Current.Global.Theme != AppearanceTheme.Custom && style == button.Style)
+                        {
+                            top = primary ? SKColor.Parse("#0567E7") : GetColor(DownloadsVisual.ButtonTop);
+                            normal = primary ? SKColor.Parse("#0567E3") : GetColor(DownloadsVisual.ButtonEnd);
+                        }
+                        if (!buttonGradients.TryGetValue(style, out var cached) || cached.Top != top || cached.Bottom != normal)
+                        {
+                            var brush = new LinearGradientBrush { End = new System.Drawing.PointF(0, 1) };
+                            brush.GradientStops.Add(new GradientStop(top, 0)); brush.GradientStops.Add(new GradientStop(normal, 1));
+                            cached = (top, normal, brush); buttonGradients[style] = cached;
+                        }
+                        style.BackgroundBrush = cached.Brush;
+                        style.Border.Width = 1; style.Border.Radius = 7;
+                        style.Border.Color = GetColor(primary ? AppThemeTokens.AccentHover : AppThemeTokens.Border);
+                    }
+                    button.StyleFocused.Border.Color = GetColor(AppThemeTokens.Accent);
+                }
+            }
             if (IsComboBox)
             {
                 ApplyInputState(control.Style, AppThemeTokens.Surface, AppThemeTokens.Border, AppThemeTokens.TextPrimary);
@@ -243,6 +330,16 @@ internal static class AppUi
                 ApplySurfaceState(control.StyleFocused, surface.Hover);
                 ApplySurfaceState(control.StylePressed, surface.Hover);
                 ApplySurfaceState(control.StyleDisabled, surface.Normal);
+            }
+            if (Gradient is { } gradient)
+            {
+                var first = GetColor(gradient.First); var second = GetColor(gradient.Second);
+                if (gradientColors != (first, second))
+                {
+                    gradientColors = (first, second); gradientBrush = new LinearGradientBrush { End = new System.Drawing.PointF(0.35f, 1) };
+                    gradientBrush.GradientStops.Add(new GradientStop(first, 0)); gradientBrush.GradientStops.Add(new GradientStop(second, 1));
+                }
+                control.BackgroundBrush = gradientBrush;
             }
             control.Invalidate();
         }

@@ -10,7 +10,7 @@ namespace ModernTubeDownloader.Views;
 /// <summary>Only the closed appearance schema is editable; no paths, credentials or executable configuration.</summary>
 internal sealed class PersonalizationSettingsPanel : Panel
 {
-    private static readonly string[] Sections = ["Global", "Navigation", "Downloads", "Live", "History", "Other", "BatchImport", "Settings", "Details"];
+    private static readonly string[] Sections = ["Global", "Navigation", "Downloads", "Live", "History", "Other", "BatchImport", "Settings", "Details", "ModernDashboardShell"];
     private readonly AppServices services;
     private readonly ComboBox section = new() { AccessibleAutomationId = "AppearanceSection" };
     private readonly FlowLayoutPanel commands = new() { WrapContents = true };
@@ -31,7 +31,7 @@ internal sealed class PersonalizationSettingsPanel : Panel
         AppUi.Input(section); AppUi.Primary(previewButton); warning.Multiline = true;
         preview.Controls.AddRange([previewText, previewButton, previewProgress]);
         Controls.AddRange([title, commands, section, fields, preview, warning]);
-        foreach (var name in new[] { "Default", "Compact", "Large", "Minimal" }) Add("Preset." + name, () => ApplyAsync(AppearanceProfile.Preset(name)));
+        foreach (var name in new[] { "Default", "Compact", "Large", "Minimal", "ModernDashboard" }) Add("Preset." + name, () => ApplyAsync(AppearanceProfile.Preset(name)));
         Add("Import", ImportAsync); Add("Export", ExportAsync);
         Add("ResetSection", () => ConfirmResetAsync(false)); Add("ResetAll", () => ConfirmResetAsync(true));
         section.SelectedIndexChanged += (_, _) => { if (!editing) BuildFields(); };
@@ -134,12 +134,21 @@ internal sealed class PersonalizationSettingsPanel : Panel
     }
     public void LayoutForWidth(int width)
     {
-        Width = width; var line = AppTypography.TextHeight(46); var commandHeight = AppTypography.TextHeight(46) * (int)Math.Ceiling(8d / Math.Max(1, (width - 48) / 198));
+        // Construction and shell reparenting can precede the usable card allocation.
+        if (width <= 48) return;
+        Width = width; var line = AppTypography.TextHeight(46); var commandHeight = AppTypography.TextHeight(46) * (int)Math.Ceiling(9d / Math.Max(1, (width - 48) / 198));
         title.SetBounds(24, 18, width - 48, AppTypography.TextHeight(32));
-        foreach (var button in labels.Keys) { button.Height = AppTypography.TextHeight(38); button.Width = Math.Min(width - 48, AppTypography.TextHeight(190)); }
-        // Width-dependent wrap count includes the text-scaled command buttons.
-        commandHeight = (int)Math.Ceiling(8d / Math.Max(1, (width - 48) / (Math.Min(width - 48, AppTypography.TextHeight(190)) + 8))) * line;
-        commands.SetBounds(24, title.Bottom + 10, width - 48, commandHeight); section.SetBounds(24, commands.Bottom + 8, width - 48, AppTypography.TextHeight(38));
+        // Commit one consistent wrap geometry; laying out after each individual button
+        // resize lets FlowLayout measure a mixture of old and new command widths.
+        commands.SuspendLayout();
+        try
+        {
+            foreach (var button in labels.Keys) { button.Height = AppTypography.TextHeight(38); button.Width = Math.Min(width - 48, AppTypography.TextHeight(190)); }
+            commandHeight = (int)Math.Ceiling(9d / Math.Max(1, (width - 48) / (Math.Min(width - 48, AppTypography.TextHeight(190)) + 8))) * line;
+            commands.SetBounds(24, title.Bottom + 10, width - 48, commandHeight);
+        }
+        finally { commands.ResumeLayout(true); }
+        section.SetBounds(24, commands.Bottom + 8, width - 48, AppTypography.TextHeight(38));
         fields.SetBounds(24, section.Bottom + 12, width - 48, fields.Controls.Count * line);
         var y = 0; foreach (var row in fields.Controls) { row.SetBounds(0, y, fields.Width, line); var c = row.Controls.ToArray(); var left = Math.Max(200, fields.Width / 2); c[0].SetBounds(0, 0, left - 10, line - 4); c[1].SetBounds(left, 0, Math.Max(100, fields.Width - left), line - 6); if (c.Length > 2) { c[1].Width = Math.Max(100, fields.Width - left - 156); c[2].SetBounds(c[1].Right + 4, 0, 42, line - 6); c[3].SetBounds(c[2].Right + 4, 0, 106, line - 6); } y += line; }
         preview.SetBounds(24, fields.Bottom + 12, width - 48, AppTypography.TextHeight(116)); previewText.SetBounds(16, 12, preview.Width - 32, AppTypography.TextHeight(28)); previewButton.SetBounds(16, previewText.Bottom + 6, Math.Min(340, preview.Width - 32), AppTypography.TextHeight(38)); previewProgress.SetBounds(16, previewButton.Bottom + 12, preview.Width - 32, 8);

@@ -30,7 +30,7 @@ internal sealed class QueueItemActionEventArgs(Guid itemId, QueueItemAction acti
     public QueueItemAction Action { get; } = action;
 }
 
-internal sealed class QueueItemCard : UserControl
+internal sealed partial class QueueItemCard : UserControl
 {
     private readonly ThumbnailCacheService thumbnails;
     private readonly LocalizationService text;
@@ -41,7 +41,7 @@ internal sealed class QueueItemCard : UserControl
     private readonly Label subtitle;
     private readonly Label status;
     private readonly Label transfer;
-    private readonly ProgressBar progress;
+    private readonly DashboardProgress progress;
     private readonly Button primaryAction;
     private readonly Button secondaryAction;
     private readonly Button moreAction;
@@ -62,7 +62,7 @@ internal sealed class QueueItemCard : UserControl
         Padding = new Padding(18);
         AppUi.Card(this);
 
-        thumbnail = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom };
+        thumbnail = new DownloadsPictureBox { SizeMode = PictureBoxSizeMode.Zoom };
         thumbnail.Style.Border.Radius = 10;
         thumbnail.Style.Border.Width = 0;
         AppUi.BindBackground(thumbnail, AppThemeTokens.SurfaceSecondary);
@@ -86,7 +86,7 @@ internal sealed class QueueItemCard : UserControl
         transfer = AppUi.Muted();
         AppTypography.Bind(transfer, 10.25f);
         transfer.TextAlign = ContentAlignment.TopRight;
-        progress = new ProgressBar { Minimum = 0, Maximum = 100 };
+        progress = new DashboardProgress { Minimum = 0, Maximum = 100 };
         primaryAction = new Button();
         secondaryAction = new Button();
         moreAction = new Button { Text = "…" };
@@ -122,6 +122,7 @@ internal sealed class QueueItemCard : UserControl
     {
         positionBadge.Text = position ?? string.Empty;
         positionBadge.Visible = !string.IsNullOrEmpty(position);
+        if (dashboard) LayoutDashboardRow();
     }
 
     public void UpdateItem(DownloadQueueItem item, bool isSelected)
@@ -133,7 +134,10 @@ internal sealed class QueueItemCard : UserControl
         positionBadge.AccessibleAutomationId = $"QueuePosition-{item.Id:N}";
         primaryAction.AccessibleAutomationId = $"QueuePrimaryAction-{item.Id:N}";
         secondaryAction.AccessibleAutomationId = $"QueueSecondaryAction-{item.Id:N}";
+        var selectionChanged = selected != isSelected;
         selected = isSelected;
+        AccessibleName = item.Title;
+        if (selectionChanged && dashboard) NotifyAccessibilityClients(ModernFormsNext.Accessibility.AccessibleEvents.Selection);
         title.Text = item.Title;
         var appearance = AppearancePresentation.Current.Downloads;
         subtitle.Text = (appearance.ShowAuthor ? item.Channel + "  •  " : "") + (appearance.ShowSource ? SourcePresentation.Host(item.SourceUrl) + "  •  " : "") + $"{text[$"Quality.{QualityPreset.Find(item.QualityPresetId).Id}"]}" +
@@ -160,8 +164,9 @@ internal sealed class QueueItemCard : UserControl
         ConfigureActions(item);
         ShowActions(selected);
         BuildContextMenu(item);
-        AppUi.BindBackground(this, isSelected ? AppThemeTokens.NavigationSelected : AppThemeTokens.Surface);
+        AppUi.BindBackground(this, isSelected ? dashboard ? AppThemeTokens.RowSelected : AppThemeTokens.NavigationSelected : AppThemeTokens.Surface);
 
+        if (dashboard) UpdateDashboardRow(item);
         if (!string.Equals(loadedThumbnail, item.ThumbnailUrl, StringComparison.Ordinal))
         {
             loadedThumbnail = item.ThumbnailUrl;
@@ -171,6 +176,7 @@ internal sealed class QueueItemCard : UserControl
 
     private void LayoutControls()
     {
+        if (dashboard) { LayoutDashboardRow(); return; }
         var innerWidth = Math.Max(460, Width - 36);
         var compact = innerWidth < 760;
         var appearance = AppearancePresentation.Current.Downloads;
@@ -290,7 +296,7 @@ internal sealed class QueueItemCard : UserControl
     }
     private void ShowActions(bool show)
     {
-        show |= AppearancePresentation.Current.Downloads.Actions == ActionPresentation.Always || selected || primaryAction.Focused || secondaryAction.Focused || moreAction.Focused;
+        show |= (dashboard ? AppearancePresentation.Current.ModernDashboardShell.Actions : AppearancePresentation.Current.Downloads.Actions) == ActionPresentation.Always || selected || primaryAction.Focused || secondaryAction.Focused || moreAction.Focused;
         foreach (var button in new[] { primaryAction, secondaryAction, moreAction }) button.Opacity = show ? 1 : 0;
     }
 
@@ -347,7 +353,7 @@ internal sealed class QueueItemCard : UserControl
     }
 
     private void SelectCard(object? sender, EventArgs e)
-        => ActionRequested?.Invoke(this, new QueueItemActionEventArgs(itemId, QueueItemAction.Select));
+    { if (dashboard) Select(); ActionRequested?.Invoke(this, new QueueItemActionEventArgs(itemId, QueueItemAction.Select)); }
 
     private void CardSizeChanged(object? sender, EventArgs e) => LayoutControls();
 
@@ -376,6 +382,7 @@ internal sealed class QueueItemCard : UserControl
         {
             disposed = true;
             lifetimeCancellation.Cancel();
+            dashboardTips.Dispose();
             SizeChanged -= CardSizeChanged;
             text.LanguageChanged -= LanguageChanged;
             lifetimeCancellation.Dispose();

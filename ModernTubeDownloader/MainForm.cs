@@ -8,6 +8,7 @@ using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Views;
+using ModernTubeDownloader.Shell;
 
 namespace ModernTubeDownloader;
 
@@ -20,11 +21,17 @@ public sealed class MainForm : Form
     private readonly HistoryView historyView;
     private readonly SettingsView settingsView;
     private readonly OtherView otherView;
-    private readonly Panel sidebar;
-    private readonly Panel header;
+    private readonly AppShellHost shellHost;
+    private readonly CaptionLabel caption = new();
+    private readonly CaptionLabel captionVersion = new();
+    private readonly Button captionTheme = new();
+    private readonly ToolTip captionTips = new();
+    private WindowsFileDrop? fileDrop;
+    private bool fallbackNotice;
     private readonly Panel content;
-    private readonly Label brandLabel;
-    private readonly Label queueStatus;
+    private readonly BatchImportView batchView;
+    private readonly InformationView helpView;
+    private readonly InformationView aboutView;
     private readonly Panel preparationOverlay;
     private readonly Panel preparationCard;
     private readonly Label preparationTitle;
@@ -34,8 +41,7 @@ public sealed class MainForm : Form
     private readonly Label denoPreparation;
     private readonly Button preparationRetry;
     private readonly ProgressBar preparationProgress;
-    private readonly Dictionary<Control, Button> navigation = [];
-    private readonly Dictionary<Button, AppVectorIcon> navigationIcons = [];
+    private readonly Dictionary<Control, AppPageId> pages = [];
     private Control? currentView;
     private bool readyPresentationShown;
     private bool uiLoopReady;
@@ -50,9 +56,10 @@ public sealed class MainForm : Form
     private readonly DevelopmentAutomationHost? automation;
 #endif
 
-    public MainForm(AppServices services, bool enableAutomation = false, ExternalMediaRequest? initialExternalRequest = null)
+    public MainForm(AppServices services, bool enableAutomation = false, ExternalMediaRequest? initialExternalRequest = null, bool classicUi = false)
     {
         this.services = services;
+        if (classicUi) services.Appearance.ForceClassicForSession();
         this.initialExternalRequest = initialExternalRequest;
         text = services.Localization;
         services.Appearance.Initialize();
@@ -65,48 +72,18 @@ public sealed class MainForm : Form
             automation = new DevelopmentAutomationHost();
 #endif
         AppBranding.Apply(this);
+        AppUi.BindForeground(caption); AppTypography.Bind(caption, 12, FontStyle.Bold);
+        AppUi.Secondary(captionTheme); captionTheme.AccessibleAutomationId = "CaptionTheme";
+        captionTheme.Click += async (_, _) => await services.Appearance.SetModeAsync(
+            services.Appearance.EffectiveVariant == ThemeVariant.Dark ? Settings.AppThemeMode.Light : Settings.AppThemeMode.Dark);
+        AppUi.BindForeground(captionVersion, AppThemeTokens.TextSecondary);
+        TitleBar.Controls.AddRange([caption, captionVersion, captionTheme]); TitleBar.SizeChanged += (_, _) => LayoutCaption();
         Size = new System.Drawing.Size(1440, 900);
         MinimumSize = new System.Drawing.Size(1000, 700);
 
-        sidebar = new Panel { Dock = DockStyle.Left, Width = 236, Padding = new Padding(18, 20, 18, 18) };
-        AppUi.BindBackground(sidebar, AppThemeTokens.Navigation);
-
-        var logo = new Panel { Left = 18, Top = 18, Width = 56, Height = 56, Padding = new Padding(6) };
-        AppUi.Card(logo, secondary: true);
-        logo.Controls.Add(new PictureBox
-        {
-            Dock = DockStyle.Fill,
-            Image = AppBranding.Icon,
-            SizeMode = PictureBoxSizeMode.Zoom
-        });
-        sidebar.Controls.Add(logo);
-
-        brandLabel = AppUi.Heading("ModernTube\nDownloader", 12.5f);
-        brandLabel.Left = 86;
-        brandLabel.Top = 22;
-        brandLabel.Width = 142;
-        brandLabel.Height = 50;
-        brandLabel.Multiline = true;
-        sidebar.Controls.Add(brandLabel);
-
-        var downloadsButton = AddNavigationButton(text["Nav.Downloads"], "NavDownloads", 120, AppIconKind.Download);
-        var liveButton = AddNavigationButton(text["Nav.Live"], "NavLive", 174, AppIconKind.Live);
-        var historyButton = AddNavigationButton(text["Nav.History"], "NavHistory", 228, AppIconKind.History);
-        var otherButton = AddNavigationButton(text["Nav.Other"], "NavOther", 282, AppIconKind.Queue);
-        var settingsButton = AddNavigationButton(text["Nav.Settings"], "NavSettings", 336, AppIconKind.Settings);
-
-        header = new Panel { Dock = DockStyle.Top, Height = 12 };
-        AppUi.BindBackground(header, AppThemeTokens.Surface);
-
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 44, Padding = new Padding(26, 10, 26, 8) };
-        AppUi.BindBackground(footer, AppThemeTokens.SurfaceSecondary);
-        queueStatus = AppUi.Muted();
-        queueStatus.Dock = DockStyle.Fill;
-        footer.Controls.Add(queueStatus);
-
         content = new Panel { Dock = DockStyle.Fill };
         AppUi.BindBackground(content);
-        downloadsView = new DownloadsView(services) { Visible = true };
+        downloadsView = CreatePage(modern => new DownloadsView(services, modern)); downloadsView.Visible = true;
 #if DEBUG
         if (automation is not null)
         {
@@ -114,7 +91,13 @@ public sealed class MainForm : Form
             downloadsView.RegisterAdvancedForAutomation = automation.RegisterWindow;
         }
 #endif
-        historyView = new HistoryView(services) { Visible = false };
+        historyView = CreatePage(modern => new HistoryView(services, modern)); historyView.Visible = false;
+        historyView.RetryRequested += async (_, url) =>
+        {
+            ShowView(downloadsView);
+            try { await downloadsView.AcceptExternalRequestAsync(new(url, true, true, Source: "history", Intent: ExternalMediaIntent.QuickQueue)); }
+            catch (Exception error) { downloadsView.ShowExternalRequestError(error); }
+        };
         liveView = new LiveView(services) { Visible = false };
 #if DEBUG
         if (automation is not null) liveView.RegisterDetailsForAutomation = automation.RegisterWindow;
@@ -125,11 +108,24 @@ public sealed class MainForm : Form
         settingsView = new SettingsView(services) { Visible = false };
         otherView = new OtherView(services) { Visible = false };
         otherView.RegisterTool("Batch", () => _ = OpenBatchAsync());
+        otherView.RegisterTool("Thumbnails", () => _ = OpenThumbnailToolAsync());
         otherView.ResumeBatch += (_, session) => _ = OpenBatchAsync(session);
         settingsView.InstallUpdateRequested += (_, _) => _ = RequestUpdateInstallationAsync();
         downloadsView.SupportedSourcesRequested += OpenSupportedSources;
         settingsView.SupportedSourcesRequested += OpenSupportedSources;
-        content.Controls.AddRange([downloadsView, liveView, historyView, otherView, settingsView]);
+        liveView.SupportedSourcesRequested += OpenSupportedSources;
+        otherView.NavigateRequested += (_, page) => Navigate(page);
+        batchView = new BatchImportView(services) { Visible = false };
+#if DEBUG
+        if (automation is not null) batchView.RegisterDialog = automation.RegisterWindow;
+#endif
+        helpView = new InformationView(services, false) { Visible = false };
+        aboutView = new InformationView(services, true) { Visible = false };
+        content.Controls.AddRange([downloadsView, liveView, historyView, otherView, settingsView, batchView, helpView, aboutView]);
+        pages[downloadsView] = AppPageId.Downloads; pages[liveView] = AppPageId.Live;
+        pages[historyView] = AppPageId.History; pages[otherView] = AppPageId.Other;
+        pages[settingsView] = AppPageId.Settings; pages[batchView] = AppPageId.Batch;
+        pages[helpView] = AppPageId.Help; pages[aboutView] = AppPageId.About;
 
         preparationOverlay = new Panel { Dock = DockStyle.Fill, Visible = true };
         AppUi.BindBackground(preparationOverlay, AppThemeTokens.Background);
@@ -167,44 +163,51 @@ public sealed class MainForm : Form
         content.Controls.Add(preparationOverlay);
         preparationOverlay.BringToFront();
 
-        var mainHost = new Panel { Dock = DockStyle.Fill };
-        AppUi.BindBackground(mainHost);
-        mainHost.Controls.Add(content);
-        mainHost.Controls.Add(footer);
-        mainHost.Controls.Add(header);
-        Controls.Add(mainHost);
-        Controls.Add(sidebar);
-
-        navigation[downloadsView] = downloadsButton;
-        navigation[liveView] = liveButton;
-        navigation[historyView] = historyButton;
-        navigation[settingsView] = settingsButton;
-        navigation[otherView] = otherButton;
+        shellHost = new AppShellHost(content, text, services.Logger);
+        shellHost.Navigate += (_, page) => Navigate(page);
+        shellHost.ThemeRequested += async (_, _) => await services.Appearance.SetModeAsync(
+            services.Appearance.EffectiveVariant == ThemeVariant.Dark ? Settings.AppThemeMode.Light : Settings.AppThemeMode.Dark);
+        shellHost.UpdateRequested += (_, _) => { Navigate(AppPageId.Settings); settingsView.ShowCategory("Updates"); };
+        shellHost.Fallback += (_, _) =>
+        {
+            services.Appearance.ForceClassicForSession();
+            fallbackNotice = true;
+        };
+        Controls.Add(shellHost);
+        shellHost.Apply(services.Appearance.InterfaceMode);
+        ApplyInterface();
+        services.Appearance.ModeChanged += AppearanceChanged;
         tray = new TrayApplicationController(this, services, BeginShutdown, () => ShowView(liveView));
 #if DEBUG
         if (automation is not null) tray.RegisterDialog = automation.RegisterWindow;
 #endif
-        downloadsButton.Click += (_, _) => ShowView(downloadsView);
-        liveButton.Click += (_, _) => ShowView(liveView);
-        historyButton.Click += (_, _) => ShowView(historyView);
-        settingsButton.Click += (_, _) => ShowView(settingsView);
-        otherButton.Click += (_, _) => ShowView(otherView);
         currentView = downloadsView;
         UiCrashDiagnostics.SetActiveView("Downloads");
         UpdateNavigationState();
 
         services.Queue.Changed += StateChanged;
         services.Tools.Changed += StateChanged;
+        services.Live.Changed += StateChanged; services.Updates.Changed += StateChanged;
         text.LanguageChanged += LanguageChanged;
         ThemeManager.Current.ThemeChanged += ThemeChanged;
-        AppTypography.RegisterLayout(sidebar, () => { UpdateLayout(); UpdateNavigationState(); });
+        AppTypography.RegisterLayout(shellHost, () => { UpdateLayout(); shellHost.RefreshChrome(); });
         Closing += FormClosing;
         Shown += FormShown;
-        header.SizeChanged += LayoutChanged;
+        content.SizeChanged += LayoutChanged;
         UpdateLayout();
         ApplyLocalization();
         UpdateStatus();
         _ = InitializeAsync();
+    }
+
+    private T CreatePage<T>(Func<bool, T> factory) where T : Control
+    {
+        try { return factory(services.Appearance.InterfaceMode == AppInterfaceMode.ModernDashboard); }
+        catch (Exception error) when (services.Appearance.InterfaceMode == AppInterfaceMode.ModernDashboard)
+        {
+            services.Logger.Error("Modern page construction failed; recovering Classic presentation.", error);
+            services.Appearance.ForceClassicForSession(); fallbackNotice = true; return factory(false);
+        }
     }
 
     private async void OpenSupportedSources(object? sender, EventArgs e)
@@ -228,10 +231,29 @@ public sealed class MainForm : Form
         catch (Exception ex) { services.Logger.Error("Supported sources window failed.", ex); }
     }
 
+    private async Task OpenThumbnailToolAsync()
+    {
+        try
+        {
+            using var window = new ThumbnailToolForm(services, shellHost.Mode == AppInterfaceMode.ModernDashboard);
+#if DEBUG
+            using var registration = automation?.RegisterWindow(window);
+#endif
+            await window.ShowDialog(this);
+            await otherView.RefreshToolsAsync();
+        }
+        catch (Exception error) { services.Logger.Error("Thumbnail tool window failed.", error); }
+    }
+
     private async Task OpenBatchAsync(ModernTubeDownloader.Batch.BatchImportSession? session = null)
     {
         try
         {
+            if (shellHost.Mode == AppInterfaceMode.ModernDashboard)
+            {
+                if (session is not null) batchView.Present(session);
+                Navigate(AppPageId.Batch); return;
+            }
             using var window = new BatchImportForm(services, session);
 #if DEBUG
             if (automation is not null) window.RegisterDialog = automation.RegisterWindow;
@@ -242,32 +264,68 @@ public sealed class MainForm : Form
         catch (Exception ex) { services.Logger.Error("Batch window failed.", ex); }
     }
 
-    private Button AddNavigationButton(string label, string automationId, int top, AppIconKind iconKind)
+    public AppPageId CurrentPage => shellHost.CurrentPage;
+    public AppInterfaceMode InterfaceMode => shellHost.Mode;
+    public void Navigate(AppPageId page)
     {
-        var button = new Button
+        if (page == AppPageId.Batch && shellHost.Mode == AppInterfaceMode.Classic) { ShowView(otherView); _ = OpenBatchAsync(); return; }
+        if (pages.FirstOrDefault(pair => pair.Value == page).Key is { } view) ShowView(view);
+    }
+
+    private void AppearanceChanged(object? sender, EventArgs e) => Application.RunOnUIThread(ApplyInterface);
+    private void ApplyInterface()
+    {
+        try { ApplyInterfaceCore(); if (uiLoopReady) ShowFallbackNotice(); }
+        catch (Exception error) when (services.Appearance.InterfaceMode == AppInterfaceMode.ModernDashboard)
         {
-            Text = label,
-            Left = 18,
-            Top = top,
-            Width = 192,
-            Height = 46,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Padding = new Padding(48, 0, 10, 0)
-        };
-        AppUi.NavigationButton(button, selected: false);
-        AppTypography.Bind(button, 11f);
-        button.Name = $"Navigation{label}";
-        button.AccessibleAutomationId = automationId;
-        var icon = new AppVectorIcon(iconKind, 24, AppThemeTokens.TextPrimary)
+            services.Logger.Error("Modern Dashboard presentation failed; recovering Classic without restarting services.", error);
+            services.Appearance.ForceClassicForSession(); fallbackNotice = true;
+            ApplyInterfaceCore();
+            if (uiLoopReady) ShowFallbackNotice();
+        }
+    }
+    private async void ShowFallbackNotice()
+    {
+        if (!fallbackNotice) return; fallbackNotice = false;
+        await SystemMessageBox.ShowAsync(this, text["Dashboard.Fallback"], text["App.Title"]);
+    }
+    private void ApplyInterfaceCore()
+    {
+        shellHost.Apply(services.Appearance.InterfaceMode);
+        var modern = shellHost.Mode == AppInterfaceMode.ModernDashboard;
+        if (!modern) foreach (var view in pages.Keys) DashboardVisual.RestoreTree(view);
+        downloadsView.SetDashboard(modern); liveView.SetDashboard(modern);
+        historyView.SetDashboard(modern); otherView.SetDashboard(modern); settingsView.SetDashboard(modern); batchView.SetDashboard(modern);
+        Text = modern ? "ModernTubeDownloader   v" + AppBranding.Version : text["App.Title"];
+        AppTypography.SetDashboardPresentation(TitleBar, modern);
+        AppTypography.Bind(caption, modern ? 10.5f : 12, FontStyle.Bold);
+        AppTypography.Bind(captionVersion, 10, FontStyle.Regular);
+        TitleBar.Height = modern ? AppTypography.TextHeight(48) : 34;
+        AppUi.BindBackground(TitleBar, modern ? AppThemeTokens.Background : AppThemeTokens.Surface);
+        foreach (var view in pages.Keys) AppTypography.SetDashboardPresentation(view, modern);
+        if (!modern && currentView == batchView) ShowView(otherView);
+        LayoutCaption();
+        UpdateLayout(); UpdateStatus();
+    }
+
+    private void LayoutCaption()
+    {
+        if (shellHost is null) return;
+        var modern = shellHost.Mode == AppInterfaceMode.ModernDashboard;
+        caption.Visible = captionVersion.Visible = captionTheme.Visible = modern;
+        TitleBar.Image = AppBranding.CaptionIcon(modern);
+        if (modern)
         {
-            Left = 15,
-            Top = 11
-        };
-        icon.Click += (_, _) => button.PerformClick();
-        button.Controls.Add(icon);
-        navigationIcons[button] = icon;
-        sidebar.Controls.Add(button);
-        return button;
+            TitleBar.Text = ""; caption.Text = "ModernTubeDownloader"; captionVersion.Text = "v" + AppBranding.Version;
+            captionTheme.Text = ""; captionTheme.AccessibleName = text["Dashboard.Theme"];
+            captionTips.SetToolTip(captionTheme, captionTheme.AccessibleName);
+            captionTheme.SetBounds(Math.Max(52, TitleBar.Width - 200), (TitleBar.Height - 34) / 2, 36, 34);
+            DashboardVisual.Button(captionTheme); DashboardVisual.Icon(captionTheme, AppIconKind.Sun, iconOnly: true);
+            var captionLeft = TitleBar.Height + 8;
+            caption.SetBounds(captionLeft, 0, Math.Min(DashboardVisual.TextWidth(caption, caption.Text) + 4, Math.Max(0, captionTheme.Left - captionLeft - 14)), TitleBar.Height);
+            captionVersion.SetBounds(caption.Right + 14, 0, Math.Max(0, captionTheme.Left - caption.Right - 28), TitleBar.Height);
+        }
+        else TitleBar.Text = Text;
     }
 
     private Label CreatePreparationRow(int top)
@@ -283,13 +341,11 @@ public sealed class MainForm : Form
     private async void ShowView(Control view)
     {
         UiCrashDiagnostics.VerifyUiThread("main.view-switch");
-        if (ReferenceEquals(currentView, view))
-            return;
+        if (ReferenceEquals(currentView, view)) { shellHost.Select(pages[view]); return; }
 
         var previous = currentView;
         currentView = view;
-        UiCrashDiagnostics.SetActiveView(ReferenceEquals(view, downloadsView) ? "Downloads" :
-            ReferenceEquals(view, liveView) ? "Live" : ReferenceEquals(view, historyView) ? "History" : ReferenceEquals(view, otherView) ? "Other" : "Settings");
+        UiCrashDiagnostics.SetActiveView(pages[view].ToString());
         view.Visible = true;
         view.Opacity = 0f;
         view.TranslationY = 8f;
@@ -301,10 +357,7 @@ public sealed class MainForm : Form
         {
             view.Opacity = 1; view.TranslationY = 0; if (previous is not null) previous.Visible = false; return;
         }
-        var selectedButton = navigation[view];
-        selectedButton.ScaleX = 0.98f;
-        selectedButton.ScaleY = 0.98f;
-        _ = selectedButton.ScaleToAsync(1f, AppearancePresentation.AnimationMilliseconds(170), Easings.CubicOut);
+
 
         try
         {
@@ -324,12 +377,8 @@ public sealed class MainForm : Form
 
     private void UpdateNavigationState()
     {
-        foreach (var (view, button) in navigation)
-        {
-            var selected = ReferenceEquals(view, currentView);
-            AppUi.NavigationButton(button, selected);
-            navigationIcons[button].SetColorToken(selected ? AppThemeTokens.NavigationSelectedText : AppThemeTokens.TextPrimary);
-        }
+        if (currentView is not null) shellHost.Select(pages[currentView]);
+        if (fileDrop is not null) fileDrop.Enabled = shellHost.Mode == AppInterfaceMode.ModernDashboard && (currentView == batchView || currentView == otherView);
     }
 
     private async Task InitializeAsync()
@@ -381,9 +430,12 @@ public sealed class MainForm : Form
             text.Get("Footer.Downloading", active),
             text.Get("Footer.Completed", completed)
         };
-        queueStatus.Text = string.Join("  •  ", segments) +
-            (services.Queue.IsPaused ? $"  •  {text["Footer.Paused"]}" : string.Empty);
+        shellHost.SetStatus(string.Join("  •  ", segments) +
+            (services.Queue.IsPaused ? $"  •  {text["Footer.Paused"]}" : string.Empty));
 
+        var generalStatus = DashboardStatus.Read(services);
+        if (shellHost.Mode == AppInterfaceMode.ModernDashboard) shellHost.SetStatus(generalStatus.Text, generalStatus.Token);
+        downloadsView.SetDashboardStatus(generalStatus.Text, generalStatus.Token);
         var engine = services.Tools.EngineStatus;
 
         if (services.Tools.CanAnalyze)
@@ -454,13 +506,8 @@ public sealed class MainForm : Form
 
     private void ApplyLocalization()
     {
-        Text = text["App.Title"];
-        brandLabel.Text = "ModernTube\nDownloader";
-        navigation[downloadsView].Text = text["Nav.Downloads"];
-        navigation[liveView].Text = text["Nav.Live"];
-        navigation[historyView].Text = text["Nav.History"];
-        navigation[otherView].Text = text["Nav.Other"];
-        navigation[settingsView].Text = text["Nav.Settings"];
+        Text = shellHost.Mode == AppInterfaceMode.ModernDashboard ? "ModernTubeDownloader   v" + AppBranding.Version : text["App.Title"];
+        shellHost.RefreshChrome(); LayoutCaption();
         preparationRetry.Text = text["Provisioning.Retry"];
         UpdateStatus();
     }
@@ -471,7 +518,20 @@ public sealed class MainForm : Form
 
     private void FormShown(object? sender, EventArgs e)
     {
-        InitializeRuntime();
+        InitializeRuntime(); ShowFallbackNotice();
+        if (fileDrop is null && OperatingSystem.IsWindows() && PlatformHandle.HandleDescriptor == "HWND")
+        {
+            try
+            {
+                fileDrop = new WindowsFileDrop(PlatformHandle.Handle, files =>
+                {
+                    if (shutdownStarted || shellHost.Mode != AppInterfaceMode.ModernDashboard) return;
+                    Navigate(AppPageId.Batch); _ = batchView.ImportDroppedFilesAsync(files);
+                }, services.Logger);
+                UpdateNavigationState();
+            }
+            catch (Exception error) { services.Logger.Error("Native file drop unavailable; file picker remains available.", error); }
+        }
     }
 
     public void StartRuntime(bool autostart, bool hiddenArgument)
@@ -537,9 +597,7 @@ public sealed class MainForm : Form
         try
         {
             RestoreWindow();
-            if (request.View == "live") ShowView(liveView);
-            else if (request.View == "history") ShowView(historyView);
-            else ShowView(downloadsView);
+            Navigate(AppNavigation.ForNotification(request));
             // Resolve only our own persisted state. Native/IPC payload never supplies a path or URL.
             if (request.Group == "downloads")
             {
@@ -577,8 +635,7 @@ public sealed class MainForm : Form
             RestoreWindow();
             if (OperatingSystem.IsWindows() && PlatformHandle.HandleDescriptor == "HWND")
                 SetForegroundWindow(PlatformHandle.Handle);
-            if (request.Intent is null && new Uri(sourceUrl).Host is "youtube.com" or "www.youtube.com" or "m.youtube.com" &&
-                new Uri(sourceUrl).AbsolutePath.StartsWith("/live/", StringComparison.OrdinalIgnoreCase))
+            if (AppNavigation.ForExternalRequest(request with { SourceUrl = sourceUrl }) == AppPageId.Live)
             { ShowView(liveView); await liveView.AcceptUrlAsync(sourceUrl); }
             else
             { ShowView(downloadsView); await downloadsView.AcceptExternalRequestAsync(request with { SourceUrl = sourceUrl }); }
@@ -601,23 +658,6 @@ public sealed class MainForm : Form
 
     private void UpdateLayout()
     {
-        var profile = AppearancePresentation.Current;
-        var iconsOnly = profile.Navigation.Mode == NavigationMode.Icons;
-        sidebar.Width = iconsOnly ? 84 : (profile.Navigation.Width switch { NavigationWidth.Narrow => 212, NavigationWidth.Wide => 310, _ => 236 }) + (AppTypography.Scale > 1.25 ? 64 : 0);
-        brandLabel.Visible = !iconsOnly;
-        brandLabel.Width = sidebar.Width - brandLabel.Left - 16;
-        brandLabel.Text = AppTypography.Scale > 1.25 ? "ModernTube\nDownloader" : "ModernTubeDownloader"; brandLabel.Multiline = true; brandLabel.Height = AppTypography.Scale > 1.25 ? 78 : 52;
-        var top = 120;
-        foreach (var button in navigation.Values.OrderBy(b => b.AccessibleAutomationId switch { "NavDownloads" => 0, "NavLive" => 1, "NavHistory" => 2, "NavOther" => 3, _ => 4 }))
-        {
-            var label = text[button.AccessibleAutomationId switch { "NavDownloads" => "Nav.Downloads", "NavLive" => "Nav.Live", "NavHistory" => "Nav.History", "NavOther" => "Nav.Other", _ => "Nav.Settings" }];
-            button.Text = iconsOnly ? "" : label; button.AccessibleName = label;
-            button.Width = sidebar.Width - 36; button.Top = top; button.Height = AppTypography.TextHeight(46);
-            var icon = navigationIcons[button]; var size = profile.Global.IconSize switch { AppearanceSize.None when !iconsOnly => 0, AppearanceSize.Small => 20, AppearanceSize.Large => 30, _ => 24 };
-            icon.Visible = size > 0; if (size > 0) icon.SetIconSize(size);
-            icon.Left = iconsOnly ? (button.Width - size) / 2 : 15; icon.Top = (button.Height - size) / 2;
-            button.Padding = new Padding(iconsOnly ? 0 : size == 0 ? 15 : size + 24, 0, 10, 0); top = button.Bottom + AppearancePresentation.Spacing(8);
-        }
         preparationCard.Width = Math.Min(660, Math.Max(520, content.ClientSize.Width - 96));
         preparationCard.Left = Math.Max(24, (preparationOverlay.ClientSize.Width - preparationCard.Width) / 2);
         preparationCard.Top = Math.Max(24, (preparationOverlay.ClientSize.Height - preparationCard.Height) / 2);
@@ -645,7 +685,7 @@ public sealed class MainForm : Form
     {
         if (shutdownStarted) return;
         shutdownStarted = true;
-        queueStatus.Text = text["Footer.Stopping"];
+        shellHost.SetStatus(text["Footer.Stopping"]);
         _ = ShutdownAndCloseAsync();
     }
 
@@ -690,14 +730,16 @@ public sealed class MainForm : Form
     {
         if (disposing)
         {
-            tray.Dispose();
+            fileDrop?.Dispose(); captionTips.Dispose(); tray.Dispose();
             services.Queue.Changed -= StateChanged;
             services.Tools.Changed -= StateChanged;
+            services.Live.Changed -= StateChanged; services.Updates.Changed -= StateChanged;
             text.LanguageChanged -= LanguageChanged;
             ThemeManager.Current.ThemeChanged -= ThemeChanged;
             Closing -= FormClosing;
             Shown -= FormShown;
-            header.SizeChanged -= LayoutChanged;
+            content.SizeChanged -= LayoutChanged;
+            services.Appearance.ModeChanged -= AppearanceChanged;
         }
         base.Dispose(disposing);
     }

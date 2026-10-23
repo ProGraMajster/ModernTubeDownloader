@@ -6,7 +6,9 @@ namespace ModernTubeDownloader.Theming;
 
 public sealed class AppearanceProfile
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
+    public AppInterfaceMode InterfaceMode { get; set; }
+    public ModernDashboardAppearance ModernDashboardShell { get; set; } = new();
     public GlobalAppearance Global { get; set; } = new();
     public TypographyPreferences Typography { get; set; } = new();
     public NavigationAppearance Navigation { get; set; } = new();
@@ -22,6 +24,7 @@ public sealed class AppearanceProfile
         "Compact" => new() { Global = new() { Density = AppearanceDensity.Compact, SpacingPercent = 90 }, Downloads = new() { CardDensity = AppearanceDensity.Compact }, History = new() { CompactList = true }, Settings = new() { CompactCards = true, SectionSpacing = 8 } },
         "Large" => new() { Typography = new() { AppTextScale = 125 }, Global = new() { Density = AppearanceDensity.Comfortable }, Navigation = new() { Width = NavigationWidth.Wide } },
         "Minimal" => new() { Global = new() { Animations = false, CornerRadius = 4 }, Downloads = new() { ShowAuthor = false, ShowSource = false }, History = new() { ShowOutputPath = false }, Details = new() { CollapseTechnical = true } },
+        "ModernDashboard" => new() { InterfaceMode = AppInterfaceMode.ModernDashboard, Global = new() { Theme = AppearanceTheme.Dark, CornerRadius = 10 } },
         "Default" => new(), _ => throw new ArgumentException("Appearance.Error.Profile")
     };
     public AppearanceProfile Copy() => AppearanceProfileStore.Validate(JsonSerializer.Serialize(this, AppearanceProfileStore.Options));
@@ -33,6 +36,29 @@ public sealed class AppearanceProfile
     }
 }
 public sealed class TypographyPreferences { public int AppTextScale { get; set; } = 100; }
+public enum AppInterfaceMode { Classic, ModernDashboard }
+public enum DashboardSidebarMode { Expanded, Compact, Auto }
+public enum DashboardInspectorMode { Always, Auto, Hidden }
+public enum DashboardWidgetsMode { All, Compact, Hidden }
+public sealed class ModernDashboardAppearance
+{
+    public DashboardSidebarMode Sidebar { get; set; } = DashboardSidebarMode.Auto;
+    public DashboardInspectorMode Inspector { get; set; } = DashboardInspectorMode.Auto;
+    public DashboardWidgetsMode Widgets { get; set; }
+    public AppearanceDensity QueueDensity { get; set; } = AppearanceDensity.Normal;
+    public AppearanceSize Thumbnail { get; set; } = AppearanceSize.Normal;
+    public bool ShowAuthor { get; set; } = true;
+    public bool ShowSource { get; set; } = true;
+    public bool ShowQuality { get; set; } = true;
+    public bool ShowFormat { get; set; } = true;
+    public bool ShowSize { get; set; } = true;
+    public bool ShowSpeed { get; set; } = true;
+    public bool ShowEta { get; set; } = true;
+    public ActionPresentation Actions { get; set; }
+    public bool Statistics { get; set; } = true;
+    public bool SpeedChart { get; set; } = true;
+    public bool ActiveProcesses { get; set; } = true;
+}
 public enum AppearanceTheme { System, Light, Dark, Custom }
 public enum AppearanceDensity { Compact, Normal, Comfortable }
 public enum AppearanceSize { None, Small, Normal, Large }
@@ -135,11 +161,12 @@ public sealed class AppearanceProfileStore(string path)
         if (json.Length > 65536) throw new InvalidDataException("Appearance.Error.Profile");
         using (var document = JsonDocument.Parse(json, new() { MaxDepth = 10 })) RejectDuplicates(document.RootElement);
         var value = JsonSerializer.Deserialize<AppearanceProfile>(json, Options) ?? throw new InvalidDataException("Appearance.Error.Profile");
-        if (value.SchemaVersion != 1 || value.Typography is null || value.Typography.AppTextScale is < 80 or > 200) throw new InvalidDataException("Appearance.Error.Profile");
+        if (value.SchemaVersion is not (1 or 2) || !Enum.IsDefined(value.InterfaceMode) || value.ModernDashboardShell is null || value.Typography is null || value.Typography.AppTextScale is < 80 or > 200) throw new InvalidDataException("Appearance.Error.Profile");
+        value.SchemaVersion = 2;
         if (value.Global is null || value.Navigation is null || value.Downloads is null || value.Live is null || value.History is null || value.Other is null || value.BatchImport is null || value.Settings is null || value.Details is null ||
             value.Global.Colors is null || value.Global.CornerRadius is < 0 or > 32 || value.Global.SpacingPercent is < 75 or > 150 || value.Settings.SectionSpacing is < 4 or > 40 || value.BatchImport.UrlColumnWidth is < 200 or > 1200)
             throw new InvalidDataException("Appearance.Error.Profile");
-        foreach (var section in new object[] { value.Global, value.Navigation, value.Downloads, value.Live, value.History, value.Other, value.BatchImport, value.Details })
+        foreach (var section in new object[] { value.Global, value.Navigation, value.Downloads, value.Live, value.History, value.Other, value.BatchImport, value.Details, value.ModernDashboardShell })
             foreach (var property in section.GetType().GetProperties()) if (property.PropertyType.IsEnum && !Enum.IsDefined(property.PropertyType, property.GetValue(section)!)) throw new InvalidDataException("Appearance.Error.Profile");
         var colors = new[] { "Accent", "Background", "Surface", "SurfaceSecondary", "Border", "TextPrimary", "TextSecondary" };
         foreach (var (key, color) in value.Global.Colors)

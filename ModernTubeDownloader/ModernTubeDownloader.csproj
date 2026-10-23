@@ -46,6 +46,11 @@
     <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>
     <Copy SourceFiles="@(NativeHostFiles)" DestinationFolder="$(OutDir)native-host" SkipUnchangedFiles="true" />
   </Target>
+  <Target Name="AddApplicationSourceMetadata" BeforeTargets="GetAssemblyAttributes" DependsOnTargets="InitializeSourceControlInformation">
+    <ItemGroup Condition="'$(SourceRevisionId)' != ''">
+      <AssemblyMetadata Include="SourceCommit" Value="$(SourceRevisionId)" />
+    </ItemGroup>
+  </Target>
   <Target Name="CopyUpdaterForDevelopment" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == ''">
     <ItemGroup><UpdaterFiles Include="..\ModernTubeDownloader.Updater\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>
     <Copy SourceFiles="@(UpdaterFiles)" DestinationFolder="$(OutDir)updater" SkipUnchangedFiles="true" />

@@ -8,6 +8,9 @@ namespace ModernTubeDownloader.Services;
 
 public sealed class ThumbnailCacheService : IDisposable
 {
+    internal const int MaximumImageBytes = 12 * 1024 * 1024;
+    internal const int MaximumImageDimension = 8192;
+    internal const long MaximumImagePixels = 16 * 1024 * 1024;
     private readonly AppPaths paths;
     private readonly IAppLogger logger;
     private readonly HttpClient client;
@@ -48,28 +51,82 @@ public sealed class ThumbnailCacheService : IDisposable
         finally { pending.TryRemove(url, out _); }
     }
 
-    private async Task<SKBitmap?> LoadAsync(string url, CancellationToken cancellationToken)
+    /// <summary>An explicit tool request is independent of automatic thumbnail display.
+    /// The caller owns the returned bitmap and cancellation stops its own I/O.</summary>
+    public async Task<SKBitmap?> GetExportCopyAsync(string url, CancellationToken cancellationToken = default)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return null;
+        CancellationTokenSource linked;
+        lock (lifetimeSync)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (memory.TryGetValue(url, out var cached)) return cached.Copy();
+            linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetimeCancellation.Token);
+        }
+        using (linked) return await LoadAsync(url, linked.Token, retain: false).ConfigureAwait(false);
+    }
+
+    private static async Task<byte[]> ReadBoundedAsync(Stream source, CancellationToken token)
+    {
+        using var buffer = new MemoryStream(); var chunk = new byte[81920];
+        while (await source.ReadAsync(chunk, token).ConfigureAwait(false) is > 0 and var count)
+        {
+            if (buffer.Length + count > MaximumImageBytes) throw new InvalidDataException("Thumbnail exceeds the 12 MiB cache limit.");
+            buffer.Write(chunk, 0, count);
+        }
+        return buffer.ToArray();
+    }
+
+    private async Task<SKBitmap?> LoadAsync(string url, CancellationToken cancellationToken, bool retain = true)
     {
         try
         {
             Directory.CreateDirectory(paths.ThumbnailCacheDirectory);
             var cacheFile = CachePath(url);
             byte[] bytes;
-            if (File.Exists(cacheFile))
+            var fromCache = File.Exists(cacheFile);
+            if (fromCache)
             {
-                bytes = await File.ReadAllBytesAsync(cacheFile, cancellationToken).ConfigureAwait(false);
+                await using var file = new FileStream(cacheFile, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+                if (file.Length > MaximumImageBytes) throw new InvalidDataException("Cached thumbnail exceeds the 12 MiB limit.");
+                bytes = await ReadBoundedAsync(file, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                bytes = await client.GetByteArrayAsync(url, cancellationToken).ConfigureAwait(false);
-                if (bytes.Length > 12 * 1024 * 1024)
+                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+                if (response.Content.Headers.ContentLength > MaximumImageBytes)
                     throw new InvalidDataException("Thumbnail exceeds the 12 MiB cache limit.");
-                await File.WriteAllBytesAsync(cacheFile, bytes, cancellationToken).ConfigureAwait(false);
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                bytes = await ReadBoundedAsync(stream, cancellationToken).ConfigureAwait(false);
             }
 
-            var bitmap = SKBitmap.Decode(bytes);
+            using var data = SKData.CreateCopy(bytes);
+            using var codec = SKCodec.Create(data);
+            if (codec is null || codec.Info.Width <= 0 || codec.Info.Height <= 0 ||
+                codec.Info.Width > MaximumImageDimension || codec.Info.Height > MaximumImageDimension || (long)codec.Info.Width * codec.Info.Height > MaximumImagePixels)
+                throw new InvalidDataException("Invalid thumbnail or image dimensions exceed the limit.");
+            cancellationToken.ThrowIfCancellationRequested();
+            var bitmap = SKBitmap.Decode(codec);
             if (bitmap is null)
                 throw new InvalidDataException("The thumbnail data is not a supported image.");
+            try
+            {
+                if (!fromCache)
+                {
+                    var temporary = cacheFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                    try
+                    {
+                        await File.WriteAllBytesAsync(temporary, bytes, cancellationToken).ConfigureAwait(false);
+                        try { File.Move(temporary, cacheFile, overwrite: false); }
+                        catch (IOException) when (File.Exists(cacheFile)) { /* A concurrent cache request won. */ }
+                    }
+                    finally { if (File.Exists(temporary)) File.Delete(temporary); }
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            catch { bitmap.Dispose(); throw; }
             lock (lifetimeSync)
             {
                 if (disposed)
@@ -77,7 +134,7 @@ public sealed class ThumbnailCacheService : IDisposable
                     bitmap.Dispose();
                     return null;
                 }
-                memory[url] = bitmap;
+                if (retain) memory[url] = bitmap;
                 return bitmap;
             }
         }

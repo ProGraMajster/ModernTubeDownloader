@@ -14,6 +14,7 @@ internal sealed class MediaRangeEditor : Panel
     private readonly TextBox from;
     private readonly Label toLabel;
     private readonly TextBox to;
+    private bool responsiveLayout, arranging;
     public event EventHandler? ModeChanged;
     public bool IsCustom => mode.SelectedItem is LocalizedOption<MediaRangeMode> { Value: MediaRangeMode.Custom };
 
@@ -25,10 +26,10 @@ internal sealed class MediaRangeEditor : Panel
         mode = new ComboBox { AccessibleAutomationId = automationPrefix + "RangeMode" };
         AppUi.Input(mode);
         fromLabel = AppUi.Muted();
-        from = new TextBox { AccessibleAutomationId = automationPrefix + "RangeStart", Placeholder = "hh:mm:ss" };
+        from = new AppThemeTextBox { AccessibleAutomationId = automationPrefix + "RangeStart", Placeholder = "hh:mm:ss" };
         AppUi.Input(from);
         toLabel = AppUi.Muted();
-        to = new TextBox { AccessibleAutomationId = automationPrefix + "RangeEnd", Placeholder = "hh:mm:ss" };
+        to = new AppThemeTextBox { AccessibleAutomationId = automationPrefix + "RangeEnd", Placeholder = "hh:mm:ss" };
         AppUi.Input(to);
         Controls.AddRange([label, mode, fromLabel, from, toLabel, to]);
         mode.SelectedIndexChanged += (_, _) => UpdateVisibility();
@@ -54,6 +55,15 @@ internal sealed class MediaRangeEditor : Panel
         return error is null;
     }
 
+    public bool CompactLayout { get; set; }
+    // Opt-in presentation: Classic callers keep their original row recipe.
+    public bool ResponsiveLayout { get => responsiveLayout; set { responsiveLayout = value; if (!value && !CompactLayout) AppUi.BindBackground(this); LayoutControls(); } }
+    public void SetRange(MediaTimeRange value)
+    {
+        mode.SelectedIndex = value.Mode == MediaRangeMode.Custom ? 1 : 0;
+        from.Text = value.Start?.ToString(@"hh\:mm\:ss") ?? ""; to.Text = value.End?.ToString(@"hh\:mm\:ss") ?? "";
+    }
+
     public void Reset()
     {
         mode.SelectedIndex = 0;
@@ -67,6 +77,7 @@ internal sealed class MediaRangeEditor : Panel
         label.Text = text["Range.Label"];
         fromLabel.Text = text["Range.From"];
         toLabel.Text = text["Range.To"];
+        mode.AccessibleName = label.Text; from.AccessibleName = fromLabel.Text; to.AccessibleName = toLabel.Text;
         mode.Items.Clear();
         mode.Items.Add(new LocalizedOption<MediaRangeMode>(MediaRangeMode.Full, text["Range.Full"]));
         mode.Items.Add(new LocalizedOption<MediaRangeMode>(MediaRangeMode.Custom, text["Range.Custom"]));
@@ -78,11 +89,47 @@ internal sealed class MediaRangeEditor : Panel
     {
         var custom = IsCustom;
         fromLabel.Visible = from.Visible = toLabel.Visible = to.Visible = custom;
+        if (CompactLayout || ResponsiveLayout) LayoutControls();
         ModeChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void LayoutControls()
     {
+        if (arranging) return;
+        if (CompactLayout || ResponsiveLayout)
+        {
+            arranging = true;
+            try
+            {
+                var width = Math.Max(0, ClientSize.Width);
+                if (width == 0) { foreach (var child in Controls) child.SetBounds(0, 0, 0, 0); Height = 0; return; }
+                var line = AppTypography.TextHeight(24); var field = AppTypography.TextHeight(34);
+                var labelWidth = DashboardVisual.TextWidth(label, label.Text) + 4;
+                var fromWidth = DashboardVisual.TextWidth(fromLabel, fromLabel.Text) + 4;
+                var toWidth = DashboardVisual.TextWidth(toLabel, toLabel.Text) + 4;
+                var modeWidth = AppTypography.TextHeight(180); var timeWidth = AppTypography.TextHeight(100);
+                var inlineWidth = labelWidth + 8 + modeWidth + (IsCustom ? 16 + fromWidth + 4 + timeWidth + 12 + toWidth + 4 + timeWidth : 0);
+                var inline = !CompactLayout && width >= inlineWidth;
+                if (inline)
+                {
+                    label.SetBounds(0, (field - line) / 2, labelWidth, line); mode.SetBounds(label.Right + 8, 0, modeWidth, field);
+                    fromLabel.SetBounds(mode.Right + 16, label.Top, fromWidth, line); from.SetBounds(fromLabel.Right + 4, 0, timeWidth, field);
+                    toLabel.SetBounds(from.Right + 12, label.Top, toWidth, line); to.SetBounds(toLabel.Right + 4, 0, timeWidth, field);
+                }
+                else
+                {
+                    label.SetBounds(0, 0, width, line); mode.SetBounds(0, label.Bottom + 2, width, field);
+                    var paired = width >= AppTypography.TextHeight(240); var half = (width - 10) / 2;
+                    fromLabel.SetBounds(0, mode.Bottom + 8, paired ? half : width, line); from.SetBounds(0, fromLabel.Bottom + 2, fromLabel.Width, field);
+                    toLabel.SetBounds(paired ? half + 10 : 0, paired ? fromLabel.Top : from.Bottom + 8, fromLabel.Width, line); to.SetBounds(toLabel.Left, toLabel.Bottom + 2, toLabel.Width, field);
+                }
+                if (!IsCustom) foreach (var child in new Control[] { fromLabel, from, toLabel, to }) child.SetBounds(0, 0, 0, 0);
+                Height = IsCustom ? Math.Max(mode.Bottom, to.Bottom) : mode.Bottom;
+                AppUi.BindBackground(this, AppThemeTokens.Surface);
+            }
+            finally { arranging = false; }
+            return;
+        }
         var available = Math.Max(450, Width);
         label.SetBounds(0, 7, 88, 24);
         mode.SetBounds(90, 0, 142, 34);
