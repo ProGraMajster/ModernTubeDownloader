@@ -79,6 +79,30 @@ function WaitCheck([scriptblock]$Check,[string]$Message) {
     do { if (& $Check) { return }; Start-Sleep -Milliseconds 100 } while($clock.Elapsed.TotalSeconds -lt 30)
     throw $Message
 }
+function FindOwnedPopupItem([string]$Caption) {
+    $captionCondition=[System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$Caption),
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem))
+    $processCondition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$owned.Id)
+    foreach($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children,$processCondition)) {
+        # UIA can expose the owned popup as a child of the main window.
+        $item=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$captionCondition)
+        if($item -and $item.Current.IsEnabled -and -not $item.Current.IsOffscreen -and $item.Current.ProcessId -eq $owned.Id) { return $item }
+    }
+    return $null
+}
+function SaveOwnedWindowDiagnostics {
+    $processCondition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$owned.Id)
+    $windows=@([System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children,$processCondition) | ForEach-Object {
+        $window=$_; $current=$window.Current
+        @{name=$current.Name;handle=$current.NativeWindowHandle;type=$current.ControlType.ProgrammaticName;nodes=@($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
+            $c=$_.Current; @{name=$c.Name;id=$c.AutomationId;type=$c.ControlType.ProgrammaticName;handle=$c.NativeWindowHandle;pid=$c.ProcessId}
+        })}
+    })
+    ConvertTo-Json -InputObject $windows -Depth 6 | Set-Content (Join-Path $DataRoot 'playlist-owned-window-diagnostics.json') -Encoding UTF8
+    $popup=[PlaylistWindow]::Popup($owned.Id,$hwnd)
+    if($popup -ne [IntPtr]::Zero) { Capture 'playlist-unexpected-popup' $popup }
+}
 function ReadQueue { if(Test-Path (Join-Path $DataRoot 'queue.json')) { foreach($job in (Get-Content (Join-Path $DataRoot 'queue.json') -Raw | ConvertFrom-Json)) { Write-Output $job } } }
 function CloseOwned {
     if($owned.HasExited) { return }
@@ -193,26 +217,21 @@ try {
                 WaitCheck { (Find "QueueItem-$firstId").GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected } 'Keyboard did not select the playlist row.'
             }
             Capture 'playlist-keyboard-selection'
-            Invoke "QueueMoreAction-$firstId"
-            WaitCheck { [PlaylistWindow]::Popup($owned.Id,$hwnd) -ne [IntPtr]::Zero } 'Queue context menu absent.'
-            Capture 'playlist-context-menu' ([PlaylistWindow]::Popup($owned.Id,$hwnd))
             $selectCaption=if((Find 'InspectorDetails').Current.Name -eq 'Szczegóły'){'Wybierz'}else{'Select'}
-            $menuHwnd=[PlaylistWindow]::Popup($owned.Id,$hwnd)
-            $menuRoot=[System.Windows.Automation.AutomationElement]::FromHandle($menuHwnd)
-            $captionCondition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$selectCaption)
-            $processCondition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$owned.Id)
-            $menuItem=$null
-            foreach($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children,$processCondition)) {
-                $menuItem=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$captionCondition)
-                if($menuItem) { break }
-            }
+            Invoke "QueueMoreAction-$firstId"
+            # A pre-existing owned tooltip is not evidence that the asynchronous
+            # menu invocation has completed. Wait for the actual menu command.
+            try { WaitCheck { $null -ne (FindOwnedPopupItem $selectCaption) } 'Queue Select menu item absent.' }
+            catch { SaveOwnedWindowDiagnostics; throw }
+            $menuItem=FindOwnedPopupItem $selectCaption
             if(-not $menuItem -or -not $menuItem.Current.IsEnabled -or $menuItem.Current.ProcessId -ne $owned.Id) { throw 'Owned Select menu item unavailable.' }
             $r=$menuItem.Current.BoundingRectangle
             $nativeOwner=$menuItem
             while($nativeOwner -and $nativeOwner.Current.NativeWindowHandle -eq 0) { $nativeOwner=[System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($nativeOwner) }
-            if(-not $nativeOwner -or $nativeOwner.Current.ProcessId -ne $owned.Id) { throw 'Menu has no owned native ancestor.' }
+            if(-not $nativeOwner -or $nativeOwner.Current.ProcessId -ne $owned.Id -or $nativeOwner.Current.NativeWindowHandle -eq $hwnd.ToInt64()) { throw 'Menu has no distinct owned native ancestor.' }
+            Capture 'playlist-context-menu' ([IntPtr]$nativeOwner.Current.NativeWindowHandle)
             if(-not [PlaylistWindow]::Click([IntPtr]$nativeOwner.Current.NativeWindowHandle,$owned.Id,[int]($r.X+$r.Width/2),[int]($r.Y+$r.Height/2))) { throw 'Owned menu click failed.' }
-            WaitCheck { [PlaylistWindow]::Popup($owned.Id,$hwnd) -eq [IntPtr]::Zero } 'Context menu did not close after Select.'
+            WaitCheck { $null -eq (FindOwnedPopupItem $selectCaption) } 'Context menu did not close after Select.'
             foreach($id in @('InspectorTitle','InspectorPlaylist')) {
                 $label=Find $id; Reveal $label; $label.SetFocus()
                 if(-not [PlaylistWindow]::Key($hwnd,$owned.Id,112)) { throw 'Owned F1 dispatch failed.' }
