@@ -21,6 +21,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     private readonly DownloadsPictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom };
     private readonly Label imageDuration = AppUi.Muted();
     private readonly FullValueLabel title = new(), link = new();
+    private readonly FullValueLabel playlistContext = new() { AccessibleAutomationId = "InspectorPlaylist", Multiline = true, AutoEllipsis = true };
     private readonly Label author = AppUi.Muted(), facts = AppUi.Muted(), hint = AppUi.Muted();
     private readonly Panel editor = new();
     private readonly DashboardFields fields = new();
@@ -50,7 +51,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         AutoScroll = true; AccessibleAutomationId = "DashboardInspector";
         DashboardStyle.Card(this); AppUi.BindBackground(image, AppThemeTokens.SurfaceSecondary); title.Multiline = facts.Multiline = hint.Multiline = true;
         AppUi.BindForeground(title); AppTypography.Bind(title, 12, FontStyle.Bold); AppUi.BindForeground(link);
-        title.Style.BackgroundColor = link.Style.BackgroundColor = SkiaSharp.SKColors.Transparent;
+        title.Style.BackgroundColor = link.Style.BackgroundColor = playlistContext.Style.BackgroundColor = SkiaSharp.SKColors.Transparent;
         title.AutoEllipsis = author.AutoEllipsis = link.AutoEllipsis = true;
         AppUi.BindForeground(link, AppThemeTokens.Info);
         foreach (var button in new[] { details, options, copy, openFile, openFolder, advanced, retry }) AppUi.Secondary(button);
@@ -65,8 +66,10 @@ internal sealed class DashboardInspector : AppScrollPanel
         container.TabIndex = 0; quality.TabIndex = 1; subtitleEditor.TabIndex = 2;
         audioValue.TabIndex = 3; folderValue.TabIndex = 4; folderOpen.TabIndex = 5;
         range.TabIndex = 6; advanced.TabIndex = 7; apply.TabIndex = 8;
-        Controls.AddRange([details, options, image, title, author, link, sourceGlyph, copy, facts, fields, editor, openFile, openFolder, retry, emptyIcon]);
+        Controls.AddRange([details, options, image, title, author, playlistContext, link, sourceGlyph, copy, facts, fields, editor, openFile, openFolder, retry, emptyIcon]);
         title.AccessibleAutomationId = "InspectorTitle"; link.AccessibleAutomationId = "InspectorSource";
+        AppTypography.Bind(playlistContext, 9.5f); AppUi.BindForeground(playlistContext, AppThemeTokens.TextSecondary);
+        BindFullValue(playlistContext, () => playlistContext.Text);
         BindFullValue(title, () => title.Text); BindFullValue(link, () => source ?? ""); BindFullValue(folderValue, () => folderPath ?? "");
         AppTypography.Bind(imageDuration, 9.5f); imageDuration.TextAlign = ContentAlignment.MiddleCenter;
         AppUi.BindBackground(imageDuration, AppThemeTokens.Background); Controls.Add(imageDuration);
@@ -117,6 +120,8 @@ internal sealed class DashboardInspector : AppScrollPanel
         var changed = queueId != item.Id || queued != (item.Status == DownloadStatus.Queued);
         queueId = item.Id; queued = item.Status == DownloadStatus.Queued; options.Visible = true;
         Present(item.Title, item.Channel, item.SourceUrl, item.ThumbnailUrl, item.FinalFile);
+        playlistContext.Text = string.IsNullOrWhiteSpace(item.PlaylistTitle) ? "" : services.Localization.Get("Queue.PlaylistPart", item.PlaylistTitle) +
+            (item.PlaylistIndex is { } ordinal ? $" · #{ordinal}" : "");
         folderPath = item.FinalFile is { Length: > 0 } finalFile ? System.IO.Path.GetDirectoryName(finalFile) : services.Settings.Current.FinalOutputDirectory;
         openFolder.Enabled = Directory.Exists(folderPath);
         imageDuration.Text = DashboardStyle.Duration(item.DurationSeconds);
@@ -141,7 +146,7 @@ internal sealed class DashboardInspector : AppScrollPanel
             container.Items.Clear(); foreach (var value in Enum.GetValues<PreferredVideoContainer>()) container.Items.Add(new Localization.LocalizedOption<PreferredVideoContainer>(value, t["Container." + value]));
             container.SelectedIndex = (int)item.PreferredVideoContainer;
             range.SetRange(item.RequestedRange); subtitles = item.SubtitleOptions.Copy(); sponsors = item.SponsorBlockOptions.Copy();
-            hint.Text = t[CanEditOptions ? "Dashboard.QueuedOptions" : queued ? "Dashboard.MetadataRequired" : "Dashboard.InspectorReadOnly"];
+            hint.Text = t[CanEditOptions ? "Dashboard.QueuedOptions" : queued ? item.PlaylistId is not null ? "Playlist.FormatsHint" : "Dashboard.MetadataRequired" : "Dashboard.InspectorReadOnly"];
         }
         var selectedAudio = metadata?.Formats.FirstOrDefault(f => f.Id == (item.SelectedFormats?.AudioFormatId ?? item.SelectedFormats?.VideoFormatId));
         var audio = selectedAudio?.HasAudio == true ? selectedAudio.AudioCodec : null;
@@ -193,7 +198,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     private void Present(string name, string channel, string url, string? thumbnail, string? path)
     {
-        hasSelection = true; title.Text = name; author.Text = channel; source = url; finalPath = folderPath = path; link.Text = url;
+        playlistContext.Text = ""; hasSelection = true; title.Text = name; author.Text = channel; source = url; finalPath = folderPath = path; link.Text = url;
         tips.SetToolTip(title, name); tips.SetToolTip(author, channel); tips.SetToolTip(link, url);
         openFile.Enabled = File.Exists(path); openFolder.Enabled = path is not null && Directory.Exists(System.IO.Path.GetDirectoryName(path));
         copy.Enabled = source.Length > 0;
@@ -300,6 +305,9 @@ internal sealed class DashboardInspector : AppScrollPanel
         retry.Visible = historyMode && hasSelection;
         image.RoundedPreview = queueId is not null;
         title.EnableKeyboardValues(queueId is not null); link.EnableKeyboardValues(queueId is not null);
+        playlistContext.Visible = hasSelection && queueId is not null && !string.IsNullOrWhiteSpace(playlistContext.Text);
+        playlistContext.EnableKeyboardValues(playlistContext.Visible);
+        if (!playlistContext.Visible) playlistContext.SetBounds(0, 0, 0, 0);
         sourceGlyph.Visible = hasSelection && queueId is not null;
         if (!sourceGlyph.Visible) sourceGlyph.SetBounds(0, 0, 0, 0);
         details.SetBounds(12 + o.X, 10 + o.Y, width / 2, line); options.SetBounds(details.Right + 4, details.Top, width / 2 - 4, line);
@@ -335,7 +343,8 @@ internal sealed class DashboardInspector : AppScrollPanel
         else imageDuration.SetBounds(0, 0, 0, 0);
         title.SetBounds(12 + o.X, image.Bottom + 12, width, DashboardVisual.LabelHeight(title, width, 3));
         author.SetBounds(12 + o.X, title.Bottom + 2, width, AppTypography.TextHeight(24));
-        link.SetBounds(12 + o.X, author.Bottom + 6, width - AppTypography.TextHeight(32) - 6, AppTypography.TextHeight(30));
+        if (playlistContext.Visible) playlistContext.SetBounds(12 + o.X, author.Bottom + 4, width, DashboardVisual.LabelHeight(playlistContext, width, 2));
+        link.SetBounds(12 + o.X, (playlistContext.Visible ? playlistContext.Bottom : author.Bottom) + 6, width - AppTypography.TextHeight(32) - 6, AppTypography.TextHeight(30));
         copy.SetBounds(link.Right + 6, link.Top, AppTypography.TextHeight(32), link.Height);
         copyGlyph.SetBounds((copy.Width - 18) / 2, (copy.Height - 18) / 2, 18, 18);
         if (queueId is not null)

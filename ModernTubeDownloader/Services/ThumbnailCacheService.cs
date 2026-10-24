@@ -67,6 +67,18 @@ public sealed class ThumbnailCacheService : IDisposable
         using (linked) return await LoadAsync(url, linked.Token, retain: false).ConfigureAwait(false);
     }
 
+    // A paged preview owns these small copies. Paging must not grow the shared
+    // in-memory cache to the size of an entire playlist.
+    internal async Task<SKBitmap?> GetPreviewCopyAsync(string? url, CancellationToken token)
+    {
+        if (isEnabled?.Invoke() == false || string.IsNullOrWhiteSpace(url)) return null;
+        using var original = await GetExportCopyAsync(url, token).ConfigureAwait(false);
+        if (original is null) return null;
+        var ratio = Math.Min(1d, 320d / Math.Max(original.Width, original.Height));
+        return original.Resize(new SKImageInfo(Math.Max(1, (int)(original.Width * ratio)),
+            Math.Max(1, (int)(original.Height * ratio))), new SKSamplingOptions(SKFilterMode.Linear));
+    }
+
     private static async Task<byte[]> ReadBoundedAsync(Stream source, CancellationToken token)
     {
         using var buffer = new MemoryStream(); var chunk = new byte[81920];

@@ -9,6 +9,7 @@ internal sealed partial class DownloadsView
 {
     private bool dashboard;
     private bool dashboardDrawer;
+    private bool arrangingDashboard;
     private int dashboardPage;
     private System.Drawing.Rectangle classicAnalysisProgressBounds;
     private const int DashboardPageSize = 40;
@@ -30,6 +31,7 @@ internal sealed partial class DownloadsView
         if (dashboard == value) { if (value) UpdateLayout(); return; }
         if (value) classicAnalysisProgressBounds = analysisProgress.Bounds;
         dashboard = value;
+        playlistPreview.SetDashboard(value);
         ((DashboardButton)analyzeButton).JoinedEdge = value ? 2 : 0;
         analyzeButton.Click -= AnalyzeClicked; analyzeButton.Click -= DashboardAddMenu;
         if (value) analyzeButton.Click += DashboardAddMenu; else analyzeButton.Click += AnalyzeClicked;
@@ -88,6 +90,7 @@ internal sealed partial class DownloadsView
     }
     private void EnsureDashboard()
     {
+        playlistPreview.SetDashboard(true);
         // Also runs for direct Modern construction, before SetDashboard(true)'s
         // same-mode early return. Geometry and Invoke must match a shell switch.
         ((DashboardButton)analyzeButton).JoinedEdge = 2;
@@ -185,6 +188,25 @@ internal sealed partial class DownloadsView
     }
     private void LayoutDashboard()
     {
+        if (arrangingDashboard) return;
+        arrangingDashboard = true;
+        try
+        {
+            // Closing a tall playlist removes the outer scroll rail. Reclaim its
+            // viewport width before painting the queue and inspector again.
+            for (var pass = 0; pass < 3; pass++)
+            {
+                var viewport = DisplayRectangle;
+                SuspendLayout();
+                try { ArrangeDashboard(); }
+                finally { ResumeLayout(true); }
+                if (DisplayRectangle == viewport) break;
+            }
+        }
+        finally { arrangingDashboard = false; }
+    }
+    private void ArrangeDashboard()
+    {
         if (dashboardQueue is null) return;
         AutoScroll = true;
         AppUi.BindGradient(this, DownloadsVisual.Background, DownloadsVisual.BackgroundEnd);
@@ -227,7 +249,7 @@ internal sealed partial class DownloadsView
         var top = dashboardChips.Bottom + 19;
         if (playlistPreview.Visible)
         {
-            playlistPreview.SetBounds(margin + origin.X, top, width, AppTypography.TextHeight(GetPreviewHeight(false)));
+            playlistPreview.SetBounds(margin + origin.X, top, width, AppTypography.TextHeight(600));
             top = playlistPreview.Bottom + gap;
         }
         else if (previewPanel.Visible)

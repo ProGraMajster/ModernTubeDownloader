@@ -411,6 +411,7 @@
   "Playlist.PreviousPage": "Previous",
   "Playlist.NextPage": "Next",
   "Playlist.Page": "Page {0} of {1}",
+  "Playlist.FormatsHint": "Each video resolves its format when its download starts.",
   "Playlist.AddSummary": "Added {0}. Skipped {1} duplicates; {2} unavailable.",
   "Queue.PlaylistPart": "Playlist: {0}",
   "Queue.CompletedWithWarnings": "completed with warnings",

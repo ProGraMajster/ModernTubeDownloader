@@ -159,3 +159,21 @@ canonical toggle semantics and restoration of Classic borders. History tests use
 the real controls to verify filtering/sorting/date ranges preserve stored data.
 Native visual evidence is kept locally under `artifacts/dashboard-visual/` with
 before/after/comparisons, an audit, acceptance matrix and explicit limitations.
+
+### Downloads playlist visual qualification
+
+`pwsh -File scripts/Test-Automation.ps1 -PlaylistVisualSmoke -InterfaceMode ModernDashboard`
+uses a separately enabled heterogeneous 12-entry fixture through the normal metadata and queue
+services. Windows UIA verifies selection, unavailable entries, three ordered jobs, duplicate
+skipping, shared quality/container settings, inspector, same-profile restart and watch+list
+routing. `-PlaylistCount 120` also checks page selection and the 40-row bound. Original
+owned-HWND PNGs have UIA/queue snapshots and a hash/DPI/text-scale/source-commit manifest.
+This extends the existing `-PlaylistSmoke`; it does not replace its larger handoff checks.
+
+`-PlaylistTransferSmoke` additionally exercises real executor progress, Cancel/Retry,
+Interrupted recovery, deterministic failure and completion, an audio-only job, keyboard
+selection, a native context menu, F1 value popups and URL copy with clipboard restoration.
+Only the isolated FakeTool emits synthetic media. No global cursor injection is used.
+`-PublishStartupSmoke -ApplicationPath <published-exe>` runs the same UIA client against
+production Release without a Debug endpoint. These checks qualify the synthetic pipeline,
+not Internet providers or owner visual acceptance; automatic hover remains separate.

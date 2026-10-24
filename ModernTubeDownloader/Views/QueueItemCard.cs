@@ -134,6 +134,7 @@ internal sealed partial class QueueItemCard : UserControl
         positionBadge.AccessibleAutomationId = $"QueuePosition-{item.Id:N}";
         primaryAction.AccessibleAutomationId = $"QueuePrimaryAction-{item.Id:N}";
         secondaryAction.AccessibleAutomationId = $"QueueSecondaryAction-{item.Id:N}";
+        moreAction.AccessibleAutomationId = $"QueueMoreAction-{item.Id:N}";
         var selectionChanged = selected != isSelected;
         selected = isSelected;
         AccessibleName = item.Title;

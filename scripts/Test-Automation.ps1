@@ -14,6 +14,8 @@ param(
     [switch]$AppearanceSmoke,
     [string]$SampleUrl = 'https://example.test/watch/sample123',
     [switch]$PlaylistSmoke,
+    [switch]$PlaylistVisualSmoke,
+    [switch]$PlaylistTransferSmoke,
     [switch]$PreviewOnly,
     [switch]$ClearPreviewSmoke,
     [switch]$ScrollProbe,
@@ -74,6 +76,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($PlaylistTransferSmoke) { $PlaylistVisualSmoke = $true }
+if ($PlaylistVisualSmoke) { $PlaylistSmoke = $true; $CaptureVisual = $true }
 if ($DownloadsTooltipSmoke) { $DownloadsInputSmoke = $true }
 if ($DownloadsFullValuesSmoke) { $DownloadsInputSmoke = $true }
 if ($DownloadsProvidersSmoke) { $DashboardVisualFixture = $true; $DashboardFixtureCount = 19; $CaptureVisual = $true }
@@ -506,6 +510,7 @@ if ($QueueScrollRepro -or $CrashStress -or $DashboardFixture) {
 $previousDataRoot = $env:MODERNTUBEDOWNLOADER_DATA_ROOT
 $previousSkipProtocol = $env:MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL
 $previousAllSettings = $env:MODERNTUBEDOWNLOADER_QA_ALL_SETTINGS
+$previousPlaylistVisual = $env:MTD_FAKE_PLAYLIST_VISUAL
 $previousPlaylistCount = $env:MTD_FAKE_PLAYLIST_COUNT
 $env:MODERNTUBEDOWNLOADER_DATA_ROOT = $dataRoot
 $env:MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL = '1'
@@ -515,6 +520,11 @@ if ($AppTextScale -ne 100 -or $InterfaceMode -eq 'ModernDashboard') {
         ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $dataRoot 'appearance.json') -Encoding utf8
 }
 if ($PlaylistSmoke) { $env:MTD_FAKE_PLAYLIST_COUNT = "$PlaylistCount" }
+if ($PlaylistVisualSmoke) {
+    $env:MTD_FAKE_PLAYLIST_VISUAL = '1'
+    $dummyQueue = @(1..6 | ForEach-Object { @{} }); $dummyHistory = @(1..6 | ForEach-Object { @{ FinalPath = 'qa.mp4' } })
+    & (Join-Path $PSScriptRoot 'New-DashboardVisualFixture.ps1') -DataRoot $dataRoot -Queue $dummyQueue -History $dummyHistory
+}
 $normalProcess = $null
 $script:automationProcess = $null
 $protocolSnapshot = @()
@@ -562,6 +572,22 @@ try {
     Wait-MainWindow $normalProcess
     Write-Output "Indicative startup to native HWND/input-idle: $([Math]::Round($startupMeasurement.Elapsed.TotalMilliseconds,1)) ms (not tools ready or cold-PC qualification)."
     Wait-Bridge $normalProcess.Id $false
+    if ($PlaylistVisualSmoke) {
+        if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
+            if (-not [MtdAutomationWindowCloser]::PlaceWindow($normalProcess.MainWindowHandle, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)) { throw 'Playlist HWND placement failed.' }
+        }
+        Write-Output "Owned playlist profile: $dataRoot"
+        $clientSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-PlaylistVisual.ps1') -Raw
+        $command = '& { ' + $clientSource + ' } -ProcessId ' + $normalProcess.Id +
+            " -DataRoot '" + $dataRoot.Replace("'", "''") + "' -Count $PlaylistCount -TextScale $AppTextScale -Interface '$InterfaceMode'"
+        $command += " -SourceCommit '" + (& git -C $repo rev-parse HEAD).Trim() + "'"
+        if (& git -C $repo status --porcelain) { $command += ' -SourceDirty' }
+        if ($ClassicUiRecovery) { $command += ' -ClassicRecovery' }
+        if ($PlaylistTransferSmoke) { $command += ' -Transfer' }
+        & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command $command
+        if ($LASTEXITCODE -ne 0) { throw 'Playlist Windows UIA qualification failed.' }
+        return
+    }
     if ($PublishStartupSmoke) {
         $readyWatch = [Diagnostics.Stopwatch]::StartNew()
         do {
@@ -2174,7 +2200,7 @@ try {
             }
             Write-Output "Scroll probe count=$PlaylistCount before=$($listBefore.value.scrollInfo.vertical | ConvertTo-Json -Compress) wheel=$($listWheel.value.scrollInfo.vertical.offset) track=$($listTrack.value.scrollInfo.vertical.offset) drag=$($listDrag.value.scrollInfo.vertical.offset) afterReveal=$($listAfter.value.scrollInfo.vertical.offset)"
         }
-        $firstPage = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot, '--depth', '9')
+        $firstPage = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot, '--depth', '16')
         $firstRows = @($firstPage.nodes | Where-Object { $_.node.automationId -like 'PlaylistEntryToggle*' })
         if ($firstRows.Count -ne [Math]::Min(40, $PlaylistCount)) { throw "First page rendered $($firstRows.Count) entries instead of at most 40." }
         if ($PlaylistCount -gt 40) {
@@ -2187,7 +2213,7 @@ try {
                 if ($newPage.value.scrollInfo.vertical.offset -ne 0) { throw 'Playlist page switch did not reset scroll to top.' }
                 Write-Output "Scroll probe nextPage=$($newPage.value.scrollInfo.vertical | ConvertTo-Json -Compress)"
             }
-            $secondPage = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot, '--depth', '9')
+            $secondPage = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot, '--depth', '16')
             $secondRows = @($secondPage.nodes | Where-Object { $_.node.automationId -like 'PlaylistEntryToggle*' })
             if ($secondRows.Count -ne [Math]::Min(40, $PlaylistCount - 40)) { throw "Second page rendered $($secondRows.Count) entries instead of at most 40." }
             Invoke-NodeAction (Find-Node 'PlaylistPreviousPageButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
@@ -2528,6 +2554,7 @@ finally {
     $env:MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL = $previousSkipProtocol
     $env:MODERNTUBEDOWNLOADER_DATA_ROOT = $previousDataRoot
     $env:MTD_FAKE_PLAYLIST_COUNT = $previousPlaylistCount
+    $env:MTD_FAKE_PLAYLIST_VISUAL = $previousPlaylistVisual
     $env:MTD_FAKE_METADATA_THUMBNAIL = $previousFakeThumbnail
     foreach ($process in @($normalProcess, $script:automationProcess)) {
         if ($null -ne $process -and -not $process.HasExited) {

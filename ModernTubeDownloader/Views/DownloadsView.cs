@@ -222,8 +222,9 @@ internal sealed partial class DownloadsView : UserControl
             feedback,
             analysisProgress]);
 
-        playlistPreview = new PlaylistPreviewControl(text) { Visible = false };
+        playlistPreview = new PlaylistPreviewControl(text, services.Thumbnails) { Visible = false };
         playlistPreview.AddRequested += PlaylistAddRequested;
+        playlistPreview.CloseRequested += (_, _) => ClearAnalyzedPreview();
         playlistPreview.AdvancedOptionsRequested += AdvancedClicked;
 
         queueToolbar = new Panel();

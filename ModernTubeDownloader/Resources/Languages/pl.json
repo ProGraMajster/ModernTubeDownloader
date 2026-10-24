@@ -411,6 +411,7 @@
   "Playlist.PreviousPage": "Poprzednia",
   "Playlist.NextPage": "Następna",
   "Playlist.Page": "Strona {0} z {1}",
+  "Playlist.FormatsHint": "Format każdego filmu zostanie dobrany przy rozpoczęciu pobierania.",
   "Playlist.AddSummary": "Dodano {0}. Pominięto {1} duplikatów; {2} niedostępnych.",
   "Queue.PlaylistPart": "Playlista: {0}",
   "Queue.CompletedWithWarnings": "ukończono z ostrzeżeniami",

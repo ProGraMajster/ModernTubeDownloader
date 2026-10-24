@@ -3,6 +3,7 @@ using ModernFormsNext;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Localization;
 using ModernTubeDownloader.Models;
+using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Utilities;
 using SkiaSharp;
@@ -35,12 +36,23 @@ internal sealed class PlaylistPreviewControl : UserControl
     private PlaylistSelection? selection;
     private int page;
     private bool binding;
+    private bool dashboard;
+    private readonly ThumbnailCacheService? thumbnails;
+    private CancellationTokenSource? pageLifetime;
+    private readonly Button closePreview;
 
-    public PlaylistPreviewControl(LocalizationService text)
+
+    public PlaylistPreviewControl(LocalizationService text, ThumbnailCacheService? thumbnails = null)
     {
         this.text = text;
+        this.thumbnails = thumbnails;
         AccessibleAutomationId = "PlaylistPreview";
         AppUi.Card(this);
+        closePreview = new Button { Text = "×", AccessibleAutomationId = "PlaylistClosePreview", Visible = false };
+        AppUi.Secondary(closePreview);
+        closePreview.Text = "";
+        DashboardVisual.Icon(closePreview, AppIconKind.Close, true);
+        closePreview.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
         title = AppUi.Heading(string.Empty, 17f);
         title.AccessibleAutomationId = "PlaylistTitle";
         facts = AppUi.Muted();
@@ -100,20 +112,36 @@ internal sealed class PlaylistPreviewControl : UserControl
         advancedOptions.Click += (_, _) => AdvancedOptionsRequested?.Invoke(this, EventArgs.Empty);
         Controls.AddRange([title, facts, selectedCount, selectAll, clearSelection, qualityLabel, quality,
             containerLabel, container, rangeEditor, rangeHint, feedback, entries,
-            previousPage, nextPage, pageText, advancedOptions, addSelected]);
+            previousPage, nextPage, pageText, advancedOptions, addSelected, closePreview]);
         SizeChanged += (_, _) => LayoutControls();
         text.LanguageChanged += LanguageChanged;
         ApplyLocalization();
         LayoutControls();
     }
 
+    public event EventHandler? CloseRequested;
+    public void SetDashboard(bool value)
+    {
+        if (dashboard == value) return;
+        dashboard = value;
+        closePreview.Visible = value;
+        rangeEditor.ResponsiveLayout = value;
+        AppTypography.SetDashboardPresentation(this, value);
+        if (value) DownloadsVisual.Card(this); else AppUi.Card(this);
+        foreach (var row in rows) row.SetDashboard(value);
+        pageLifetime?.Cancel(); pageLifetime?.Dispose();
+        pageLifetime = value ? new CancellationTokenSource() : null;
+        if (value && thumbnails is not null && pageLifetime is not null)
+            _ = LoadPageImagesAsync(rows.ToArray(), pageLifetime.Token);
+        ApplyLocalization();
+    }
     public event EventHandler? AddRequested;
     public event EventHandler? AdvancedOptionsRequested;
     public PlaylistSelection? Selection => selection;
     public QualityPreset SelectedPreset => quality.SelectedItem is LocalizedOption<QualityPreset> option ? option.Value : QualityPreset.All[0];
     public PreferredVideoContainer SelectedContainer => container.SelectedItem is LocalizedOption<PreferredVideoContainer> option
         ? option.Value : PreferredVideoContainer.Auto;
-    public void SetFeedback(string message) => feedback.Text = message;
+    public void SetFeedback(string message) { feedback.Text = message; LayoutControls(); }
     public bool TryGetRange(out MediaTimeRange range, out string? error)
         => rangeEditor.TryGetRange(null, false, out range, out error);
 
@@ -161,6 +189,8 @@ internal sealed class PlaylistPreviewControl : UserControl
     {
         UiCrashDiagnostics.VerifyUiThread("playlist.page-rebuild");
         UiCrashDiagnostics.Record("playlist.rebuild.begin", "playlistEntries", entries.Controls.Count);
+        pageLifetime?.Cancel(); pageLifetime?.Dispose();
+        pageLifetime = new CancellationTokenSource();
         foreach (var row in rows) row.Dispose();
         rows.Clear();
         entries.Controls.Clear();
@@ -177,14 +207,37 @@ internal sealed class PlaylistPreviewControl : UserControl
                 row.Selector.CheckedChanged += RowCheckedChanged;
                 rows.Add(row);
                 entries.Controls.Add(row);
+                row.SetDashboard(dashboard);
             }
         }
         finally { binding = false; }
+        if (dashboard && thumbnails is not null) _ = LoadPageImagesAsync(rows.ToArray(), pageLifetime.Token);
         RefreshRowText();
         RefreshSelection();
         ResizeRows();
         entries.VerticalScrollProperties.Value = 0;
         UiCrashDiagnostics.Record("playlist.rebuild.end", "playlistEntries", entries.Controls.Count);
+    }
+
+    private async Task LoadPageImagesAsync(PlaylistEntryRow[] pageRows, CancellationToken token)
+    {
+        // Sequential decode bounds transient full-resolution memory to one image.
+        foreach (var row in pageRows)
+        {
+            if (token.IsCancellationRequested) return;
+            if (row.HasImage) continue;
+            SKBitmap? bitmap;
+            try { bitmap = await thumbnails!.GetPreviewCopyAsync(row.ThumbnailUrl, token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+            catch (ObjectDisposedException) { return; } // The cache can close with its application owner.
+            if (bitmap is null) continue;
+            if (token.IsCancellationRequested) { bitmap.Dispose(); return; }
+            Application.RunOnUIThread(() =>
+            {
+                if (token.IsCancellationRequested) bitmap.Dispose();
+                else row.SetImage(bitmap);
+            });
+        }
     }
 
     private void RowCheckedChanged(object? sender, EventArgs e)
@@ -225,6 +278,7 @@ internal sealed class PlaylistPreviewControl : UserControl
 
     private void ApplyLocalization()
     {
+        closePreview.AccessibleName = text["Downloads.ClearPreview"];
         selectAll.Text = text["Playlist.SelectAll"];
         clearSelection.Text = text["Playlist.ClearSelection"];
         previousPage.Text = text["Playlist.PreviousPage"];
@@ -237,7 +291,7 @@ internal sealed class PlaylistPreviewControl : UserControl
         if (selection is not null)
         {
             title.Text = string.IsNullOrWhiteSpace(selection.Playlist.Title) ? text["Playlist.Untitled"] : selection.Playlist.Title;
-            facts.Text = text.Get("Playlist.Facts", selection.Playlist.Channel ?? text["Common.NotAvailable"], selection.Playlist.EntryCount);
+            facts.Text = text.Get("Playlist.Facts", selection.Playlist.Channel ?? text["Common.NotAvailable"], selection.Playlist.EntryCount) + (dashboard ? " · " + text["Playlist.FormatsHint"] : "");
             RefreshPageControls();
             RefreshRowText();
             RefreshSelectionCount();
@@ -261,6 +315,9 @@ internal sealed class PlaylistPreviewControl : UserControl
 
     private void LayoutControls()
     {
+        if (dashboard) { LayoutDashboard(); return; }
+        title.Multiline = false;
+        facts.Multiline = false;
         var width = Math.Max(540, ClientSize.Width);
         title.SetBounds(20, 12, width - 40, 32);
         facts.SetBounds(20, 44, width - 40, 24);
@@ -314,6 +371,55 @@ internal sealed class PlaylistPreviewControl : UserControl
         ResizeRows();
     }
 
+    private void LayoutDashboard()
+    {
+        int T(int n) => AppTypography.TextHeight(n);
+        var w = Math.Max(300, ClientSize.Width); const int inset = 16;
+        closePreview.SetBounds(w - 52, 12, 36, 32);
+        title.Multiline = true; title.AutoEllipsis = true;
+        title.SetBounds(inset, 14, w - 84, T(38));
+        facts.Multiline = true;
+        facts.SetBounds(inset, title.Bottom + 2, w - 32, T(AppTypography.TextScale > 125 ? 42 : 24));
+        var compact = w >= 1100 && AppTypography.TextScale <= 125;
+        var y = facts.Bottom + 8;
+        selectedCount.SetBounds(inset, y, compact ? w / 2 : w - 32, T(28));
+        y = compact ? y : selectedCount.Bottom + 6;
+        var selectWidth = Math.Min((w - 40) / 2, DashboardVisual.ActionWidth(selectAll));
+        var clearWidth = Math.Min((w - 40) / 2, DashboardVisual.ActionWidth(clearSelection));
+        selectAll.SetBounds(compact ? w - 24 - selectWidth - clearWidth : inset, y, selectWidth, T(32));
+        clearSelection.SetBounds(selectAll.Right + 8, y, clearWidth, T(32));
+        y = selectAll.Bottom + 10;
+        var fieldWidth = Math.Min(T(240), (w - 40) / 2);
+        qualityLabel.SetBounds(inset, y, fieldWidth, T(22));
+        containerLabel.SetBounds(inset + fieldWidth + 8, y, fieldWidth, T(22));
+        quality.SetBounds(inset, qualityLabel.Bottom + 3, fieldWidth, T(34));
+        container.SetBounds(containerLabel.Left, quality.Top, fieldWidth, T(34));
+        if (compact) rangeEditor.SetBounds(container.Right + 16, quality.Top, w - container.Right - 32, T(36));
+        else rangeEditor.SetBounds(inset, quality.Bottom + 8, w - 32, T(36));
+        rangeHint.Visible = rangeEditor.IsCustom;
+        rangeHint.SetBounds(inset, rangeEditor.Bottom + 4, w - 32, T(24));
+        y = rangeEditor.IsCustom ? rangeHint.Bottom + 8 : rangeEditor.Bottom + 10;
+        var actionY = Height - T(40) - 12;
+        var addWidth = Math.Min(w - 32, DashboardVisual.ActionWidth(addSelected));
+        var advancedWidth = Math.Min(w - 32, DashboardVisual.ActionWidth(advancedOptions));
+        addSelected.SetBounds(w - inset - addWidth, actionY, addWidth, T(36));
+        advancedOptions.SetBounds(inset, actionY, advancedWidth, T(36));
+        if (advancedOptions.Right + 8 > addSelected.Left)
+        { advancedOptions.Top -= T(42); actionY -= T(42); }
+        feedback.Multiline = true;
+        var feedbackHeight = string.IsNullOrEmpty(feedback.Text) ? 0 : T(34);
+        feedback.SetBounds(inset, actionY - feedbackHeight - 6, w - 32, feedbackHeight);
+        var pagingY = feedback.Top - T(34) - 6;
+        previousPage.Text = "‹"; nextPage.Text = "›";
+        previousPage.AccessibleName = text["Playlist.PreviousPage"];
+        nextPage.AccessibleName = text["Playlist.NextPage"];
+        previousPage.SetBounds(inset, pagingY, 44, T(32));
+        pageText.SetBounds(68, pagingY, Math.Min(T(160), w - 140), T(32));
+        nextPage.SetBounds(pageText.Right + 8, pagingY, 44, T(32));
+        entries.SetBounds(inset, y, w - 32, Math.Max(64, pagingY - y - 8));
+        ResizeRows();
+    }
+
     private void RefreshPageControls()
     {
         pageText.Text = text.Get("Playlist.Page", page + 1, PageCount());
@@ -331,7 +437,7 @@ internal sealed class PlaylistPreviewControl : UserControl
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) text.LanguageChanged -= LanguageChanged;
+        if (disposing) { text.LanguageChanged -= LanguageChanged; pageLifetime?.Cancel(); pageLifetime?.Dispose(); pageLifetime = null; }
         base.Dispose(disposing);
     }
 }
@@ -342,6 +448,33 @@ internal sealed class PlaylistEntryRow : Panel
     private readonly Label number;
     private readonly Label title;
     private readonly Label detail;
+    private bool dashboard;
+    private readonly DownloadsPictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom, RoundedPreview = true, Visible = false };
+    private readonly PictureBox placeholder = new() { Image = AppBranding.Icon, SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.Fill, Padding = new Padding(16) };
+    private SKBitmap? ownedImage;
+    public bool HasImage => ownedImage is not null;
+    public string? ThumbnailUrl => entry.ThumbnailUrl;
+    public void SetImage(SKBitmap bitmap) { image.Image = null; ownedImage?.Dispose(); ownedImage = bitmap; image.Image = bitmap; placeholder.Visible = false; }
+    public void SetDashboard(bool value)
+    {
+        dashboard = value;
+        AppTypography.SetDashboardPresentation(this, value);
+        image.Visible = value;
+        RefreshSurface();
+        Height = value ? AppTypography.TextHeight(76) : 42;
+        LayoutContent();
+    }
+    private void RefreshSurface()
+    {
+        if (dashboard) AppUi.BindGradient(this, Selector.Checked ? DownloadsVisual.Selected : DownloadsVisual.Panel,
+            Selector.Checked ? DownloadsVisual.SelectedEnd : DownloadsVisual.PanelEnd);
+        else AppUi.BindInteractiveSurface(this, AppThemeTokens.SurfaceSecondary, AppThemeTokens.SurfaceHover);
+    }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) { image.Image = null; ownedImage?.Dispose(); ownedImage = null; }
+        base.Dispose(disposing);
+    }
 
     public PlaylistEntryRow(int ordinal, PlaylistEntry entry, bool selected)
     {
@@ -366,6 +499,7 @@ internal sealed class PlaylistEntryRow : Panel
             style.BackgroundBrush = null;
             style.BackgroundColor = SKColors.Transparent;
         }
+        Selector.CheckedChanged += (_, _) => RefreshSurface();
         number = AppUi.Muted($"{entry.PlaylistIndex}.");
         number.TextAlign = ContentAlignment.MiddleRight;
         title = AppUi.Muted();
@@ -377,7 +511,10 @@ internal sealed class PlaylistEntryRow : Panel
         detail = AppUi.Muted();
         detail.AccessibleAutomationId = $"PlaylistEntryDetail{ordinal + 1}";
         detail.TextAlign = ContentAlignment.MiddleRight;
-        Controls.AddRange([Selector, number, title, detail]);
+        AppUi.BindBackground(image, AppThemeTokens.SurfaceSecondary);
+        AppUi.BindBackground(placeholder, AppThemeTokens.SurfaceSecondary);
+        image.Controls.Add(placeholder);
+        Controls.AddRange([Selector, number, title, detail, image]);
         SizeChanged += (_, _) => LayoutContent();
         LayoutContent();
     }
@@ -389,7 +526,7 @@ internal sealed class PlaylistEntryRow : Panel
     {
         title.Text = string.IsNullOrWhiteSpace(entry.Title) ? unavailable : entry.Title;
         detail.Text = !entry.IsAvailable ? unavailable :
-            entry.DurationSeconds is { } seconds ? FormatDuration(seconds) : string.Empty;
+            entry.DurationSeconds is { } seconds ? FormatDuration(seconds) : dashboard ? "—" : string.Empty;
     }
 
     private static string FormatDuration(double seconds)
@@ -401,6 +538,19 @@ internal sealed class PlaylistEntryRow : Panel
 
     private void LayoutContent()
     {
+        if (dashboard)
+        {
+            Height = AppTypography.TextHeight(76);
+            Selector.SetBounds(8, (Height - 26) / 2, 26, 26);
+            number.SetBounds(36, (Height - AppTypography.TextHeight(28)) / 2, AppTypography.TextHeight(32), AppTypography.TextHeight(28));
+            image.SetBounds(number.Right + 8, (Height - 54) / 2, 96, 54);
+            var left = image.Right + 12;
+            title.SetBounds(left, 6, Math.Max(0, Width - left - 12), AppTypography.TextHeight(42));
+            detail.TextAlign = ContentAlignment.MiddleLeft;
+            detail.SetBounds(left, title.Bottom, Math.Max(0, Width - left - 12), AppTypography.TextHeight(22));
+            return;
+        }
+        detail.TextAlign = ContentAlignment.MiddleRight;
         Selector.SetBounds(9, 9, 25, 25);
         number.SetBounds(40, 7, 40, 28);
         var detailWidth = Math.Min(112, Math.Max(82, Width / 5));
