@@ -212,7 +212,7 @@ try {
             while($nativeOwner -and $nativeOwner.Current.NativeWindowHandle -eq 0) { $nativeOwner=[System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($nativeOwner) }
             if(-not $nativeOwner -or $nativeOwner.Current.ProcessId -ne $owned.Id) { throw 'Menu has no owned native ancestor.' }
             if(-not [PlaylistWindow]::Click([IntPtr]$nativeOwner.Current.NativeWindowHandle,$owned.Id,[int]($r.X+$r.Width/2),[int]($r.Y+$r.Height/2))) { throw 'Owned menu click failed.' }
-            WaitCheck { [PlaylistWindow]::Popup($owned.Id,$hwnd) -eq [IntPtr]::Zero } 'Context menu did not close after Select.' 
+            WaitCheck { [PlaylistWindow]::Popup($owned.Id,$hwnd) -eq [IntPtr]::Zero } 'Context menu did not close after Select.'
             foreach($id in @('InspectorTitle','InspectorPlaylist')) {
                 $label=Find $id; Reveal $label; $label.SetFocus()
                 if(-not [PlaylistWindow]::Key($hwnd,$owned.Id,112)) { throw 'Owned F1 dispatch failed.' }
@@ -264,6 +264,10 @@ try {
         if(($completed.videoId -join ',') -ne 'p001,p002,p004') { throw 'Per-entry metadata changed stable media IDs.' }
         if(($completed.id -join ',') -ne ($before.id -join ',')) { throw 'Retry changed IDs/order.' }
         foreach($job in $completed) { if(-not (Test-Path -LiteralPath $job.finalFile)) { throw 'Completed job has no output file.' } }
+        WaitCheck {
+            $widgetNames=@((Find 'DashboardWidgets').FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
+            ($widgetNames -contains '3') -and (@($widgetNames | Where-Object { $_ -match '^(Aktywne procesy|Active processes) \(0\)$' }).Count -gt 0)
+        } 'Widgets did not converge to three completed jobs and no owned processes.'
         SelectRow (Find "QueueItem-$firstId"); Capture 'playlist-completed-after-retry'
     }
     SetText 'DownloadUrlInput' 'https://www.youtube.com/watch?v=p006&list=synthetic-playlist'

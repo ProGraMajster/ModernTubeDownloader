@@ -376,6 +376,7 @@ internal sealed class PlaylistPreviewControl : UserControl
         int T(int n) => AppTypography.TextHeight(n);
         var w = Math.Max(300, ClientSize.Width); const int inset = 16;
         closePreview.SetBounds(w - 52, 12, 36, 32);
+        DashboardVisual.Icon(closePreview, AppIconKind.Close, true);
         title.Multiline = true; title.AutoEllipsis = true;
         title.SetBounds(inset, 14, w - 84, T(38));
         facts.Multiline = true;
