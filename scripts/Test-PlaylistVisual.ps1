@@ -103,7 +103,45 @@ function SaveOwnedWindowDiagnostics {
     $popup=[PlaylistWindow]::Popup($owned.Id,$hwnd)
     if($popup -ne [IntPtr]::Zero) { Capture 'playlist-unexpected-popup' $popup }
 }
-function ReadQueue { if(Test-Path (Join-Path $DataRoot 'queue.json')) { foreach($job in (Get-Content (Join-Path $DataRoot 'queue.json') -Raw | ConvertFrom-Json)) { Write-Output $job } } }
+function ReadQueue {
+    $path=Join-Path $DataRoot 'queue.json'
+    if(Test-Path $path) {
+        # Read one settled checkpoint, never poll the writer by holding its file.
+        # Windows MoveFileEx can reject replacement even with FileShare.Delete.
+        $deadline=[Diagnostics.Stopwatch]::StartNew()
+        do {
+            $stamp=(Get-Item -LiteralPath $path).LastWriteTimeUtc
+            if(([DateTime]::UtcNow-$stamp).TotalMilliseconds -ge 300) { break }
+            Start-Sleep -Milliseconds 25
+            if($deadline.Elapsed.TotalSeconds -ge 3) { throw 'Queue checkpoint did not settle for inspection.' }
+        } while($true)
+        $stream=[IO.FileStream]::new($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $reader=[IO.StreamReader]::new($stream)
+        try { $json=$reader.ReadToEnd() } finally { $reader.Dispose() }
+        foreach($job in ($json | ConvertFrom-Json)) { Write-Output $job }
+    }
+}
+function QueueRows {
+    @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.AutomationId -like 'QueueItem-*' })
+}
+function QueueStatusIs([string]$Id,[string]$State) {
+    $names=switch($State) {
+        'active' { @('Pobieranie obrazu','Pobieranie dźwięku','Downloading video','Downloading audio') }
+        'cancelled' { @('Anulowano','Cancelled') }
+        'interrupted' { @('Przerwano','Interrupted') }
+        'failed' { @('Niepowodzenie','Failed') }
+        'completed' { @('Ukończono','Completed') }
+    }
+    $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,('QueueStatus-'+([guid]$Id).ToString('N')))
+    $element=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
+    if(-not $element) { return $false }
+    $name=$element.Current.Name
+    foreach($expected in $names) { if($name.StartsWith($expected,[StringComparison]::Ordinal)) { return $true } }
+    return $false
+}
+function AssertPersistedStatus([string]$Id,[int[]]$Statuses) {
+    if((@(ReadQueue) | Where-Object id -eq $Id).status -notin $Statuses) { throw "Canonical checkpoint disagrees with UIA status for $Id." }
+}
 function CloseOwned {
     if($owned.HasExited) { return }
     [void]$owned.CloseMainWindow()
@@ -188,8 +226,9 @@ try {
         }
     }
     Invoke 'PlaylistAddSelectedButton'
-    WaitCheck { @(ReadQueue).Count -eq 3 } 'Handoff did not persist exactly three jobs.'
+    WaitCheck { @(QueueRows).Count -eq 3 } 'Handoff did not expose exactly three jobs.'
     $before=@(ReadQueue)
+    if($before.Count -ne 3) { throw 'Handoff did not persist exactly three jobs.' }
     if(($before.videoId -join ',') -ne 'p001,p002,p004') { throw 'Handoff changed entry IDs/order.' }
     foreach($job in $before) {
         if($job.qualityPresetId -ne '1080' -or $job.preferredVideoContainer -ne 2 -or $job.playlistId -ne 'synthetic-playlist') { throw 'Handoff lost shared options/provenance.' }
@@ -261,15 +300,19 @@ try {
         WaitCheck { @(Get-ChildItem $DataRoot -Recurse -Filter '.review-transfer-ready').Count -gt 0 } 'Actual byte transfer did not reach its gate.'
         SelectRow (Find "QueueItem-$firstId"); Capture 'playlist-downloading'
         Invoke "QueuePrimaryAction-$firstId"
-        WaitCheck { (@(ReadQueue) | Where-Object id -eq $before[0].id).status -eq 8 } 'Cancel did not persist.'
+        WaitCheck { QueueStatusIs $before[0].id 'cancelled' } 'Cancel did not update the canonical row.'
+        AssertPersistedStatus $before[0].id @(8)
         Capture 'playlist-cancelled'
         Invoke "QueuePrimaryAction-$firstId"
-        WaitCheck { (@(ReadQueue) | Where-Object id -eq $before[0].id).status -in @(2,3) } 'Retry did not restart the first job.'
+        WaitCheck { QueueStatusIs $before[0].id 'active' } 'Retry did not restart the first job.'
+        AssertPersistedStatus $before[0].id @(2,3)
         RestartOwned
         Invoke 'NavDownloads'
-        WaitCheck { (@(ReadQueue) | Where-Object id -eq $before[0].id).status -eq 13 } 'Restart did not recover Interrupted.'
+        WaitCheck { QueueStatusIs $before[0].id 'interrupted' } 'Restart did not recover Interrupted.'
+        AssertPersistedStatus $before[0].id @(13)
         SelectRow (Find "QueueItem-$firstId"); Capture 'playlist-interrupted'
-        WaitCheck { (@(ReadQueue) | Where-Object id -eq $before[1].id).status -eq 7 } 'Synthetic executor failure did not persist.'
+        WaitCheck { QueueStatusIs $before[1].id 'failed' } 'Synthetic executor failure did not update the row.'
+        AssertPersistedStatus $before[1].id @(7)
         $secondId=([guid]$before[1].id).ToString('N')
         SelectRow (Find "QueueItem-$secondId"); Capture 'playlist-failed'
         Get-ChildItem $DataRoot -Recurse -Filter '.playlist-failure-ready' | ForEach-Object { Set-Content (Join-Path $_.DirectoryName '.playlist-retry-allow') 'allowed' }
@@ -277,9 +320,10 @@ try {
         Invoke "QueuePrimaryAction-$firstId"
         WaitCheck {
             Get-ChildItem $DataRoot -Recurse -Filter '.review-transfer-ready' | ForEach-Object { Set-Content (Join-Path $_.DirectoryName '.review-transfer-release') 'allowed' }
-            @(@(ReadQueue) | Where-Object status -eq 6).Count -eq 3
+            @($before | Where-Object { QueueStatusIs $_.id 'completed' }).Count -eq 3
         } 'Retry did not complete all three canonical jobs.'
         $completed=@(ReadQueue)
+        if(@($completed | Where-Object status -eq 6).Count -ne 3) { throw 'Completion did not persist for all three jobs.' }
         if(($completed.videoId -join ',') -ne 'p001,p002,p004') { throw 'Per-entry metadata changed stable media IDs.' }
         if(($completed.id -join ',') -ne ($before.id -join ',')) { throw 'Retry changed IDs/order.' }
         foreach($job in $completed) { if(-not (Test-Path -LiteralPath $job.finalFile)) { throw 'Completed job has no output file.' } }
@@ -320,9 +364,12 @@ try {
         Invoke 'DashboardChipAnalyze'; [void](Find 'PlaylistEntryToggle5')
         Invoke 'PlaylistClearSelectionButton'; Toggle 5; Choose 'PlaylistQualitySelector' 7
         Invoke 'PlaylistAddSelectedButton'
-        WaitCheck { @(ReadQueue).Count -eq 4 } 'Audio-only selection did not reach the canonical queue.'
-        WaitCheck { (@(ReadQueue) | Where-Object videoId -eq 'p005').status -eq 6 } 'Audio-only selection did not complete.'
+        WaitCheck { @(QueueRows).Count -eq 4 } 'Audio-only selection did not reach the canonical queue.'
+        $audioRow=@(QueueRows) | Where-Object { $_.Current.AutomationId -notin @($before | ForEach-Object { 'QueueItem-'+([guid]$_.id).ToString('N') }) }
+        $audioId=$audioRow.Current.AutomationId.Substring('QueueItem-'.Length)
+        WaitCheck { QueueStatusIs $audioId 'completed' } 'Audio-only selection did not complete.'
         $audioJob=@(ReadQueue) | Where-Object videoId -eq 'p005'
+        if($audioJob.status -ne 6) { throw 'Audio-only completion did not persist.' }
         if($audioJob.qualityPresetId -ne 'audio' -or -not $audioJob.selectedFormats.audioOnly -or $audioJob.selectedFormats.videoFormatId) { throw 'Audio-only selection resolved a video stream.' }
         Invoke 'PlaylistClosePreview'
         SelectRow (Find ('QueueItem-'+([guid]$audioJob.id).ToString('N')))
