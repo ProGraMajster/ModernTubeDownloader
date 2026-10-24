@@ -189,7 +189,7 @@ if (arguments.Contains("--dump-single-json"))
         }
         if (sourceUri is not null)
         {
-            var id = sourceUri.Query.Split('&').FirstOrDefault(value => value.TrimStart('?').StartsWith("id=", StringComparison.OrdinalIgnoreCase) || value.TrimStart('?').StartsWith("v=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2).Last();
+            var id = MediaQueryId(sourceUri, richPlaylist);
             if (!string.IsNullOrWhiteSpace(id))
             {
                 metadata["id"] = id;
@@ -249,7 +249,7 @@ if (arguments.Contains("-f"))
     var videoId = "sample123";
     if (Uri.TryCreate(sourceUrl, UriKind.Absolute, out var videoUri))
     {
-        var queryId = videoUri.Query.Split('&').FirstOrDefault(value => value.TrimStart('?').StartsWith("id=", StringComparison.OrdinalIgnoreCase) || value.TrimStart('?').StartsWith("v=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2).Last();
+        var queryId = MediaQueryId(videoUri, Environment.GetEnvironmentVariable("MTD_FAKE_PLAYLIST_VISUAL") == "1");
         if (!string.IsNullOrWhiteSpace(queryId)) videoId = queryId;
     }
     Directory.CreateDirectory(outputDirectory);
@@ -449,3 +449,13 @@ static string PlaylistTitle(int index) => index switch
     _ => $"SYNTHETIC QA — Materiał {index:000}"
 };
 static double? PlaylistDuration(int index) => index switch { 2 => 90061, 4 => null, 5 => 10800, 6 => 3, _ => 40 + index };
+
+static string? MediaQueryId(Uri uri, bool allowVideoKey)
+{
+    var parameters = uri.Query.TrimStart('?').Split('&');
+    // Existing fixtures use id= even when v= is also present. The additional
+    // YouTube-shaped key is opt-in for visual playlist fixtures only.
+    var pair = parameters.FirstOrDefault(value => value.StartsWith("id=", StringComparison.OrdinalIgnoreCase))
+        ?? (allowVideoKey ? parameters.FirstOrDefault(value => value.StartsWith("v=", StringComparison.OrdinalIgnoreCase)) : null);
+    return pair?.Split('=', 2).Last();
+}
