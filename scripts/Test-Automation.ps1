@@ -2431,7 +2431,25 @@ try {
                 throw 'First or last semantic queue badge has the wrong number.'
             }
         }
-        if (-not $script:automationProcess.CloseMainWindow() -or -not $script:automationProcess.WaitForExit(30000)) {
+        # Pending playlist jobs require the same production shutdown choice as
+        # the single-video smoke below. Keep the entire close within 30 seconds.
+        $closeClock = [Diagnostics.Stopwatch]::StartNew()
+        if (-not $script:automationProcess.CloseMainWindow()) { throw 'Playlist close request failed.' }
+        do {
+            $closeRoots = Invoke-AutomationCli -CliArguments @('roots', '--pid', "$($script:automationProcess.Id)")
+            $closeRoot = @($closeRoots.value | Where-Object rootId -ne $mainRoot) | Select-Object -First 1
+        } while (-not $closeRoot -and $closeClock.Elapsed.TotalSeconds -lt 15)
+        if (-not $closeRoot) { throw 'Pending playlist did not expose a shutdown confirmation.' }
+        [void](Find-Node 'ShutdownChoiceWindow' $closeRoot.rootId)
+        Write-Output 'Playlist pending-work ShutdownChoiceWindow verified; invoking ShutdownExit.'
+        try { Invoke-NodeAction (Find-Node 'ShutdownExit' $closeRoot.rootId) $closeRoot.rootId 'Invoke' | Out-Null }
+        catch {
+            if ($_.Exception.Message -notmatch '^Automation CLI exit 5: action\b' -or
+                $_.Exception.Message -notmatch '"error"\s*:\s*"OutcomeUnknown"') { throw }
+            Write-Output 'Playlist ShutdownExit transport closed; process exit, code and bridge removal remain required.'
+        }
+        $remainingCloseMs = [Math]::Max(0, 30000 - [int]$closeClock.ElapsedMilliseconds)
+        if (-not $script:automationProcess.WaitForExit($remainingCloseMs) -or $script:automationProcess.ExitCode -ne 0) {
             throw 'Automation process did not close cleanly.'
         }
         Wait-Bridge $script:automationProcess.Id $false
