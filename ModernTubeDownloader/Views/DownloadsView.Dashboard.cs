@@ -159,7 +159,7 @@ internal sealed partial class DownloadsView
         if (e.KeyCode is Keys.Up or Keys.Down && items.Count > 0)
         {
             index = Math.Clamp(index + (e.KeyCode == Keys.Down ? 1 : -1), 0, items.Count - 1); selectedItemId = items[index].Id;
-            BuildQueueCards(selectedItemId);
+            if (!cards.ContainsKey(selectedItemId.Value)) BuildQueueCards(selectedItemId);
             RefreshSelection(); ScrollQueueCardIntoView(selectedItemId.Value); e.Handled = true;
         }
         else if (e.KeyCode == Keys.Enter) { dashboardDrawer = true; UpdateLayout(); e.Handled = true; }

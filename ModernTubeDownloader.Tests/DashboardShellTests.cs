@@ -237,6 +237,42 @@ public sealed class DashboardShellTests
         finally { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
+    [Fact]
+    public async Task GroupArrowSelectionKeepsVisibleTreeAndRevealsNextPage()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-group-arrows-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            var items = Enumerable.Range(1, 45).Select(i => new DownloadQueueItem
+            {
+                VideoId = "qa-" + i, Title = "QA " + i, SourceUrl = "https://example.test/" + i,
+                PlaylistId = "group", PlaylistTitle = "Group", PlaylistIndex = i, Status = DownloadStatus.Completed
+            }).ToArray();
+            services.Queue.AddRangeSkippingDuplicates(items);
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize();
+                var view = new DownloadsView(services); view.SetDashboard(true);
+                host.Show(view, 1536, 1024); view.RevealQueueItem(items[0].Id); host.ProcessPendingWork();
+                var list = Find<FlowLayoutPanel>(view, "QueueList");
+                var parentChanges = 0; list.ParentChanged += (_, _) => parentChanges++;
+                Assert.True(host.Input.Focus(Find<QueueItemCard>(list, $"QueueItem-{items[0].Id:N}")));
+                host.Input.PressKey(Keys.Down);
+                Assert.Equal(items[1].Id, view.SelectedItemId);
+                Assert.Equal(0, parentChanges);
+                view.RevealQueueItem(items[38].Id); host.ProcessPendingWork();
+                Assert.True(host.Input.Focus(Find<QueueItemCard>(list, $"QueueItem-{items[38].Id:N}")));
+                host.Input.PressKey(Keys.Down);
+                Assert.Equal(items[39].Id, view.SelectedItemId);
+                Assert.NotNull(Find<QueueItemCard>(list, $"QueueItem-{items[39].Id:N}"));
+                Assert.Equal(items.Select(item => item.Id), services.Queue.Snapshot().Select(item => item.Id));
+            }
+            await services.ShutdownAsync();
+        }
+        finally { AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Theory]
     [InlineData(100)] [InlineData(150)] [InlineData(200)]
     public async Task QueuePresentationRoundtripRetainsHostSelectionAndCanonicalRecords(int scale)
