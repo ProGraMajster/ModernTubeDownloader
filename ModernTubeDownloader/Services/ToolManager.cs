@@ -548,9 +548,9 @@ public sealed class ToolManager
             usageCounts[kind] = Math.Max(0, usageCounts[kind] - 1);
             shouldActivate = usageCounts[kind] == 0 && GetPendingInstallationUnsafe(kind) is not null;
         }
-        if (shouldActivate)
-            _ = ActivatePendingAsync(kind);
-        return ValueTask.CompletedTask;
+        // The caller owns the lease through async disposal, including activation
+        // and its final state write. Do not leave a writer behind after disposal.
+        return shouldActivate ? new ValueTask(ActivatePendingAsync(kind)) : ValueTask.CompletedTask;
     }
 
     private async Task ActivatePendingAsync(ExternalToolKind kind)

@@ -13,6 +13,38 @@ public sealed class ThumbnailCacheServiceTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "ModernTubeDownloader.Thumbnail.Tests", Guid.NewGuid().ToString("N"));
 
+    [Fact]
+    public async Task PlaylistPreviewOwnsBoundedCopiesAndRespectsAutomaticImageSetting()
+    {
+        const string url = "https://example.test/playlist-thumbnail";
+        var paths = AppPaths.Create(root);
+        Directory.CreateDirectory(paths.ThumbnailCacheDirectory);
+        var file = Path.Combine(paths.ThumbnailCacheDirectory, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url))) + ".img");
+        using var original = new SKBitmap(1280, 720);
+        original.Erase(SKColors.CornflowerBlue);
+        using var image = SKImage.FromBitmap(original);
+        using var encoded = image.Encode(SKEncodedImageFormat.Png, 90);
+        await File.WriteAllBytesAsync(file, encoded.ToArray());
+        var enabled = true;
+        using var client = new HttpClient(new RejectNetworkHandler());
+        using var cache = new ThumbnailCacheService(paths, new NullAppLogger(), () => enabled, client);
+        using (var preview = await cache.GetPreviewCopyAsync(url, CancellationToken.None))
+        {
+            Assert.NotNull(preview);
+            Assert.Equal((320, 180), (preview.Width, preview.Height));
+        }
+        var shared = await cache.GetAsync(url);
+        Assert.NotNull(shared);
+        using (var second = await cache.GetPreviewCopyAsync(url, CancellationToken.None)) Assert.NotSame(shared, second);
+        Assert.Equal((1280, 720), (shared.Width, shared.Height));
+        Assert.Equal(SKColors.CornflowerBlue, shared.GetPixel(0, 0));
+        enabled = false;
+        Assert.Null(await cache.GetPreviewCopyAsync(url, CancellationToken.None));
+        enabled = true;
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cache.GetPreviewCopyAsync(url, cancelled.Token));
+    }
+
     [Theory]
     [InlineData(SKEncodedImageFormat.Jpeg)]
     [InlineData(SKEncodedImageFormat.Png)]

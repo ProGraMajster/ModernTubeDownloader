@@ -297,9 +297,9 @@ public sealed class DownloadJobExecutor(
                     }
                 }
             }
+            var finalDuration = await ffmpeg.TryProbeDurationAsync(finalPath).ConfigureAwait(false);
             if (requestedRange.Mode == MediaRangeMode.Custom)
             {
-                var finalDuration = await ffmpeg.TryProbeDurationAsync(finalPath).ConfigureAwait(false);
                 logger.Info($"Segment finalized QueueItemId={item.Id} RequestedRange={requestedRange.DisplayText} FinalDurationSeconds=" +
                     (finalDuration?.ToString("0.###", CultureInfo.InvariantCulture) ?? "unknown"));
             }
@@ -342,7 +342,8 @@ public sealed class DownloadJobExecutor(
                     item.PlaylistId,
                     item.PlaylistTitle,
                     item.PlaylistIndex,
-                    requestedRange), CancellationToken.None).ConfigureAwait(false);
+                    requestedRange, DurationSeconds: finalDuration,
+                    FileSizeBytes: HistoryOutputFacts.TryFileSize(finalPath, logger)), CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

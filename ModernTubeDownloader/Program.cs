@@ -41,6 +41,8 @@ internal static class Program
                 ExternalProtocolRegistration.RegisterCurrentExecutable();
                 return 0;
             }
+            var classicUi = args.Contains("--classic-ui", StringComparer.Ordinal);
+            args = args.Where(arg => arg != "--classic-ui").ToArray();
             var enableAutomation = args.Length == 1 && args[0] == "--automation";
             var autostart = args.Length is 1 or 2 && args[0] == "--autostart" &&
                 (args.Length == 1 || args[1] == "--start-hidden");
@@ -122,7 +124,7 @@ internal static class Program
                     logger.Error("Browser protocol integration could not be configured.", error);
                 }
             }
-            var form = new MainForm(services, enableAutomation, initialRequest);
+            var form = new MainForm(services, enableAutomation, initialRequest, classicUi);
             if (services.Notifications is { } notifications)
                 notifications.Navigate += (_, request) => Application.RunOnUIThread(() => form.HandleNotification(request));
             instance.Start(request =>

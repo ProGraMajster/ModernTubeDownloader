@@ -19,7 +19,7 @@ internal static class AppScrollBehavior
     }
 }
 
-internal sealed class AppScrollPanel : Panel
+internal class AppScrollPanel : Panel
 {
     protected override void OnLayout(LayoutEventArgs e)
     {

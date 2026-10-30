@@ -11,7 +11,7 @@ using SkiaSharp;
 
 namespace ModernTubeDownloader.Views;
 
-internal sealed class DownloadsView : UserControl
+internal sealed partial class DownloadsView : UserControl
 {
 #if DEBUG
     internal Func<Form, IDisposable?>? RegisterDetailsForAutomation { get; set; }
@@ -107,7 +107,7 @@ internal sealed class DownloadsView : UserControl
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private bool disposed;
 
-    public DownloadsView(AppServices services)
+    public DownloadsView(AppServices services, bool useDashboard = false)
     {
         this.services = services;
         text = services.Localization;
@@ -135,7 +135,7 @@ internal sealed class DownloadsView : UserControl
         urlPanel = new Panel();
         AppUi.Card(urlPanel);
         urlLabel = AppUi.Muted();
-        supportedSourcesButton = new Button { AccessibleAutomationId = "SupportedSourcesButton" };
+        supportedSourcesButton = new DashboardButton { AccessibleAutomationId = "SupportedSourcesButton" };
         AppUi.Secondary(supportedSourcesButton);
         supportedSourcesButton.Click += (_, _) => SupportedSourcesRequested?.Invoke(this, EventArgs.Empty);
         sourceSummary = AppUi.Muted();
@@ -149,8 +149,8 @@ internal sealed class DownloadsView : UserControl
         };
         AppUi.Input(urlInput);
         AppTypography.Bind(urlInput, 12.5f);
-        pasteButton = new Button { Height = 48, Width = 48, AccessibleAutomationId = "PasteButton" };
-        analyzeButton = new Button { Height = 48, Enabled = false, AccessibleAutomationId = "AnalyzeButton" };
+        pasteButton = new DashboardButton { Height = 48, Width = 48, AccessibleAutomationId = "PasteButton" };
+        analyzeButton = new DashboardButton { Height = 48, Enabled = false, AccessibleAutomationId = "AnalyzeButton" };
         AppUi.Secondary(pasteButton);
         AppUi.Primary(analyzeButton);
         pasteIcon = new AppVectorIcon(AppIconKind.Clipboard, 24, AppThemeTokens.TextPrimary)
@@ -191,13 +191,13 @@ internal sealed class DownloadsView : UserControl
         rangeEditor.ModeChanged += (_, _) => UpdateLayout();
         rangeHint = AppUi.Muted();
         rangeHint.AccessibleAutomationId = "VideoRangeKeyframeHint";
-        addButton = new Button { Enabled = false, AccessibleAutomationId = "AddToQueueButton" };
-        detailsButton = new Button { Enabled = false, AccessibleAutomationId = "DetailsButton" };
-        advancedButton = new Button { Enabled = false, AccessibleAutomationId = "AdvancedOptionsButton" };
+        addButton = new DashboardButton { Enabled = false, AccessibleAutomationId = "AddToQueueButton" };
+        detailsButton = new DashboardButton { Enabled = false, AccessibleAutomationId = "DetailsButton" };
+        advancedButton = new DashboardButton { Enabled = false, AccessibleAutomationId = "AdvancedOptionsButton" };
         AppUi.Primary(addButton);
         AppUi.Secondary(detailsButton);
         AppUi.Secondary(advancedButton);
-        clearPreviewButton = new Button { Text = "×", Visible = false, AccessibleAutomationId = "ClearAnalyzedPreviewButton" };
+        clearPreviewButton = new DashboardButton { Text = "×", Visible = false, AccessibleAutomationId = "ClearAnalyzedPreviewButton" };
         feedback = AppUi.Muted();
         analysisProgress = new ProgressBar { Minimum = 0, Maximum = 100, Value = 45, Visible = false };
         addButton.Click += AddClicked;
@@ -222,8 +222,10 @@ internal sealed class DownloadsView : UserControl
             feedback,
             analysisProgress]);
 
-        playlistPreview = new PlaylistPreviewControl(text) { Visible = false };
+        playlistPreview = new PlaylistPreviewControl(text, services.Thumbnails) { Visible = false };
         playlistPreview.AddRequested += PlaylistAddRequested;
+        playlistPreview.DashboardLayoutChanged += (_, _) => UpdateLayout();
+        playlistPreview.CloseRequested += (_, _) => ClearAnalyzedPreview();
         playlistPreview.AdvancedOptionsRequested += AdvancedClicked;
 
         queueToolbar = new Panel();
@@ -240,8 +242,8 @@ internal sealed class DownloadsView : UserControl
         storageWarning.Visible = false;
         admissionCountdown.AccessibleAutomationId = "QueueAdmissionCountdown";
         admissionCountdown.Visible = false;
-        pauseButton = new Button { AccessibleAutomationId = "QueuePauseButton" };
-        moreButton = new Button { Text = "…", Width = 44, AccessibleAutomationId = "QueueMenuButton" };
+        pauseButton = new DashboardButton { AccessibleAutomationId = "QueuePauseButton" };
+        moreButton = new DashboardButton { Text = "…", Width = 44, AccessibleAutomationId = "QueueMenuButton" };
         AppUi.Secondary(pauseButton);
         AppUi.Secondary(moreButton);
         pauseButton.Click += (_, _) => services.Queue.SetPaused(!services.Queue.IsPaused);
@@ -262,10 +264,11 @@ internal sealed class DownloadsView : UserControl
             if (queueStructureDirty)
             {
                 queueStructureDirty = false; var reveal = pendingQueueReveal; pendingQueueReveal = null;
-                BuildQueueCards(reveal);
+                BuildQueueCards(dashboard ? null : reveal);
             }
             UpdateAdmissionCountdown();
             UpdateQueueSummary();
+            RefreshPlaylistGroups();
         };
         admissionCountdownTimer.Start();
 
@@ -300,15 +303,23 @@ internal sealed class DownloadsView : UserControl
         services.Queue.Changed += QueueChanged;
         services.Settings.Changed += SettingsChanged;
         services.Tools.Changed += ToolStatusChanged;
-        ApplyLocalization();
-        SetPreviewState(PreviewState.Empty);
-        BuildQueueCards();
-        UpdateLayout();
+        try
+        {
+            if (useDashboard) { dashboard = true; rangeEditor.ResponsiveLayout = true; rangeHint.Multiline = true; EnsureDashboard(); }
+            ApplyLocalization();
+            SetPreviewState(PreviewState.Empty);
+            BuildQueueCards();
+            UpdateLayout();
+        }
+        catch { Dispose(); throw; }
         AppTypography.RegisterLayout(this, UpdateLayout);
     }
 
     private void UpdateLayout()
     {
+        if (dashboard) { LayoutDashboard(); return; }
+        header.Visible = urlLabel.Visible = supportedSourcesButton.Visible = true;
+        pasteIcon.Visible = true; pasteButton.Text = "";
         AutoScroll = AppTypography.Scale > 1.25;
         var displayOrigin = DisplayRectangle.Location;
         const int page = 28;
@@ -997,6 +1008,7 @@ internal sealed class DownloadsView : UserControl
         {
             if (disposed) return;
             pauseButton.Text = services.Queue.IsPaused ? text["Queue.Resume"] : text["Queue.Pause"];
+            if (dashboard) DashboardVisual.Icon(pauseButton, services.Queue.IsPaused ? AppIconKind.Play : AppIconKind.Pause);
             UpdateAdmissionCountdown();
             if (e.Kind is QueueChangeKind.Collection or QueueChangeKind.Order)
             {
@@ -1006,6 +1018,7 @@ internal sealed class DownloadsView : UserControl
             else if (e.ItemId is { } id && cards.TryGetValue(id, out var card) && services.Queue.Find(id) is { } item)
                 card.UpdateItem(item, selectedItemId == id);
             // Refreshed when opened, not recreated on every byte tick.
+            if (dashboard) { RefreshDashboardSelection(); queueTitle.Text = text.Get("Dashboard.QueueTitle", services.Queue.Snapshot().Count); }
         });
     }
 
@@ -1031,8 +1044,10 @@ internal sealed class DownloadsView : UserControl
         if (changed) UpdateLayout();
         var remaining = services.Processor.RemainingAdmissionDelay;
         var seconds = remaining is { } delay ? (int)Math.Ceiling(delay.TotalSeconds) : 0;
+        var countdownChanged = admissionCountdown.Visible != (seconds > 0);
         admissionCountdown.Visible = seconds > 0;
         if (seconds > 0) admissionCountdown.Text = text.Get("Queue.NextDownloadIn", seconds);
+        if (dashboard && countdownChanged) UpdateLayout();
     }
 
     private void UpdateEngineStatus()
@@ -1054,26 +1069,32 @@ internal sealed class DownloadsView : UserControl
         });
     }
 
-    private void BuildQueueCards(Guid? scrollToItemId = null)
+    private void BuildQueueCards(Guid? scrollToItemId = null, bool rebuildPresentation = false)
     {
+        if (dashboard) { BuildGroupedQueueCards(scrollToItemId, rebuildPresentation); return; }
+        foreach (var group in groupCards.Values) { queueHost.Controls.Remove(group); group.Dispose(); }
+        groupCards.Clear();
         UiCrashDiagnostics.VerifyUiThread("downloads.queue-rebuild");
         UiCrashDiagnostics.Record("queue.rebuild.begin", "queueHost", queueHost.Controls.Count);
         var previousIds = cards.Keys.ToHashSet();
         var items = services.Queue.Snapshot();
+        var pageSize = dashboard ? DashboardPageSize : QueueCardPage.Size;
+        var currentPage = dashboard ? dashboardPage : queuePage;
         if (scrollToItemId is { } reveal)
         {
             var index = Array.FindIndex(items.ToArray(), item => item.Id == reveal);
-            if (index >= 0) queuePage = QueueCardPage.ForIndex(index);
+            if (index >= 0) currentPage = index / pageSize;
         }
-        queuePage = QueueCardPage.Clamp(queuePage, items.Count);
-        var visibleItems = items.Skip(queuePage * QueueCardPage.Size).Take(QueueCardPage.Size).ToArray();
+        currentPage = Math.Clamp(currentPage, 0, Math.Max(0, (items.Count - 1) / pageSize));
+        if (dashboard) dashboardPage = currentPage; else queuePage = currentPage;
+        var visibleItems = items.Skip(currentPage * pageSize).Take(pageSize).ToArray();
         var visibleIds = visibleItems.Select(item => item.Id).ToHashSet();
         if (selectedItemId is { } selected && items.All(item => item.Id != selected))
             selectedItemId = null;
         queueHost.SuspendLayout();
         try
         {
-            foreach (var cachedId in cards.Keys.Where(cachedId => !visibleIds.Contains(cachedId)).ToArray())
+            foreach (var cachedId in cards.Keys.Where(cachedId => rebuildPresentation || !visibleIds.Contains(cachedId)).ToArray())
             {
                 var old = cards[cachedId]; queueHost.Controls.Remove(old); old.Dispose(); cards.Remove(cachedId);
             }
@@ -1082,13 +1103,15 @@ internal sealed class DownloadsView : UserControl
                 if (!cards.TryGetValue(item.Id, out var card))
                 {
                     card = new QueueItemCard(services.Thumbnails, text);
+                    card.SetDashboard(dashboard);
+                    card.KeyDown += DashboardKeys;
                     card.ActionRequested += CardActionRequested;
                     cards[item.Id] = card;
                     queueHost.Controls.Add(card);
                 }
                 card.BringToFront();
                 card.UpdateItem(item, selectedItemId == item.Id);
-                if (queueBuilt && items.Count <= 40 && !previousIds.Contains(item.Id))
+                if (!dashboard && queueBuilt && items.Count <= 40 && !previousIds.Contains(item.Id))
                 {
                     card.Opacity = 0f;
                     card.TranslationY = 8f;
@@ -1113,6 +1136,7 @@ internal sealed class DownloadsView : UserControl
             ScrollQueueCardIntoView(id);
         BuildQueueMenu();
         UpdateQueueSummary();
+        if (dashboard) { RefreshDashboardSelection(); UpdateLayout(); }
         UiCrashDiagnostics.Record("queue.rebuild.end", "queueHost", queueHost.Controls.Count);
     }
 
@@ -1153,9 +1177,10 @@ internal sealed class DownloadsView : UserControl
         // DisplayRectangle reflects the space left after FlowLayoutPanel padding and any
         // visible vertical scrollbar. Size cards to that viewport so vertical overflow does
         // not create a secondary horizontal scrollbar.
-        var width = Math.Max(520, queueHost.DisplayRectangle.Width - 4);
+        var width = Math.Max(dashboard ? 320 : 520, queueHost.DisplayRectangle.Width - 4);
         foreach (var card in cards.Values)
             card.Width = width;
+        foreach (var card in groupCards.Values) card.Width = width;
     }
 
     private void BuildQueueMenu()
@@ -1172,6 +1197,8 @@ internal sealed class DownloadsView : UserControl
         var retryable = selected?.Status is DownloadStatus.Failed or DownloadStatus.Cancelled or
             DownloadStatus.Partial or DownloadStatus.Interrupted;
         queueMenu.Items.Clear();
+        if (dashboard)
+            AddQueueMenu((AppearancePresentation.Current.ModernDashboardShell.GroupPlaylists ? "✓ " : "") + text["PlaylistGroup.Preference"], () => _ = TogglePlaylistGroupingAsync());
         AddQueueMenu(text["Queue.ClearPending"], () => services.Queue.RemoveAllPending(),
             items.Any(item => item.Status is DownloadStatus.Queued or DownloadStatus.Waiting));
         queueMenu.Items.Add(new MenuSeparatorItem());
@@ -1235,6 +1262,8 @@ internal sealed class DownloadsView : UserControl
 
     private void RefreshSelection()
     {
+        RefreshPlaylistGroups();
+        RefreshDashboardSelection();
         foreach (var pair in cards)
         {
             if (services.Queue.Find(pair.Key) is { } item)
@@ -1300,6 +1329,7 @@ internal sealed class DownloadsView : UserControl
         SetPreviewState(previewState);
         if (analyzedMetadata is not null) PopulateMetadata(analyzedMetadata);
         BuildQueueMenu();
+        LocalizeDashboard();
         UpdateQueueSummary();
     }
 
@@ -1307,9 +1337,11 @@ internal sealed class DownloadsView : UserControl
     {
         if (disposed) return;
         var summary = QueueProgressSummary.Build(services.Queue.ProgressSnapshot(), services.Queue.IsPaused);
-        var layoutChanged = queueSummary.Visible != (summary.Total > 0) || queuePageText.Visible != (summary.Total > QueueCardPage.Size);
-        queueSummary.Visible = queueProgress.Visible = summary.Total > 0;
-        queuePageText.Visible = queuePrevious.Visible = queueNext.Visible = summary.Total > QueueCardPage.Size;
+        var showSummary = !dashboard && summary.Total > 0;
+        var showPaging = !dashboard && summary.Total > QueueCardPage.Size;
+        var layoutChanged = queueSummary.Visible != showSummary || queuePageText.Visible != showPaging;
+        queueSummary.Visible = queueProgress.Visible = showSummary;
+        queuePageText.Visible = queuePrevious.Visible = queueNext.Visible = showPaging;
         queueProgress.Value = (int)summary.Percent;
         queueSummary.Text = text.Get("Queue.Overall", summary.Settled, summary.Total, summary.Completed, summary.Failed,
             (summary.KnownBytes / 1073741824d).ToString("N2", text.Culture), summary.UnknownSizes,
@@ -1351,6 +1383,7 @@ internal sealed class DownloadsView : UserControl
             queueHost.SizeChanged -= QueueHostSizeChanged;
             pasteToolTip.Dispose();
             admissionCountdownTimer.Dispose();
+            groupMenu.Dispose();
             analyzeCancellation?.Cancel();
             lifetimeCancellation.Dispose();
         }

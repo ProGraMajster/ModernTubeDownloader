@@ -12,14 +12,14 @@ internal enum AppIconKind
     Queue,
     Live,
     History,
-    Settings
+    Settings, Help, Info, Link, Search, Play, Close, More, Retry, Folder, Plus, Pause, Trash, ChevronDown, Check, Sun, Media, Audio, Resolution, Storage, Stop
 }
 
 internal sealed class AppVectorIcon : UserControl
 {
     private readonly List<(Shape Shape, bool Fill)> shapes = [];
     private string colorToken;
-    private readonly AppIconKind kind;
+    private AppIconKind kind;
 
     public AppVectorIcon(AppIconKind kind, int size = 24, string colorToken = AppThemeTokens.TextSecondary)
     {
@@ -52,10 +52,66 @@ internal sealed class AppVectorIcon : UserControl
         ApplyTheme();
     }
 
+    public void SetKind(AppIconKind value)
+    {
+        if (kind == value) return; kind = value;
+        foreach (var (shape, _) in shapes) { Controls.Remove(shape); shape.Dispose(); }
+        shapes.Clear(); Build(kind, Width / 24f);
+        foreach (var (shape, _) in shapes) { shape.Click += ChildClicked; Controls.Add(shape); }
+        ApplyTheme();
+    }
+
     private void Build(AppIconKind kind, float scale)
     {
         switch (kind)
         {
+            case AppIconKind.Media:
+                AddPath(scale, [ClosedFigure((5,2),(15,2),(20,7),(20,22),(5,22)), OpenFigure((15,2),(15,7),(20,7)), ClosedFigure((10,11),(16,15),(10,19))]); break;
+            case AppIconKind.Audio:
+                AddPath(scale, [OpenFigure((9,18),(9,5),(20,2),(20,15)), OpenFigure((9,9),(20,6))]);
+                AddCircle(2*scale,15*scale,7*scale,scale); AddCircle(13*scale,12*scale,7*scale,scale); break;
+            case AppIconKind.Resolution:
+                AddPath(scale, [ClosedFigure((2,4),(22,4),(22,20),(2,20)), OpenFigure((6,10),(6,8),(9,8)), OpenFigure((15,16),(18,16),(18,14))]); break;
+            case AppIconKind.Storage:
+                AddPath(scale, [ClosedFigure((6,3),(18,3),(22,18),(21,21),(3,21),(2,18)), OpenFigure((2,17),(22,17))]);
+                AddFilledCircle(16*scale,18*scale,2*scale); break;
+            case AppIconKind.Sun:
+                AddCircle(8 * scale, 8 * scale, 8 * scale, scale);
+                for (var ray = 0; ray < 8; ray++)
+                {
+                    var angle = ray * MathF.PI / 4;
+                    AddLine((12 + MathF.Cos(angle) * 8) * scale, (12 + MathF.Sin(angle) * 8) * scale,
+                        (12 + MathF.Cos(angle) * 10) * scale, (12 + MathF.Sin(angle) * 10) * scale, scale);
+                }
+                break;
+            case AppIconKind.Check:
+                AddCircle(2*scale,2*scale,20*scale,scale); AddPath(scale, [OpenFigure((7,12),(10,15),(17,8))]); break;
+            case AppIconKind.Plus:
+                AddLine(12*scale,4*scale,12*scale,20*scale,scale); AddLine(4*scale,12*scale,20*scale,12*scale,scale); break;
+            case AppIconKind.Pause:
+                AddPath(scale, [ClosedFigure((6,4),(9,4),(9,20),(6,20)), ClosedFigure((15,4),(18,4),(18,20),(15,20))]); break;
+            case AppIconKind.Stop:
+                AddPath(scale, [ClosedFigure((5,5),(19,5),(19,19),(5,19))]); break;
+            case AppIconKind.Trash:
+                AddPath(scale, [OpenFigure((4,6),(20,6)), ClosedFigure((6,6),(7,21),(17,21),(18,6)), OpenFigure((9,6),(9,3),(15,3),(15,6)), OpenFigure((10,10),(10,17)), OpenFigure((14,10),(14,17))]); break;
+            case AppIconKind.ChevronDown:
+                AddPath(scale, [OpenFigure((5,9),(12,16),(19,9))]); break;
+            case AppIconKind.Folder:
+                AddPath(scale, [ClosedFigure((2,7),(10,7),(12,10),(22,10),(20,21),(2,21)), OpenFigure((2,7),(2,4),(9,4),(12,7),(21,7),(21,10))]); break;
+            case AppIconKind.Link:
+                AddPath(scale, [OpenFigure((9,16),(6,19),(3,19),(1,16),(1,13),(7,7),(10,7)), OpenFigure((14,17),(17,17),(23,11),(23,8),(20,5),(17,5),(14,8))]);
+                AddLine(8*scale,16*scale,16*scale,8*scale,scale); break;
+            case AppIconKind.Search:
+                AddCircle(3*scale,3*scale,13*scale,scale); AddLine(15*scale,15*scale,22*scale,22*scale,scale); break;
+            case AppIconKind.Play:
+                AddPath(scale, [ClosedFigure((8,4),(20,12),(8,20))]); break;
+            case AppIconKind.Close:
+                AddLine(6*scale,6*scale,18*scale,18*scale,scale); AddLine(18*scale,6*scale,6*scale,18*scale,scale); break;
+            case AppIconKind.More:
+                foreach (var y in new[] { 5, 11, 17 }) AddFilledCircle(10*scale,y*scale,3*scale); break;
+            case AppIconKind.Retry:
+                AddPath(scale, [OpenFigure((20,10),(18,5),(12,3),(6,5),(3,11),(5,18),(11,21),(18,18)), OpenFigure((20,4),(20,10),(14,10))]); break;
+
             case AppIconKind.Live:
                 AddCircle(3 * scale, 3 * scale, 18 * scale, scale);
                 AddFilledCircle(8 * scale, 8 * scale, 8 * scale);
@@ -83,6 +139,13 @@ internal sealed class AppVectorIcon : UserControl
                 AddCircle(2 * scale, 2 * scale, 20 * scale, scale);
                 AddLine(12 * scale, 12 * scale, 12 * scale, 7 * scale, scale);
                 AddLine(12 * scale, 12 * scale, 16 * scale, 14 * scale, scale);
+                break;
+            case AppIconKind.Help:
+            case AppIconKind.Info:
+                AddCircle(2 * scale, 2 * scale, 20 * scale, scale);
+                if (kind == AppIconKind.Help) AddPath(scale, [OpenFigure((8, 8), (9, 5), (15, 5), (16, 9), (12, 12), (12, 14))]);
+                else AddLine(12 * scale, 10 * scale, 12 * scale, 17 * scale, scale);
+                AddFilledCircle(11 * scale, (kind == AppIconKind.Help ? 17 : 6) * scale, 2 * scale);
                 break;
             case AppIconKind.Settings:
                 AddLine(4 * scale, 6 * scale, 20 * scale, 6 * scale, scale);
@@ -156,7 +219,7 @@ internal sealed class AppVectorIcon : UserControl
 
     private void ApplyTheme()
     {
-        var skia = AppUi.GetColor(colorToken);
+        var skia = AppUi.GetColor(Enabled ? colorToken : AppThemeTokens.TextDisabled);
         var color = Color.FromArgb(skia.Alpha, skia.Red, skia.Green, skia.Blue);
         foreach (var (shape, fill) in shapes)
         {
@@ -170,6 +233,12 @@ internal sealed class AppVectorIcon : UserControl
 
     private void ChildClicked(object? sender, ModernFormsNext.MouseEventArgs e) => OnClick(e);
     private void ThemeChanged(object? sender, ThemeChangedEventArgs e) => ApplyTheme();
+
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        base.OnEnabledChanged(e);
+        ApplyTheme();
+    }
 
     private static PointF Scale(PointF point, float scale) => new(point.X * scale, point.Y * scale);
 

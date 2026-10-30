@@ -10,6 +10,15 @@ Stable release target: **1.2.1**. Published assets and workflow results are auth
 the release page. Historical releases remain unchanged. See [cookie synchronization](COOKIE_SYNC.md),
 [release checklist](RELEASE_CHECKLIST.md) and [yt-dlp feature audit/roadmap](YTDLP_FEATURE_GAP_AUDIT.md).
 
+## Optional Modern Dashboard development
+
+The isolated `feature/modern-dashboard-ui` branch develops **1.3.0-candidate.1**.
+It is a local, unpublished candidate. [Modern Dashboard](MODERN_DASHBOARD_UI.md)
+adds an optional native interface while retaining Classic as the default and
+sharing the same runtime, queue, LIVE, history and settings. Choose the interface
+in Settings → Personalization. Use `--classic-ui` for session-only recovery.
+This branch does not publish or promote the preceding hotfix.
+
 ## New in 1.2.1
 
 This stability/performance patch adds storage-safe queue pause/recovery, bounded notification
