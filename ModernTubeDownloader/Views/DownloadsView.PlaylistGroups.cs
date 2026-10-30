@@ -156,28 +156,8 @@ internal sealed partial class DownloadsView
     private async Task<bool> ConfirmPlaylistGroupRemoval()
     {
         if (FindForm() is not { } owner) return false;
-        using var dialog = new MessageBoxForm(text["PlaylistGroup.Actions"], text["PlaylistGroup.RemoveConfirm"]);
-        var buttons = dialog.Controls.OfType<Panel>().Single();
-        foreach (var existing in buttons.Controls) { existing.Visible = false; existing.Enabled = false; }
-        var cancel = new DashboardButton { Text = text["Common.Cancel"], AccessibleAutomationId = "PlaylistGroupRemoveCancel" };
-        var confirm = new DashboardButton { Text = text["PlaylistGroup.RemoveCompleted"], AccessibleAutomationId = "PlaylistGroupRemoveConfirm" };
-        AppUi.Secondary(cancel); AppUi.Primary(confirm);
-        cancel.Click += (_, _) => dialog.DialogResult = DialogResult.Cancel;
-        confirm.Click += (_, _) => dialog.DialogResult = DialogResult.Yes;
-        buttons.Controls.AddRange([cancel, confirm]);
-        AppTypography.SetDashboardPresentation(buttons, true);
-        buttons.Height = AppTypography.TextHeight(48);
-        var cancelWidth = DashboardVisual.ActionWidth(cancel);
-        var confirmWidth = DashboardVisual.ActionWidth(confirm);
-        dialog.Size = new System.Drawing.Size(Math.Max(500, cancelWidth + confirmWidth + 56), AppTypography.TextHeight(220));
-        void ArrangeButtons()
-        {
-            var height = AppTypography.TextHeight(34);
-            confirm.SetBounds(buttons.Width - confirmWidth - 12, 6, confirmWidth, height);
-            cancel.SetBounds(confirm.Left - cancelWidth - 10, 6, cancelWidth, height);
-        }
-        buttons.SizeChanged += (_, _) => ArrangeButtons(); ArrangeButtons();
-        dialog.Shown += (_, _) => cancel.Select();
+        using var dialog = AppMessageBox.Confirmation(text["PlaylistGroup.Actions"], text["PlaylistGroup.RemoveConfirm"],
+            text["PlaylistGroup.RemoveCompleted"], text["Common.Cancel"], "PlaylistGroupRemove");
         return await dialog.ShowDialog(owner) == DialogResult.Yes;
     }
 }

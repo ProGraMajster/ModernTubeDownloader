@@ -287,7 +287,8 @@ public sealed class MainForm : Form
     private async void ShowFallbackNotice()
     {
         if (!fallbackNotice) return; fallbackNotice = false;
-        await SystemMessageBox.ShowAsync(this, text["Dashboard.Fallback"], text["App.Title"]);
+        using var notice = new MessageBoxForm(text["App.Title"], text["Dashboard.Fallback"]);
+        await notice.ShowDialog(this);
     }
     private void ApplyInterfaceCore()
     {

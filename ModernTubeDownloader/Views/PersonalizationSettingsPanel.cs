@@ -117,7 +117,10 @@ internal sealed class PersonalizationSettingsPanel : Panel
     }
     private async Task ConfirmResetAsync(bool all)
     {
-        if (await SystemMessageBox.ShowAsync(FindForm(), services.Localization["Appearance.ResetConfirm"], services.Localization["Appearance.Title"], MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        if (FindForm() is not { } owner) return;
+        using var confirmation = AppMessageBox.Confirmation(services.Localization["Appearance.Title"], services.Localization["Appearance.ResetConfirm"],
+            services.Localization[all ? "Appearance.ResetAll" : "Appearance.ResetSection"], services.Localization["Common.Cancel"], "AppearanceReset");
+        if (await confirmation.ShowDialog(owner) != DialogResult.Yes) return;
         var profile = services.Appearance.Profile.Copy(); if (all) profile = new(); else profile.ResetSection(Sections[Math.Max(0, section.SelectedIndex)]); await ApplyAsync(profile);
     }
     private async Task ImportAsync()

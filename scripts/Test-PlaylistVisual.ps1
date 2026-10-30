@@ -314,6 +314,24 @@ function RunGroupFixtures($Template) {
         $owned.Refresh(); $perf+=@{jobs=$size;liveTaskCards=@(QueueRows).Count;headers=@(GroupToggles).Count;expandAndUiaObservationMs=$elapsed;workingSetBytes=$owned.WorkingSet64;queueHash=$hash}
     }
     $perf | ConvertTo-Json | Set-Content (Join-Path $DataRoot 'playlist-group-performance.json') -Encoding utf8
+    Invoke 'NavSettings'; Invoke 'SettingsCategoryPersonalization'
+    Choose 'AppearanceSection' 0
+    SetText 'AppearanceColorAccent' '#3388CC'
+    Invoke 'AppearanceResetSection'
+    WaitCheck { $null -ne (DialogButton @('Anuluj','Cancel')) } 'Appearance MessageBoxForm absent.'
+    $appearancePath=Join-Path $DataRoot 'appearance.json'
+    $custom=Get-Content -LiteralPath $appearancePath -Raw | ConvertFrom-Json
+    if($custom.global.colors.Accent -ne '#3388CC') { throw 'Custom appearance fixture was not saved.' }
+    $appearanceHash=(Get-FileHash -LiteralPath $appearancePath).Hash
+    Capture 'appearance-reset-confirmation' ([PlaylistWindow]::Popup($owned.Id,$hwnd))
+    AcceptDialog @('Anuluj','Cancel')
+    if((Get-FileHash -LiteralPath $appearancePath).Hash -ne $appearanceHash) { throw 'Cancelled appearance reset changed the profile.' }
+    Invoke 'AppearanceResetSection'
+    AcceptDialog @('Resetuj tę sekcję','Reset this section')
+    $reset=Get-Content -LiteralPath $appearancePath -Raw | ConvertFrom-Json
+    if($reset.global.colors.Accent) { throw 'Confirmed appearance reset retained the custom accent.' }
+    if((Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash -ne $hash) { throw 'Appearance reset changed canonical queue bytes.' }
+    Write-Output 'MessageBoxForm appearance reset PASS: cancel preserves profile hash; confirmation resets only appearance, queue unchanged.'
     Write-Output 'Group fixtures PASS: mixed/singles; Space/Enter; selection; shell/session; ON/OFF restart; queue hashes; child removal; 120/1300 paged39 children+1header, go-to-selected-child.'
 }
 
