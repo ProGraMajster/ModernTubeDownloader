@@ -1,7 +1,9 @@
 using ModernFormsNext;
 using ModernFormsNext.Testing;
 using ModernTubeDownloader.Localization;
+using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Models;
+using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Views;
 
@@ -10,11 +12,34 @@ namespace ModernTubeDownloader.Tests;
 [Collection("ModernFormsNext TestHost")]
 public sealed class PlaylistDashboardTests
 {
+    [Fact]
+    public void GroupActionsUseCanonicalForwardAndReverseFocusTraversal()
+    {
+        using var host = ModernFormsTestHost.Create();
+        var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "mtd-group-focus-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = AppPaths.Create(directory); paths.EnsureCreated();
+            using var thumbnails = new ThumbnailCacheService(paths, new NullAppLogger(), () => false);
+            var children = new[] { new DownloadQueueItem { PlaylistTitle = "A" }, new DownloadQueueItem { PlaylistTitle = "A" } };
+            using var group = new PlaylistGroupCard(new(new("example.test", "a"), children), thumbnails, new("pl")) { Width = 960 };
+            host.Show(group, 960, 220);
+            var title = group.Controls.OfType<Button>().Single(b => b.AccessibleAutomationId?.StartsWith("PlaylistGroupToggle-") == true);
+            var menu = group.Controls.OfType<Button>().Single(b => b.AccessibleAutomationId?.StartsWith("PlaylistGroupMenu-") == true);
+            Assert.True(host.Input.Focus(title));
+            host.Input.PressKey(Keys.Tab); Assert.True(menu.Focused);
+            host.Input.PressKey(Keys.Tab | Keys.Shift); Assert.True(title.Focused);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Theory]
     [InlineData(100, 1286, "pl")]
     [InlineData(100, 1030, "pl")]
     [InlineData(150, 1286, "pl")]
+    [InlineData(150, 1030, "pl")]
     [InlineData(200, 1286, "en")]
+    [InlineData(200, 1030, "pl")]
     public void ModernPlaylistKeepsScaledRowsBoundedAndSelectionAcrossPagesAndShells(int scale, int width, string language)
     {
         using var host = ModernFormsTestHost.Create();
@@ -55,7 +80,7 @@ public sealed class PlaylistDashboardTests
                 Assert.InRange(button.Right, 0, width);
                 Assert.InRange(button.Bottom, 0, preview.Height);
             }
-            Assert.True(list.Bottom < preview.Controls.OfType<Button>().Single(b => b.AccessibleAutomationId == "PlaylistAddSelectedButton").Top);
+            Assert.True(preview.Controls.OfType<Button>().Single(b => b.AccessibleAutomationId == "PlaylistAddSelectedButton").Bottom < list.Top);
             preview.Dispose(); // TestHost closes its hierarchy again: cancellation/disposal must be idempotent.
         }
         finally { AppTypography.SetScale(100); }

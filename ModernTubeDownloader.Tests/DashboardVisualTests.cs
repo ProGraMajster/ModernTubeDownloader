@@ -16,6 +16,25 @@ namespace ModernTubeDownloader.Tests;
 public sealed class DashboardVisualTests
 {
     [Theory]
+    [InlineData(238, 1f)]
+    [InlineData(32, 1f)]
+    [InlineData(200, 0.6f)]
+    public void SolidDashboardTextBrushPreservesNativeUnicodeColorsAndOpacity(byte channel, float opacity)
+    {
+        using var host = ModernFormsTestHost.Create();
+        var panel = new Panel(); AppTypography.SetDashboardPresentation(panel, true);
+        var label = new DashboardLabel { Text = "Zażółć 日本語 🌄 🎬", Width = 800, Height = 90, Font = new Font("Segoe UI", 20) };
+        var brush = new ModernFormsNext.Drawing.SolidColorBrush(new SKColor(channel, channel, channel, 230)) { Opacity = opacity };
+        label.Style.ForegroundColor = brush.Color.WithAlpha((byte)MathF.Round(230 * opacity));
+        panel.Controls.Add(label); var window = host.Show(panel, 820, 110);
+        using var native = window.CaptureRenderedSnapshot();
+        label.TextBrush = brush;
+        using var solid = window.CaptureRenderedSnapshot();
+        Assert.True(native.CopyPixels().SequenceEqual(solid.CopyPixels()), "A solid theme brush must preserve shaped color glyphs and ordinary text, including alpha.");
+        Assert.Equal("Zażółć 日本語 🌄 🎬", label.Text);
+    }
+
+    [Theory]
     [InlineData(100)] [InlineData(150)] [InlineData(200)]
     public void MetricValuesRemainVisibleAtEveryTextScale(int scale)
     {

@@ -1,7 +1,7 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([Parameter(Mandatory)][int]$ProcessId, [Parameter(Mandatory)][string]$DataRoot,
     [int]$Count = 12, [int]$TextScale = 100, [string]$Interface = 'ModernDashboard',
-    [switch]$ClassicRecovery, [switch]$Transfer, [string]$SourceCommit, [switch]$SourceDirty)
+    [switch]$ClassicRecovery, [switch]$Transfer, [switch]$Groups, [string]$SourceCommit, [switch]$SourceDirty)
 # External Windows UIA client: runs against Debug normal startup and the production
 # Release binary. No automation bridge, desktop capture, cursor movement or input injection.
 $ErrorActionPreference = 'Stop'
@@ -21,7 +21,7 @@ public static class PlaylistWindow {
     public static void Place(IntPtr h, Rect r) { var old=SetThreadDpiAwarenessContext(new IntPtr(-4)); try { if(!SetWindowPos(h,IntPtr.Zero,r.L,r.T,r.R-r.L,r.B-r.T,0x14)) throw new Exception("Place failed"); } finally { SetThreadDpiAwarenessContext(old); } }
     delegate bool EnumCallback(IntPtr h, IntPtr data);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumCallback callback, IntPtr data);
-    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h,uint message,IntPtr w,IntPtr l);
     [StructLayout(LayoutKind.Sequential)] struct Point { public int X,Y; }
     [DllImport("user32.dll")] static extern bool ScreenToClient(IntPtr h, ref Point p);
@@ -67,6 +67,16 @@ function Toggle([int]$Index) { $e=Find "PlaylistEntryToggle$Index"; Reveal $e; $
 function SelectRow($Row) {
     Reveal $Row
     if($Interface -eq 'ModernDashboard' -and -not $ClassicRecovery) { $Row.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
+}
+function GroupToggles {
+    @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.AutomationId -like 'PlaylistGroupToggle-*' })
+}
+function ExpandPlaylistGroups {
+    if($Interface -ne 'ModernDashboard' -or $ClassicRecovery) { return }
+    WaitCheck { @(GroupToggles).Count -gt 0 } 'Canonical playlist group header absent.'
+    foreach($button in @(GroupToggles)) {
+        if($button.Current.Name -match '^(Rozwiń|Expand):') { Reveal $button; $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+    }
 }
 function SetText([string]$Id,[string]$Text) { (Find $Id).GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Text) }
 function Choose([string]$Id,[int]$Index) {
@@ -166,6 +176,147 @@ function RestartOwned {
     $script:hwnd=$owned.MainWindowHandle; [PlaylistWindow]::Place($hwnd,$originalBounds)
     $script:root=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
 }
+function ClickOwnedMenu([string]$Caption) {
+    WaitCheck { $null -ne (FindOwnedPopupItem $Caption) } ('Missing owned menu: '+$Caption)
+    $item=FindOwnedPopupItem $Caption
+    $native=$item
+    while($native -and $native.Current.NativeWindowHandle -eq 0) { $native=[System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($native) }
+    if(-not $native -or $native.Current.ProcessId -ne $owned.Id) { throw 'Menu ancestor not owned.' }
+    $menuHandle=[IntPtr]$native.Current.NativeWindowHandle
+    $r=$item.Current.BoundingRectangle
+    if(-not [PlaylistWindow]::Click($menuHandle,$owned.Id,[int]($r.X+$r.Width/2),[int]($r.Y+$r.Height/2))) { throw 'Owned menu click failed.' }
+    # A native confirmation may already own the UI thread's modal loop. Do not
+    # synchronously scan the underlying MFN tree while waiting for its menu to close.
+    WaitCheck { -not [PlaylistWindow]::IsWindowVisible($menuHandle) } 'Group menu did not close.'
+}
+function RunGroupFixtures($Template) {
+    if($Interface -ne 'ModernDashboard' -or $ClassicRecovery) { throw 'Group fixture requires Modern.' }
+    $safeRoot=[IO.Path]::GetFullPath($DataRoot)
+    if(-not $safeRoot.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase) -or (Split-Path $safeRoot -Leaf) -notlike 'mtd-automation-smoke-*') { throw 'Fixture root is not the isolated QA profile.' }
+    function MakeJob([int]$Index,[string]$Playlist,[string]$HostName='www.youtube.com',[int]$State=0) {
+        $job=$Template | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+        $job.id=[guid]::NewGuid().ToString(); $job.jobSessionId=[guid]::NewGuid().ToString()
+        $job.videoId='group-fixture-'+$Index; $job.sourceUrl="https://$HostName/watch?v=group-fixture-$Index"
+        $job.title="SYNTHETIC QA $Index — Zażółć gęślą jaźń · 日本語 🎬"
+        $job.playlistId=$Playlist; $job.playlistTitle=if($Playlist){"SYNTHETIC QA — playlista $Playlist 日本語 🎬"}else{$null}
+        $job.playlistIndex=if($Playlist){$Index}else{$null}; $job.status=$State
+        $job.statusMessageKey='Queue.Detail.Queued'; $job.progressPercent=0
+        foreach($property in @('startedAt','completedAt','selectedFormats','finalFile')) { $job | Add-Member -NotePropertyName $property -NotePropertyValue $null -Force }
+        return $job
+    }
+    function Seed($Jobs) {
+        CloseOwned
+        $settingsPath=Join-Path $DataRoot 'settings.json'
+        $settings=Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+        $settings.QueuePaused=$true; $settings | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $settingsPath -Encoding utf8
+        ConvertTo-Json -InputObject @($Jobs) -Depth 30 | Set-Content -LiteralPath (Join-Path $DataRoot 'queue.json') -Encoding utf8
+        RestartOwned; Invoke 'NavDownloads'
+        if((@(ReadQueue).id -join ',') -ne ($Jobs.id -join ',')) { throw 'Fixture restart changed canonical job identity/order.' }
+        # First close writes the externally seeded JSON with the canonical serializer
+        # (including null omission). Establish byte hashes only after that handoff.
+        RestartOwned; Invoke 'NavDownloads'
+        if((@(ReadQueue).id -join ',') -ne ($Jobs.id -join ',')) { throw 'Canonical fixture serialization changed identity/order.' }
+    }
+    $mixed=@((MakeJob 1 'a'),(MakeJob 2 ''),(MakeJob 3 'b'),(MakeJob 4 'a' 'www.youtube.com' 6),(MakeJob 5 ''),(MakeJob 6 'b'),(MakeJob 7 'a' 'www.youtube.com' 7),(MakeJob 8 ''),(MakeJob 9 'a' 'www.youtube.com' 13))
+    $completedFile=Join-Path $DataRoot 'group-completed-fixture.mp4'
+    Set-Content -LiteralPath $completedFile -Value 'Synthetic file preservation fixture; not actual media.'
+    $mixed[3].finalFile=$completedFile
+    Seed $mixed
+    WaitCheck { @(GroupToggles).Count -eq 2 -and @(QueueRows).Count -eq 3 } 'Two groups and three singles projection differs.'
+    Capture 'downloads-two-playlists-and-singles'
+    Capture 'downloads-playlist-collapsed'
+    $queueHash=(Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash
+    $toggleId=@(GroupToggles)[0].Current.AutomationId
+    $button=Find $toggleId; Reveal $button; $button.SetFocus()
+    WaitCheck { (Find $toggleId).Current.HasKeyboardFocus } 'Group title did not receive keyboard focus.'
+    [void][PlaylistWindow]::Key($hwnd,$owned.Id,9)
+    WaitCheck { (Find ($toggleId.Replace('PlaylistGroupToggle-','PlaylistGroupMenu-'))).Current.HasKeyboardFocus } 'Tab did not reach the group actions button.'
+    $button.SetFocus()
+    [void][PlaylistWindow]::Key($hwnd,$owned.Id,32)
+    WaitCheck { @(QueueRows).Count -eq 7 } 'Space did not expand four canonical children.'
+    $childId='QueueItem-'+([guid]$mixed[3].id).ToString('N')
+    SelectRow (Find $childId)
+    Invoke $toggleId; WaitCheck { @(QueueRows).Count -eq 3 } 'Collapse retained group child controls.'
+    $button=Find $toggleId; Reveal $button; $button.SetFocus(); [void][PlaylistWindow]::Key($hwnd,$owned.Id,13)
+    WaitCheck { @(QueueRows).Count -eq 7 } 'Enter did not expand group.'
+    if(-not (Find $childId).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) { throw 'Group keyboard toggle lost selected GUID.' }
+    Capture 'downloads-group-keyboard-selected'
+    foreach($choice in @('InterfaceClassic','InterfaceModernDashboard')) { Invoke 'NavSettings'; Invoke 'SettingsCategoryPersonalization'; Invoke $choice; Invoke 'NavDownloads' }
+    WaitCheck { @(QueueRows).Count -eq 7 } 'Shell switch lost session group expansion.'
+    if((Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash -ne $queueHash) { throw 'Shell/group presentation mutated queue bytes.' }
+    $polish=(Find 'NavDownloads').Current.Name -eq 'Pobieranie'
+    $preference=if($polish){'Grupuj playlisty'}else{'Group playlists'}
+    Invoke 'QueueMenuButton'; ClickOwnedMenu ('✓ '+$preference)
+    WaitCheck { @(GroupToggles).Count -eq 0 -and @(QueueRows).Count -eq 9 } 'Grouping OFF did not restore individual records.'
+    RestartOwned; Invoke 'NavDownloads'
+    WaitCheck { @(GroupToggles).Count -eq 0 -and @(QueueRows).Count -eq 9 } 'Grouping OFF preference did not persist.'
+    Invoke 'QueueMenuButton'; ClickOwnedMenu $preference
+    WaitCheck { @(GroupToggles).Count -eq 2 -and @(QueueRows).Count -eq 3 } 'Grouping ON did not restore collapsed groups.'
+    if((Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash -ne $queueHash) { throw 'Grouping preference changed canonical queue bytes.' }
+    ExpandPlaylistGroups
+    Invoke ('QueuePrimaryAction-'+([guid]$mixed[0].id).ToString('N'))
+    WaitCheck { @(QueueRows).Count -eq 8 } 'Removing one child did not update group/control count.'
+    if(@(ReadQueue).Count -ne 8 -or (@(ReadQueue).id -contains $mixed[0].id)) { throw 'Child removal changed the wrong records.' }
+    Capture 'downloads-group-after-child-removal'
+    function DialogButton([string[]]$Names) {
+        $popup=[PlaylistWindow]::Popup($owned.Id,$hwnd)
+        if($popup -eq [IntPtr]::Zero) { return $null }
+        $window=[System.Windows.Automation.AutomationElement]::FromHandle($popup)
+        foreach($button in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)) {
+            $c=$button.Current
+            if($c.IsEnabled -and -not $c.IsOffscreen -and $c.Name -in $Names -and
+                $c.ControlType -eq [System.Windows.Automation.ControlType]::Button) { return $button }
+        }
+        return $null
+    }
+    function AcceptDialog([string[]]$Names) {
+        WaitCheck { $null -ne (DialogButton $Names) } ('Owned dialog button absent: '+($Names -join '/'))
+        $popup=[PlaylistWindow]::Popup($owned.Id,$hwnd)
+        $button=DialogButton $Names
+        $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        WaitCheck { -not [PlaylistWindow]::IsWindowVisible($popup) } 'Owned dialog did not dismiss.'
+    }
+    $groupMenuId=@(GroupToggles | Where-Object { $_.Current.Name -match 'playlista a' })[0].Current.AutomationId.Replace('PlaylistGroupToggle-','PlaylistGroupMenu-')
+    Invoke $groupMenuId; ClickOwnedMenu $(if($polish){'Ponów błędne i przerwane'}else{'Retry failed and interrupted'})
+    AcceptDialog @('OK')
+    $retried=@(ReadQueue)
+    foreach($id in @($mixed[6].id,$mixed[8].id)) { if(($retried | Where-Object id -eq $id).status -ne 0) { throw 'Group retry did not affect exactly its failed/interrupted jobs.' } }
+    if(($retried | Where-Object id -eq $mixed[3].id).status -ne 6) { throw 'Group retry modified completed child.' }
+    Invoke $groupMenuId; ClickOwnedMenu $(if($polish){'Usuń ukończone z listy'}else{'Remove completed from queue'})
+    WaitCheck { $null -ne (DialogButton @('Anuluj','Cancel')) } 'MessageBoxForm cancellation button absent.'
+    Capture 'playlist-group-remove-confirmation' ([PlaylistWindow]::Popup($owned.Id,$hwnd))
+    AcceptDialog @('Anuluj','Cancel')
+    if(@(ReadQueue).Count -ne 8) { throw 'Rejected group removal changed records.' }
+    Invoke $groupMenuId; ClickOwnedMenu $(if($polish){'Usuń ukończone z listy'}else{'Remove completed from queue'})
+    AcceptDialog @('Usuń ukończone z listy','Remove completed from queue')
+    AcceptDialog @('OK')
+    if(@(ReadQueue).Count -ne 7 -or -not (Test-Path -LiteralPath $completedFile)) { throw 'Group removal scope/file preservation failed.' }
+    Capture 'downloads-group-after-bulk-actions'
+    $perf=@()
+    foreach($size in @(120,1300)) {
+        $jobs=@(1..$size | ForEach-Object { MakeJob $_ 'large' })
+        Seed $jobs
+        $hash=(Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash
+        $clock=[Diagnostics.Stopwatch]::StartNew(); ExpandPlaylistGroups
+        WaitCheck { @(QueueRows).Count -eq 39 } 'Expanded group exceeded or missed its 39-child page budget.'
+        $elapsed=$clock.Elapsed.TotalMilliseconds
+        Invoke 'DashboardNextPage'
+        WaitCheck { @(QueueRows).Count -eq 39 } 'Second group page did not preserve bounded task controls.'
+        $target='QueueItem-'+([guid]$jobs[40].id).ToString('N')
+        SelectRow (Find $target); Capture ('downloads-group-'+$size+'-page2')
+        $id=@(GroupToggles)[0].Current.AutomationId; Invoke $id
+        WaitCheck { @(QueueRows).Count -eq 0 } 'Large collapse retained child controls.'
+        Invoke ($id.Replace('PlaylistGroupToggle-','PlaylistGroupMenu-'))
+        ClickOwnedMenu $(if($polish){'Przejdź do zadania'}else{'Go to job'})
+        WaitCheck { $null -ne ($root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,$target))) } 'Go to selected child lost its page.'
+        if(-not (Find $target).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) { throw 'Large paging changed selected GUID.' }
+        if((Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash -ne $hash) { throw 'Large projection changed queue bytes.' }
+        $owned.Refresh(); $perf+=@{jobs=$size;liveTaskCards=@(QueueRows).Count;headers=@(GroupToggles).Count;expandAndUiaObservationMs=$elapsed;workingSetBytes=$owned.WorkingSet64;queueHash=$hash}
+    }
+    $perf | ConvertTo-Json | Set-Content (Join-Path $DataRoot 'playlist-group-performance.json') -Encoding utf8
+    Write-Output 'Group fixtures PASS: mixed/singles; Space/Enter; selection; shell/session; ON/OFF restart; queue hashes; child removal; 120/1300 paged39 children+1header, go-to-selected-child.'
+}
+
 function Capture([string]$Name, [IntPtr]$Window = $hwnd) {
     Start-Sleep -Milliseconds 300
     $b=[PlaylistWindow]::Bounds($Window)
@@ -174,7 +325,8 @@ function Capture([string]$Name, [IntPtr]$Window = $hwnd) {
     finally { $g.ReleaseHdc($dc); $g.Dispose() }
     $path=Join-Path $DataRoot ($Name+'.png')
     try { $bitmap.Save($path) } finally { $bitmap.Dispose() }
-    $nodes=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
+    $captureRoot=if($Window -eq $hwnd){$root}else{[System.Windows.Automation.AutomationElement]::FromHandle($Window)}
+    $nodes=@($captureRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
         $c=$_.Current; $r=$c.BoundingRectangle
         @{id=$c.AutomationId;name=$c.Name;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen;bounds=@($r.X,$r.Y,$r.Width,$r.Height)}
     })
@@ -182,6 +334,7 @@ function Capture([string]$Name, [IntPtr]$Window = $hwnd) {
     ConvertTo-Json -InputObject @(ReadQueue) -Depth 30 | Set-Content (Join-Path $DataRoot ($Name+'-queue.json')) -Encoding UTF8
     $script:playlistCaptures.Add(@{file=$Name+'.png';width=$b.R-$b.L;height=$b.B-$b.T;dpi=[PlaylistWindow]::GetDpiForWindow($hwnd);textScale=$TextScale;
         sha256=(Get-FileHash $path -Algorithm SHA256).Hash;sourceCommit=$SourceCommit;sourceDirty=[bool]$SourceDirty;kind=$(if($Window -eq $hwnd){'full-window'}else{'owned-popup'});pid=$owned.Id;binarySha256=(Get-FileHash $appPath -Algorithm SHA256).Hash;
+        managedBinarySha256=(Get-FileHash ([IO.Path]::ChangeExtension($appPath,'.dll')) -Algorithm SHA256).Hash;
         uia=$Name+'-uia.json';queue=$Name+'-queue.json';utc=[DateTime]::UtcNow.ToString('O')})
     $script:playlistCaptures | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $DataRoot 'playlist-native-manifest.json') -Encoding UTF8
     Write-Output "Captured $Name, $($b.R-$b.L)x$($b.B-$b.T), DPI=$([PlaylistWindow]::GetDpiForWindow($hwnd)), TextScale=$TextScale"
@@ -204,15 +357,27 @@ try {
     Invoke 'PlaylistClearSelectionButton'
     foreach($i in @(1,2,4)) { Toggle $i }
     if((Find 'PlaylistSelectedCount').Current.Name -notmatch '\b3\b') { throw 'Partial selection count differs.' }
+    if($Interface -eq 'ModernDashboard' -and -not $ClassicRecovery) { Invoke 'PlaylistSharedOptionsToggle' }
     Choose 'PlaylistQualitySelector' 3
     Choose 'PlaylistContainerSelector' 2
+    if($Interface -eq 'ModernDashboard' -and -not $ClassicRecovery) { Invoke 'PlaylistSharedOptionsToggle' }
     (Find 'PlaylistEntriesList').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern).SetScrollPercent(-1,0)
     Reveal (Find 'PlaylistTitle'); Capture 'playlist-partial-selection'
+    if($Interface -eq 'ModernDashboard' -and -not $ClassicRecovery) {
+        $previewBounds=(Find 'PlaylistPreview').Current.BoundingRectangle
+        foreach($id in @('PlaylistAddSelectedButton','PlaylistSharedOptionsToggle','PlaylistEntriesToggle','PlaylistSelectAllButton','PlaylistClearSelectionButton','PlaylistNextPageButton')) {
+            $b=(Find $id).Current.BoundingRectangle
+            if($b.Left -lt $previewBounds.Left -or $b.Right -gt $previewBounds.Right) { throw ('Preview horizontal overflow: '+$id) }
+        }
+        if((Find 'PlaylistEntriesList').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern).Current.HorizontallyScrollable) { throw 'Preview unexpectedly scrolls horizontally.' }
+    }
+    if($Interface -eq 'ModernDashboard' -and -not $ClassicRecovery) { Capture 'playlist-preview-selection' }
     if($Count -gt 40) {
         Invoke 'PlaylistNextPageButton'; [void](Find 'PlaylistEntryToggle41'); Toggle 41
         $rows=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | Where-Object {$_.Current.AutomationId -like 'PlaylistEntryToggle*'})
         if($rows.Count -ne [Math]::Min(40,$Count-40)) { throw 'Playlist allocated beyond the page limit.' }
         Reveal (Find 'PlaylistEntryToggle70'); Capture 'playlist-long-paged'
+        Capture 'playlist-preview-long120-page2'
         Invoke 'PlaylistPreviousPageButton'
         if((Find 'PlaylistEntryToggle1').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne 'On') { throw 'Page switch lost selection.' }
         Invoke 'PlaylistNextPageButton'
@@ -226,6 +391,11 @@ try {
         }
     }
     Invoke 'PlaylistAddSelectedButton'
+    if($Interface -eq 'ModernDashboard' -and -not $ClassicRecovery) {
+        WaitCheck { @(GroupToggles).Count -eq 1 } 'Handoff did not create exactly one playlist group.'
+        if(@(QueueRows).Count -ne 0) { throw 'Collapsed group materialized task controls.' }
+        ExpandPlaylistGroups
+    }
     WaitCheck { @(QueueRows).Count -eq 3 } 'Handoff did not expose exactly three jobs.'
     $before=@(ReadQueue)
     if($before.Count -ne 3) { throw 'Handoff did not persist exactly three jobs.' }
@@ -244,9 +414,20 @@ try {
     SelectRow $row
     Capture 'playlist-added-to-queue'
     if($Interface -eq 'ModernDashboard' -and -not $ClassicRecovery) {
+        Capture 'downloads-playlist-expanded'
+        $groupToggle=@(GroupToggles)[0]; $groupId=$groupToggle.Current.AutomationId
+        Invoke $groupId
+        WaitCheck { @(QueueRows).Count -eq 0 } 'Collapse retained live child controls.'
+        Capture 'downloads-group-selected-collapsed'
+        Invoke $groupId
+        WaitCheck { @(QueueRows).Count -eq 3 } 'Expand did not restore the three canonical children.'
+        if(-not (Find "QueueItem-$firstId").GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) { throw 'Collapse changed the selected GUID.' }
+    }
+    if($Interface -eq 'ModernDashboard' -and -not $ClassicRecovery) {
         $detailsCondition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'InspectorDetails')
         if(-not $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$detailsCondition)) { Invoke 'DashboardToggleInspector' }
         Reveal (Find 'InspectorDetails'); Capture 'playlist-queue-selected-inspector'
+        Capture 'downloads-group-selected-inspector'
         Invoke 'InspectorOptions'; Capture 'playlist-queue-options'
         Invoke 'InspectorDetails'
         if($Transfer) {
@@ -260,10 +441,11 @@ try {
             Invoke "QueueMoreAction-$firstId"
             # A pre-existing owned tooltip is not evidence that the asynchronous
             # menu invocation has completed. Wait for the actual menu command.
-            try { WaitCheck { $null -ne (FindOwnedPopupItem $selectCaption) } 'Queue Select menu item absent.' }
+            $script:observedSelectMenuItem=$null
+            try { WaitCheck { $script:observedSelectMenuItem=FindOwnedPopupItem $selectCaption; $null -ne $script:observedSelectMenuItem } 'Queue Select menu item absent.' }
             catch { SaveOwnedWindowDiagnostics; throw }
-            $menuItem=FindOwnedPopupItem $selectCaption
-            if(-not $menuItem -or -not $menuItem.Current.IsEnabled -or $menuItem.Current.ProcessId -ne $owned.Id) { throw 'Owned Select menu item unavailable.' }
+            $menuItem=$script:observedSelectMenuItem
+            if(-not $menuItem -or -not $menuItem.Current.IsEnabled -or $menuItem.Current.ProcessId -ne $owned.Id) { SaveOwnedWindowDiagnostics; throw 'Owned Select menu item unavailable.' }
             $r=$menuItem.Current.BoundingRectangle
             $nativeOwner=$menuItem
             while($nativeOwner -and $nativeOwner.Current.NativeWindowHandle -eq 0) { $nativeOwner=[System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($nativeOwner) }
@@ -292,6 +474,12 @@ try {
     }
     RestartOwned
     Invoke 'NavDownloads'
+    if($Interface -eq 'ModernDashboard' -and -not $ClassicRecovery) {
+        WaitCheck { @(GroupToggles).Count -eq 1 } 'Restart lost grouping preference.'
+        if(@(QueueRows).Count -ne 0) { throw 'Restart did not default to collapsed.' }
+        Capture 'downloads-group-after-restart'
+        ExpandPlaylistGroups
+    }
     $row=Find "QueueItem-$firstId"; Reveal $row; SelectRow $row
     if((@(ReadQueue).id -join ',') -ne ($before.id -join ',')) { throw 'Restart changed queue IDs/order.' }
     Capture 'playlist-after-restart'
@@ -299,6 +487,12 @@ try {
         Invoke 'DashboardStartAll'
         WaitCheck { @(Get-ChildItem $DataRoot -Recurse -Filter '.review-transfer-ready').Count -gt 0 } 'Actual byte transfer did not reach its gate.'
         SelectRow (Find "QueueItem-$firstId"); Capture 'playlist-downloading'
+        $groupToggle=@(GroupToggles)[0].Current.AutomationId
+        $countsId=$groupToggle.Replace('PlaylistGroupToggle-','PlaylistGroupCounts-')
+        Invoke $groupToggle
+        WaitCheck { (Find $countsId).Current.Name -match '[1-3] (aktywnych|active)' } 'Collapsed group did not report actual active transfer.'
+        Capture 'downloads-playlist-mixed-statuses'
+        ExpandPlaylistGroups
         Invoke "QueuePrimaryAction-$firstId"
         WaitCheck { QueueStatusIs $before[0].id 'cancelled' } 'Cancel did not update the canonical row.'
         AssertPersistedStatus $before[0].id @(8)
@@ -308,9 +502,11 @@ try {
         AssertPersistedStatus $before[0].id @(2,3)
         RestartOwned
         Invoke 'NavDownloads'
+        ExpandPlaylistGroups
         WaitCheck { QueueStatusIs $before[0].id 'interrupted' } 'Restart did not recover Interrupted.'
         AssertPersistedStatus $before[0].id @(13)
         SelectRow (Find "QueueItem-$firstId"); Capture 'playlist-interrupted'
+        Capture 'downloads-group-interrupted-and-active'
         WaitCheck { QueueStatusIs $before[1].id 'failed' } 'Synthetic executor failure did not update the row.'
         AssertPersistedStatus $before[1].id @(7)
         $secondId=([guid]$before[1].id).ToString('N')
@@ -362,7 +558,8 @@ try {
         if($root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$closeCondition)) { Invoke 'PlaylistClosePreview' }
         SetText 'DownloadUrlInput' 'https://www.youtube.com/playlist?list=synthetic-playlist'
         Invoke 'DashboardChipAnalyze'; [void](Find 'PlaylistEntryToggle5')
-        Invoke 'PlaylistClearSelectionButton'; Toggle 5; Choose 'PlaylistQualitySelector' 7
+        Invoke 'PlaylistClearSelectionButton'; Toggle 5
+        Invoke 'PlaylistSharedOptionsToggle'; Choose 'PlaylistQualitySelector' 7; Invoke 'PlaylistSharedOptionsToggle'
         Invoke 'PlaylistAddSelectedButton'
         WaitCheck { @(QueueRows).Count -eq 4 } 'Audio-only selection did not reach the canonical queue.'
         $audioRow=@(QueueRows) | Where-Object { $_.Current.AutomationId -notin @($before | ForEach-Object { 'QueueItem-'+([guid]$_.id).ToString('N') }) }
@@ -375,6 +572,7 @@ try {
         SelectRow (Find ('QueueItem-'+([guid]$audioJob.id).ToString('N')))
         Capture 'playlist-audio-only-completed'
     }
+    if($Groups) { RunGroupFixtures $before[0] }
     Write-Output "Playlist Windows UIA PASS: $Count metadata entries; private+deleted excluded; 3 selected/added; repeat add skipped 3; 1080/Mkv; ordered IDs and thumbnails persisted through restart; watch+list single video. Profile: $DataRoot"
 }
 catch { Write-Output ($_.ToString() + "`n" + $_.ScriptStackTrace); throw }

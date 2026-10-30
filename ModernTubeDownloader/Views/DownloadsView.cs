@@ -224,6 +224,7 @@ internal sealed partial class DownloadsView : UserControl
 
         playlistPreview = new PlaylistPreviewControl(text, services.Thumbnails) { Visible = false };
         playlistPreview.AddRequested += PlaylistAddRequested;
+        playlistPreview.DashboardLayoutChanged += (_, _) => UpdateLayout();
         playlistPreview.CloseRequested += (_, _) => ClearAnalyzedPreview();
         playlistPreview.AdvancedOptionsRequested += AdvancedClicked;
 
@@ -263,10 +264,11 @@ internal sealed partial class DownloadsView : UserControl
             if (queueStructureDirty)
             {
                 queueStructureDirty = false; var reveal = pendingQueueReveal; pendingQueueReveal = null;
-                BuildQueueCards(reveal);
+                BuildQueueCards(dashboard ? null : reveal);
             }
             UpdateAdmissionCountdown();
             UpdateQueueSummary();
+            RefreshPlaylistGroups();
         };
         admissionCountdownTimer.Start();
 
@@ -1069,6 +1071,9 @@ internal sealed partial class DownloadsView : UserControl
 
     private void BuildQueueCards(Guid? scrollToItemId = null, bool rebuildPresentation = false)
     {
+        if (dashboard) { BuildGroupedQueueCards(scrollToItemId, rebuildPresentation); return; }
+        foreach (var group in groupCards.Values) { queueHost.Controls.Remove(group); group.Dispose(); }
+        groupCards.Clear();
         UiCrashDiagnostics.VerifyUiThread("downloads.queue-rebuild");
         UiCrashDiagnostics.Record("queue.rebuild.begin", "queueHost", queueHost.Controls.Count);
         var previousIds = cards.Keys.ToHashSet();
@@ -1175,6 +1180,7 @@ internal sealed partial class DownloadsView : UserControl
         var width = Math.Max(dashboard ? 320 : 520, queueHost.DisplayRectangle.Width - 4);
         foreach (var card in cards.Values)
             card.Width = width;
+        foreach (var card in groupCards.Values) card.Width = width;
     }
 
     private void BuildQueueMenu()
@@ -1191,6 +1197,8 @@ internal sealed partial class DownloadsView : UserControl
         var retryable = selected?.Status is DownloadStatus.Failed or DownloadStatus.Cancelled or
             DownloadStatus.Partial or DownloadStatus.Interrupted;
         queueMenu.Items.Clear();
+        if (dashboard)
+            AddQueueMenu((AppearancePresentation.Current.ModernDashboardShell.GroupPlaylists ? "✓ " : "") + text["PlaylistGroup.Preference"], () => _ = TogglePlaylistGroupingAsync());
         AddQueueMenu(text["Queue.ClearPending"], () => services.Queue.RemoveAllPending(),
             items.Any(item => item.Status is DownloadStatus.Queued or DownloadStatus.Waiting));
         queueMenu.Items.Add(new MenuSeparatorItem());
@@ -1254,6 +1262,7 @@ internal sealed partial class DownloadsView : UserControl
 
     private void RefreshSelection()
     {
+        RefreshPlaylistGroups();
         RefreshDashboardSelection();
         foreach (var pair in cards)
         {
@@ -1374,6 +1383,7 @@ internal sealed partial class DownloadsView : UserControl
             queueHost.SizeChanged -= QueueHostSizeChanged;
             pasteToolTip.Dispose();
             admissionCountdownTimer.Dispose();
+            groupMenu.Dispose();
             analyzeCancellation?.Cancel();
             lifetimeCancellation.Dispose();
         }

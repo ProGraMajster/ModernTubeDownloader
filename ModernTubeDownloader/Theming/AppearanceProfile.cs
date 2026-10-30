@@ -42,6 +42,7 @@ public enum DashboardInspectorMode { Always, Auto, Hidden }
 public enum DashboardWidgetsMode { All, Compact, Hidden }
 public sealed class ModernDashboardAppearance
 {
+    public bool GroupPlaylists { get; set; } = true;
     public DashboardSidebarMode Sidebar { get; set; } = DashboardSidebarMode.Auto;
     public DashboardInspectorMode Inspector { get; set; } = DashboardInspectorMode.Auto;
     public DashboardWidgetsMode Widgets { get; set; }

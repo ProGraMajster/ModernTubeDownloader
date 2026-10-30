@@ -16,6 +16,7 @@ param(
     [switch]$PlaylistSmoke,
     [switch]$PlaylistVisualSmoke,
     [switch]$PlaylistTransferSmoke,
+    [switch]$PlaylistGroupsSmoke,
     [switch]$PreviewOnly,
     [switch]$ClearPreviewSmoke,
     [switch]$ScrollProbe,
@@ -76,7 +77,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if ($PlaylistTransferSmoke) { $PlaylistVisualSmoke = $true }
+if ($PlaylistTransferSmoke -or $PlaylistGroupsSmoke) { $PlaylistVisualSmoke = $true }
 if ($PlaylistVisualSmoke) { $PlaylistSmoke = $true; $CaptureVisual = $true }
 if ($DownloadsTooltipSmoke) { $DownloadsInputSmoke = $true }
 if ($DownloadsFullValuesSmoke) { $DownloadsInputSmoke = $true }
@@ -577,13 +578,16 @@ try {
             if (-not [MtdAutomationWindowCloser]::PlaceWindow($normalProcess.MainWindowHandle, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)) { throw 'Playlist HWND placement failed.' }
         }
         Write-Output "Owned playlist profile: $dataRoot"
-        $clientSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-PlaylistVisual.ps1') -Raw
-        $command = '& { ' + $clientSource + ' } -ProcessId ' + $normalProcess.Id +
+        # Read the trusted local client in the child instead of embedding its entire
+        # source in CreateProcess's bounded command line. Execution policy is unchanged.
+        $clientPath = Join-Path $PSScriptRoot 'Test-PlaylistVisual.ps1'
+        $command = "& ([scriptblock]::Create([IO.File]::ReadAllText('" + $clientPath.Replace("'", "''") + "'))) -ProcessId " + $normalProcess.Id +
             " -DataRoot '" + $dataRoot.Replace("'", "''") + "' -Count $PlaylistCount -TextScale $AppTextScale -Interface '$InterfaceMode'"
         $command += " -SourceCommit '" + (& git -C $repo rev-parse HEAD).Trim() + "'"
         if (& git -C $repo status --porcelain) { $command += ' -SourceDirty' }
         if ($ClassicUiRecovery) { $command += ' -ClassicRecovery' }
         if ($PlaylistTransferSmoke) { $command += ' -Transfer' }
+        if ($PlaylistGroupsSmoke) { $command += ' -Groups' }
         & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command $command
         if ($LASTEXITCODE -ne 0) { throw 'Playlist Windows UIA qualification failed.' }
         return

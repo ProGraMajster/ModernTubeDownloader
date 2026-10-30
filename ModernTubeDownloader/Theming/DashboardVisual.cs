@@ -130,10 +130,16 @@ internal class DashboardLabel : Label
         var p = Padding;
         var bounds = new Rectangle(LogicalToDeviceUnits(p.Left), LogicalToDeviceUnits(p.Top),
             Math.Max(0, LogicalToDeviceUnits(Width - p.Horizontal)), Math.Max(0, LogicalToDeviceUnits(Height - p.Vertical)));
-        if (AppTypography.UsesSemibold(this))
+        // The general MFN brush painter uses an alpha mask, which flattens color
+        // emoji into solid rectangles. A solid text color needs no mask. Keep
+        // native shaping/fallback and the resolved token color via its public API.
+        var solid = TextBrush as ModernFormsNext.Drawing.SolidColorBrush;
+        var color = solid is null ? CurrentStyle.GetForegroundColor() :
+            solid.Color.WithAlpha((byte)Math.Clamp((int)MathF.Round(solid.Color.Alpha * solid.Opacity), 0, 255));
+        if (solid is not null || AppTypography.UsesSemibold(this))
             e.Canvas.DrawText(Text, CurrentStyle.GetFont(), LogicalToDeviceUnits(CurrentStyle.GetFontSize()), bounds,
-                Enabled ? CurrentStyle.GetForegroundColor() : Theme.ForegroundDisabledColor, TextAlign,
-                maxLines: Multiline ? null : 1, ellipsis: AutoEllipsis, fontStyle: ModernFormsNext.FontStyle.Regular);
+                Enabled ? color : Theme.ForegroundDisabledColor, TextAlign,
+                maxLines: Multiline ? null : 1, ellipsis: AutoEllipsis, fontStyle: AppTypography.TextStyle(this));
         else e.Canvas.DrawText(Text, bounds, this, TextAlign, maxLines: Multiline ? null : 1, ellipsis: AutoEllipsis);
     }
 }

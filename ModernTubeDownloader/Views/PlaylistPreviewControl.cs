@@ -40,6 +40,12 @@ internal sealed class PlaylistPreviewControl : UserControl
     private readonly ThumbnailCacheService? thumbnails;
     private CancellationTokenSource? pageLifetime;
     private readonly Button closePreview;
+    private readonly Button previewOptions = new DashboardButton { AccessibleAutomationId = "PlaylistSharedOptionsToggle", Visible = false };
+    private readonly Button collapseEntries = new DashboardButton { AccessibleAutomationId = "PlaylistEntriesToggle", Visible = false };
+    private bool optionsExpanded;
+    private bool entriesCollapsed;
+    public event EventHandler? DashboardLayoutChanged;
+    public int DashboardHeight { get; private set; } = 370;
 
 
     public PlaylistPreviewControl(LocalizationService text, ThumbnailCacheService? thumbnails = null)
@@ -113,6 +119,10 @@ internal sealed class PlaylistPreviewControl : UserControl
         Controls.AddRange([title, facts, selectedCount, selectAll, clearSelection, qualityLabel, quality,
             containerLabel, container, rangeEditor, rangeHint, feedback, entries,
             previousPage, nextPage, pageText, advancedOptions, addSelected, closePreview]);
+        AppUi.Secondary(previewOptions); AppUi.Secondary(collapseEntries);
+        previewOptions.Click += (_, _) => { optionsExpanded = !optionsExpanded; LayoutControls(); };
+        collapseEntries.Click += (_, _) => { entriesCollapsed = !entriesCollapsed; LayoutControls(); };
+        Controls.AddRange([previewOptions, collapseEntries]);
         SizeChanged += (_, _) => LayoutControls();
         text.LanguageChanged += LanguageChanged;
         ApplyLocalization();
@@ -125,6 +135,9 @@ internal sealed class PlaylistPreviewControl : UserControl
         if (dashboard == value) return;
         dashboard = value;
         closePreview.Visible = value;
+        previewOptions.Visible = collapseEntries.Visible = value;
+        if (!value)
+            foreach (var control in new Control[] { qualityLabel, quality, containerLabel, container, rangeEditor, entries, selectAll, clearSelection, previousPage, nextPage, pageText, advancedOptions }) control.Visible = true;
         rangeEditor.ResponsiveLayout = value;
         AppTypography.SetDashboardPresentation(this, value);
         if (value) DownloadsVisual.Card(this); else AppUi.Card(this);
@@ -291,7 +304,7 @@ internal sealed class PlaylistPreviewControl : UserControl
         if (selection is not null)
         {
             title.Text = string.IsNullOrWhiteSpace(selection.Playlist.Title) ? text["Playlist.Untitled"] : selection.Playlist.Title;
-            facts.Text = text.Get("Playlist.Facts", selection.Playlist.Channel ?? text["Common.NotAvailable"], selection.Playlist.EntryCount) + (dashboard ? " · " + text["Playlist.FormatsHint"] : "");
+            facts.Text = text.Get("Playlist.Facts", selection.Playlist.Channel ?? text["Common.NotAvailable"], selection.Playlist.EntryCount) + (dashboard ? " · " + text.Get("Playlist.Availability", selection.Playlist.Entries.Count(e => e.IsAvailable), selection.Playlist.Entries.Count(e => !e.IsAvailable)) : "");
             RefreshPageControls();
             RefreshRowText();
             RefreshSelectionCount();
@@ -378,47 +391,62 @@ internal sealed class PlaylistPreviewControl : UserControl
         closePreview.SetBounds(w - 52, 12, 36, 32);
         DashboardVisual.Icon(closePreview, AppIconKind.Close, true);
         title.Multiline = true; title.AutoEllipsis = true;
-        title.SetBounds(inset, 14, w - 84, T(38));
-        facts.Multiline = true;
-        facts.SetBounds(inset, title.Bottom + 2, w - 32, T(AppTypography.TextScale > 125 ? 42 : 24));
-        var compact = w >= 1100 && AppTypography.TextScale <= 125;
-        var y = facts.Bottom + 8;
-        selectedCount.SetBounds(inset, y, compact ? w / 2 : w - 32, T(28));
-        y = compact ? y : selectedCount.Bottom + 6;
-        var selectWidth = Math.Min((w - 40) / 2, DashboardVisual.ActionWidth(selectAll));
-        var clearWidth = Math.Min((w - 40) / 2, DashboardVisual.ActionWidth(clearSelection));
-        selectAll.SetBounds(compact ? w - 24 - selectWidth - clearWidth : inset, y, selectWidth, T(32));
-        clearSelection.SetBounds(selectAll.Right + 8, y, clearWidth, T(32));
-        y = selectAll.Bottom + 10;
-        var fieldWidth = Math.Min(T(240), (w - 40) / 2);
-        qualityLabel.SetBounds(inset, y, fieldWidth, T(22));
-        containerLabel.SetBounds(inset + fieldWidth + 8, y, fieldWidth, T(22));
-        quality.SetBounds(inset, qualityLabel.Bottom + 3, fieldWidth, T(34));
-        container.SetBounds(containerLabel.Left, quality.Top, fieldWidth, T(34));
-        if (compact) rangeEditor.SetBounds(container.Right + 16, quality.Top, w - container.Right - 32, T(36));
-        else rangeEditor.SetBounds(inset, quality.Bottom + 8, w - 32, T(36));
-        rangeHint.Visible = rangeEditor.IsCustom;
-        rangeHint.SetBounds(inset, rangeEditor.Bottom + 4, w - 32, T(24));
-        y = rangeEditor.IsCustom ? rangeHint.Bottom + 8 : rangeEditor.Bottom + 10;
-        var actionY = Height - T(40) - 12;
-        var addWidth = Math.Min(w - 32, DashboardVisual.ActionWidth(addSelected));
-        var advancedWidth = Math.Min(w - 32, DashboardVisual.ActionWidth(advancedOptions));
-        addSelected.SetBounds(w - inset - addWidth, actionY, addWidth, T(36));
-        advancedOptions.SetBounds(inset, actionY, advancedWidth, T(36));
-        if (advancedOptions.Right + 8 > addSelected.Left)
-        { advancedOptions.Top -= T(42); actionY -= T(42); }
+        title.SetBounds(inset, 12, w - 84, T(34));
+        facts.Multiline = true; facts.AutoEllipsis = true;
+        facts.SetBounds(inset, title.Bottom + 2, w - 32, T(24));
+        selectedCount.SetBounds(inset, facts.Bottom + 4, w - 32, T(26));
+        var y = selectedCount.Bottom + 6;
+        previewOptions.Text = text["Playlist.SharedOptions"] + (optionsExpanded ? " ▴" : " ▾");
+        collapseEntries.Text = text[entriesCollapsed ? "Playlist.ShowEntries" : "Playlist.HideEntries"];
+        previewOptions.Visible = collapseEntries.Visible = true;
+        // Primary action stays above the independently scrolled entry viewport.
+        var x = inset;
+        void Action(Button button)
+        {
+            var width = Math.Min(w - 32, DashboardVisual.ActionWidth(button));
+            if (x > inset && x + width > w - inset) { x = inset; y += T(34) + 6; }
+            button.SetBounds(x, y, width, T(34)); x = button.Right + 8;
+        }
+        Action(addSelected); Action(previewOptions); Action(collapseEntries);
+        y += T(34) + 8;
+        foreach (var control in new Control[] { qualityLabel, quality, containerLabel, container, rangeEditor, advancedOptions }) control.Visible = optionsExpanded;
+        rangeHint.Visible = optionsExpanded && rangeEditor.IsCustom;
+        if (optionsExpanded)
+        {
+            var fieldWidth = (w - 40) / 2;
+            qualityLabel.SetBounds(inset, y, fieldWidth, T(22));
+            containerLabel.SetBounds(inset + fieldWidth + 8, y, fieldWidth, T(22));
+            quality.SetBounds(inset, qualityLabel.Bottom + 3, fieldWidth, T(34));
+            container.SetBounds(containerLabel.Left, quality.Top, fieldWidth, T(34));
+            rangeEditor.SetBounds(inset, quality.Bottom + 6, w - 32, T(36));
+            rangeHint.SetBounds(inset, rangeEditor.Bottom + 4, w - 32, T(28));
+            y = (rangeHint.Visible ? rangeHint.Bottom : rangeEditor.Bottom) + 6;
+            advancedOptions.SetBounds(inset, y, Math.Min(w - 32, DashboardVisual.ActionWidth(advancedOptions)), T(32));
+            y = advancedOptions.Bottom + 8;
+        }
         feedback.Multiline = true;
-        var feedbackHeight = string.IsNullOrEmpty(feedback.Text) ? 0 : T(34);
-        feedback.SetBounds(inset, actionY - feedbackHeight - 6, w - 32, feedbackHeight);
-        var pagingY = feedback.Top - T(34) - 6;
-        previousPage.Text = "‹"; nextPage.Text = "›";
-        previousPage.AccessibleName = text["Playlist.PreviousPage"];
-        nextPage.AccessibleName = text["Playlist.NextPage"];
-        previousPage.SetBounds(inset, pagingY, 44, T(32));
-        pageText.SetBounds(68, pagingY, Math.Min(T(160), w - 140), T(32));
-        nextPage.SetBounds(pageText.Right + 8, pagingY, 44, T(32));
-        entries.SetBounds(inset, y, w - 32, Math.Max(64, pagingY - y - 8));
+        feedback.SetBounds(inset, y, w - 32, string.IsNullOrEmpty(feedback.Text) ? 0 : T(38));
+        if (feedback.Height > 0) y = feedback.Bottom + 6;
+        foreach (var control in new Control[] { entries, selectAll, clearSelection, previousPage, nextPage, pageText }) control.Visible = !entriesCollapsed;
+        if (!entriesCollapsed)
+        {
+            x = inset; Action(selectAll); Action(clearSelection);
+            previousPage.Text = "‹"; nextPage.Text = "›";
+            previousPage.AccessibleName = text["Playlist.PreviousPage"]; nextPage.AccessibleName = text["Playlist.NextPage"];
+            var pagingWidth = T(210);
+            if (x + pagingWidth > w - inset) { x = inset; y += T(34) + 6; }
+            previousPage.SetBounds(x, y, T(32), T(32));
+            pageText.SetBounds(previousPage.Right + 6, y, T(128), T(32));
+            nextPage.SetBounds(pageText.Right + 6, y, T(32), T(32));
+            y += T(34) + 6;
+            entries.SetBounds(inset, y, w - 32, Math.Max(154, T(76)));
+            y = entries.Bottom + 12;
+        }
+        else y += 4;
+        var heightChanged = DashboardHeight != y;
+        DashboardHeight = y;
         ResizeRows();
+        if (heightChanged) DashboardLayoutChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void RefreshPageControls()
@@ -459,6 +487,8 @@ internal sealed class PlaylistEntryRow : Panel
     public void SetDashboard(bool value)
     {
         dashboard = value;
+        ((PlaylistSelectionCheckBox)Selector).Dashboard = value;
+        Selector.Invalidate();
         AppTypography.SetDashboardPresentation(this, value);
         image.Visible = value;
         RefreshSurface();
@@ -487,7 +517,7 @@ internal sealed class PlaylistEntryRow : Panel
         SetControlBehavior(ControlBehaviors.Hoverable);
         AppUi.BindInteractiveSurface(this, AppThemeTokens.SurfaceSecondary, AppThemeTokens.SurfaceHover);
 
-        Selector = new CheckBox
+        Selector = new PlaylistSelectionCheckBox
         {
             AccessibleAutomationId = $"PlaylistEntryToggle{ordinal + 1}",
             Checked = selected,

@@ -28,7 +28,12 @@ internal sealed partial class DownloadsView
     {
         if (rangeEditor.ResponsiveLayout != value) rangeEditor.ResponsiveLayout = value;
         rangeHint.Multiline = value;
-        if (dashboard == value) { if (value) UpdateLayout(); return; }
+        if (dashboard == value)
+        {
+            if (value && projectedGrouping != AppearancePresentation.Current.ModernDashboardShell.GroupPlaylists) BuildQueueCards();
+            else if (value) UpdateLayout();
+            return;
+        }
         if (value) classicAnalysisProgressBounds = analysisProgress.Bounds;
         dashboard = value;
         playlistPreview.SetDashboard(value);
@@ -38,7 +43,6 @@ internal sealed partial class DownloadsView
         if (value)
         {
             EnsureDashboard();
-            if (selectedItemId is { } id) { var index = services.Queue.Snapshot().ToList().FindIndex(i => i.Id == id); if (index >= 0) dashboardPage = index / DashboardPageSize; }
         }
         if (dashboardQueue is not null) dashboardQueue.Visible = value;
         if (dashboardStatus is not null) dashboardStatus.Visible = value;
@@ -66,13 +70,13 @@ internal sealed partial class DownloadsView
         // native accessibility sees the completed collection instead of every intermediate
         // removal and layout of the old/new rows. Ordinary queue updates retain their path.
         var parent = queueHost.Parent;
-        if (parent is null) { BuildQueueCards(selectedItemId, rebuildPresentation: true); return; }
+        if (parent is null) { BuildQueueCards(dashboard ? null : selectedItemId, rebuildPresentation: true); return; }
         var index = parent.Controls.GetChildIndex(queueHost);
         parent.SuspendLayout();
         try
         {
             parent.Controls.Remove(queueHost);
-            BuildQueueCards(selectedItemId, rebuildPresentation: true);
+            BuildQueueCards(dashboard ? null : selectedItemId, rebuildPresentation: true);
         }
         finally
         {
@@ -155,7 +159,7 @@ internal sealed partial class DownloadsView
         if (e.KeyCode is Keys.Up or Keys.Down && items.Count > 0)
         {
             index = Math.Clamp(index + (e.KeyCode == Keys.Down ? 1 : -1), 0, items.Count - 1); selectedItemId = items[index].Id;
-            var page = index / DashboardPageSize; if (page != dashboardPage) { dashboardPage = page; BuildQueueCards(); }
+            BuildQueueCards(selectedItemId);
             RefreshSelection(); ScrollQueueCardIntoView(selectedItemId.Value); e.Handled = true;
         }
         else if (e.KeyCode == Keys.Enter) { dashboardDrawer = true; UpdateLayout(); e.Handled = true; }
@@ -219,7 +223,7 @@ internal sealed partial class DownloadsView
         var queueWidth = inline ? width - inspectorWidth - gap : width;
         var inputWidth = inline ? Math.Min(width - 7, queueWidth + 30) : width;
         var row = AppTypography.TextHeight(46); var wideToolbar = queueWidth >= AppTypography.TextHeight(860);
-        var hasPages = services.Queue.Snapshot().Count > DashboardPageSize;
+        var hasPages = DashboardPageCount > 1;
         var toolbarRows = wideToolbar ? 1 : 2;
         header.Visible = false; urlLabel.Visible = supportedSourcesButton.Visible = false;
         header.SetBounds(0, 0, 0, 0);
@@ -249,7 +253,8 @@ internal sealed partial class DownloadsView
         var top = dashboardChips.Bottom + 19;
         if (playlistPreview.Visible)
         {
-            playlistPreview.SetBounds(margin + origin.X, top, width, AppTypography.TextHeight(600));
+            playlistPreview.SetBounds(margin + origin.X, top, width, playlistPreview.Height);
+            playlistPreview.Height = playlistPreview.DashboardHeight;
             top = playlistPreview.Bottom + gap;
         }
         else if (previewPanel.Visible)
@@ -342,7 +347,7 @@ internal sealed partial class DownloadsView
             }
             queueTitle.Width = Math.Max(120, dashboardStart.Left - 12);
         }
-        var pages = Math.Max(1, (services.Queue.Snapshot().Count + DashboardPageSize - 1) / DashboardPageSize);
+        var pages = DashboardPageCount;
         dashboardPrevious!.Visible = dashboardNext!.Visible = dashboardPaging!.Visible = pages > 1;
         dashboardPrevious.SetBounds(queueWidth - 174, toolbarBaseHeight - 36, 30, AppTypography.TextHeight(30)); dashboardNext.SetBounds(queueWidth - 74, toolbarBaseHeight - 36, 30, dashboardPrevious.Height);
         dashboardPaging.SetBounds(dashboardPrevious.Right + 4, dashboardPrevious.Top + 2, 62, dashboardPrevious.Height); dashboardPaging.Text = $"{dashboardPage + 1}/{pages}";
