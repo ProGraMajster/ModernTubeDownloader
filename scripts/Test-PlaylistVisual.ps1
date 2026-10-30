@@ -316,18 +316,24 @@ function RunGroupFixtures($Template) {
     $perf | ConvertTo-Json | Set-Content (Join-Path $DataRoot 'playlist-group-performance.json') -Encoding utf8
     Invoke 'NavSettings'; Invoke 'SettingsCategoryPersonalization'
     Choose 'AppearanceSection' 0
+    $appearancePath=Join-Path $DataRoot 'appearance.json'
+    $beforeEdit=(Get-Item -LiteralPath $appearancePath).LastWriteTimeUtc
     SetText 'AppearanceColorAccent' '#3388CC'
+    # Personalization deliberately debounces edits. Wait for the actual atomic
+    # profile replacement using metadata, without holding a read handle open.
+    WaitCheck { (Get-Item -LiteralPath $appearancePath).LastWriteTimeUtc -gt $beforeEdit } 'Custom appearance did not reach persistence.'
     Invoke 'AppearanceResetSection'
     WaitCheck { $null -ne (DialogButton @('Anuluj','Cancel')) } 'Appearance MessageBoxForm absent.'
-    $appearancePath=Join-Path $DataRoot 'appearance.json'
     $custom=Get-Content -LiteralPath $appearancePath -Raw | ConvertFrom-Json
     if($custom.global.colors.Accent -ne '#3388CC') { throw 'Custom appearance fixture was not saved.' }
     $appearanceHash=(Get-FileHash -LiteralPath $appearancePath).Hash
     Capture 'appearance-reset-confirmation' ([PlaylistWindow]::Popup($owned.Id,$hwnd))
     AcceptDialog @('Anuluj','Cancel')
     if((Get-FileHash -LiteralPath $appearancePath).Hash -ne $appearanceHash) { throw 'Cancelled appearance reset changed the profile.' }
+    $beforeReset=(Get-Item -LiteralPath $appearancePath).LastWriteTimeUtc
     Invoke 'AppearanceResetSection'
     AcceptDialog @('Resetuj tę sekcję','Reset this section')
+    WaitCheck { (Get-Item -LiteralPath $appearancePath).LastWriteTimeUtc -gt $beforeReset } 'Confirmed appearance reset did not reach persistence.'
     $reset=Get-Content -LiteralPath $appearancePath -Raw | ConvertFrom-Json
     if($reset.global.colors.Accent) { throw 'Confirmed appearance reset retained the custom accent.' }
     if((Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash -ne $hash) { throw 'Appearance reset changed canonical queue bytes.' }
