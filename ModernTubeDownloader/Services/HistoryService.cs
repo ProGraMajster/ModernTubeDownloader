@@ -44,7 +44,9 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
             Channel = entry.Channel ?? string.Empty,
             Quality = entry.Quality ?? string.Empty,
             FinalPath = entry.FinalPath ?? string.Empty,
-            Status = entry.Status ?? string.Empty
+            Status = entry.Status ?? string.Empty,
+            DurationSeconds = entry.DurationSeconds is > 0 and var duration && double.IsFinite(duration) ? duration : null,
+            FileSizeBytes = entry.FileSizeBytes is >= 0 ? entry.FileSizeBytes : null
         };
     }
 
@@ -54,7 +56,7 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
         {
             entries.RemoveAll(existing => existing.QueueItemId == entry.QueueItemId &&
                 existing.LivePartIndex == entry.LivePartIndex);
-            entries.Add(entry);
+            entries.Add(Normalize(entry));
         }
         await SaveAsync(cancellationToken).ConfigureAwait(false);
         Changed?.Invoke(this, EventArgs.Empty);

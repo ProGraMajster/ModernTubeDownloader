@@ -10,7 +10,7 @@ internal sealed class StartupSettingsPanel : Panel
 {
     private readonly AppServices services;
     private readonly WindowsStartupService startup;
-    private readonly CheckBox showTray = new(), notice = new(), startWithWindows = new(), startHidden = new();
+    private readonly DashboardToggle showTray = new(), notice = new(), startWithWindows = new(), startHidden = new();
     private readonly ComboBox minimize = new(), close = new();
     private readonly Label title = AppUi.Heading("", 15), minimizeLabel = AppUi.Muted(), closeLabel = AppUi.Muted(), status = AppUi.Muted();
     private readonly Button apply = new();
@@ -47,6 +47,17 @@ internal sealed class StartupSettingsPanel : Panel
 
     public void LayoutForWidth(int width)
     {
+        if (AppTypography.IsDashboard(this) && width < 540)
+        {
+            var innerWidth = width - 32; var line = AppTypography.TextHeight(36); var label = AppTypography.TextHeight(24);
+            title.SetBounds(16,16,innerWidth,label); showTray.SetBounds(16,title.Bottom+14,innerWidth,AppTypography.TextHeight(42));
+            minimizeLabel.SetBounds(16,showTray.Bottom+8,innerWidth,label); minimize.SetBounds(16,minimizeLabel.Bottom+4,innerWidth,line);
+            closeLabel.SetBounds(16,minimize.Bottom+12,innerWidth,label); close.SetBounds(16,closeLabel.Bottom+4,innerWidth,line);
+            notice.SetBounds(16,close.Bottom+12,innerWidth,AppTypography.TextHeight(44)); startWithWindows.SetBounds(16,notice.Bottom+8,innerWidth,notice.Height);
+            startHidden.SetBounds(16,startWithWindows.Bottom+8,innerWidth,notice.Height); apply.SetBounds(16,startHidden.Bottom+12,innerWidth,line);
+            status.Multiline = true; status.SetBounds(16,apply.Bottom+12,innerWidth,AppTypography.TextHeight(54)); Height = status.Bottom+16; return;
+        }
+
         var inner = Math.Max(320, width - 48);
         title.SetBounds(24, 20, inner, 30);
         showTray.SetBounds(24, 66, inner, 30);

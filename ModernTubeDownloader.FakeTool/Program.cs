@@ -85,6 +85,7 @@ if (arguments.Contains("--dump-single-json"))
             ["http_headers"]=new JsonObject{["Cookie"]=value} }.ToJsonString());
         return arguments.Last().Contains("auth-probe-error",StringComparison.Ordinal)?1:0;
     }
+    var richPlaylist = Environment.GetEnvironmentVariable("MTD_FAKE_PLAYLIST_VISUAL") == "1";
     var checkUrl = arguments.LastOrDefault() ?? string.Empty;
     if (checkUrl.Contains("/source/unsupported", StringComparison.OrdinalIgnoreCase) ||
         checkUrl.Contains("/source/auth", StringComparison.OrdinalIgnoreCase))
@@ -100,6 +101,10 @@ if (arguments.Contains("--dump-single-json"))
     {
         var count = int.TryParse(Environment.GetEnvironmentVariable("MTD_FAKE_PLAYLIST_COUNT"), out var configuredCount)
             ? Math.Clamp(configuredCount, 0, 500) : 12;
+        if (richPlaylist && sourceUrl.Contains("list=empty", StringComparison.Ordinal)) count = 0;
+        if (richPlaylist && sourceUrl.Contains("list=error", StringComparison.Ordinal))
+        { Console.Error.WriteLine("ERROR: Synthetic playlist analysis failed"); return 1; }
+        if (richPlaylist && sourceUrl.Contains("list=slow", StringComparison.Ordinal)) await Task.Delay(10000);
         var entries = new JsonArray();
         for (var index = 1; index <= count; index++)
         {
@@ -107,19 +112,20 @@ if (arguments.Contains("--dump-single-json"))
             entries.Add(new JsonObject
             {
                 ["id"] = id,
-                ["title"] = index == 3 ? "[Private video]" : $"Playlist sample {index:000}",
-                ["webpage_url"] = $"https://example.test/watch?id={id}",
+                ["title"] = richPlaylist ? PlaylistTitle(index) : index == 3 ? "[Private video]" : $"Playlist sample {index:000}",
+                ["webpage_url"] = richPlaylist ? $"https://www.youtube.com/watch?v={id}" : $"https://example.test/watch?id={id}",
                 ["playlist_index"] = index,
-                ["duration"] = 40 + index,
+                ["duration"] = richPlaylist ? PlaylistDuration(index) : 40 + index,
+                ["thumbnail"] = richPlaylist && index != 4 ? $"https://example.test/dashboard/fixture-{(index - 1) % 6}.png" : null,
                 ["channel"] = "Test Channel",
-                ["availability"] = index == 3 ? "private" : "public"
+                ["availability"] = index == 3 ? "private" : richPlaylist && index == 9 ? "deleted" : "public"
             });
         }
         Console.WriteLine(new JsonObject
         {
             ["_type"] = "playlist",
             ["id"] = "synthetic-playlist",
-            ["title"] = "Integration playlist",
+            ["title"] = richPlaylist ? "SYNTHETIC QA — Podróże, muzyka i 日本語 🎬" : "Integration playlist",
             ["channel"] = "Test Channel",
             ["webpage_url"] = sourceUrl,
             ["entries"] = entries
@@ -130,6 +136,7 @@ if (arguments.Contains("--dump-single-json"))
         {"id":"sample123","webpage_url":"https://example.test/watch/sample123","original_url":"https://example.test/watch/sample123","title":"Integration Sample","description":"Synthetic metadata emitted only by the integration-test tool.","uploader":"Test Uploader","channel":"Test Channel","channel_id":"channel-test","duration":12.5,"duration_string":"00:12","upload_date":"20260830","view_count":1234,"like_count":100,"comment_count":8,"thumbnail":null,"tags":["test"],"categories":["Testing"],"language":"en","availability":"public","age_limit":0,"live_status":"not_live","extractor":"test","extractor_key":"Test","unknown_future_field":{"preserved":true},"chapters":[{"title":"Start","start_time":0,"end_time":12.5}],"subtitles":{"en":[{"ext":"vtt","url":"https://example.test/sub.vtt"}]},"automatic_captions":{},"formats":[{"format_id":"137","ext":"mp4","width":1920,"height":1080,"resolution":"1920x1080","fps":30,"vcodec":"avc1.640028","acodec":"none","vbr":4500,"protocol":"https","filesize":1000,"format_note":"1080p"},{"format_id":"22","ext":"mp4","width":1280,"height":720,"resolution":"1280x720","fps":30,"vcodec":"avc1.64001F","acodec":"mp4a.40.2","tbr":1800,"protocol":"https","filesize":800,"format_note":"720p"},{"format_id":"140","ext":"m4a","vcodec":"none","acodec":"mp4a.40.2","abr":129,"asr":44100,"audio_channels":2,"protocol":"https","filesize":200,"format_note":"medium"}]}
         """;
     var title = Environment.GetEnvironmentVariable("MTD_FAKE_METADATA_TITLE");
+    var thumbnail = Environment.GetEnvironmentVariable("MTD_FAKE_METADATA_THUMBNAIL");
     var sourceUri = Uri.TryCreate(sourceUrl, UriKind.Absolute, out var parsedUri) ? parsedUri : null;
     if (sourceUrl.Contains("/source/opaque", StringComparison.Ordinal))
     {
@@ -155,11 +162,13 @@ if (arguments.Contains("--dump-single-json"))
         return 0;
     }
     var liveRoute = sourceUri?.AbsolutePath.StartsWith("/live/", StringComparison.OrdinalIgnoreCase) == true;
-    if (!string.IsNullOrWhiteSpace(title) || liveRoute ||
-        sourceUri?.Query.Contains("id=", StringComparison.OrdinalIgnoreCase) == true)
+    if (!string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(thumbnail) || liveRoute ||
+        sourceUri?.Query.Contains("id=", StringComparison.OrdinalIgnoreCase) == true ||
+        (richPlaylist && sourceUri?.Query.Contains("v=", StringComparison.OrdinalIgnoreCase) == true))
     {
         var metadata = JsonNode.Parse(metadataJson)!.AsObject();
         if (!string.IsNullOrWhiteSpace(title)) metadata["title"] = title;
+        if (!string.IsNullOrWhiteSpace(thumbnail)) metadata["thumbnail"] = thumbnail;
         if (liveRoute)
         {
             var status = sourceUri!.AbsolutePath.EndsWith("/active", StringComparison.OrdinalIgnoreCase)
@@ -173,17 +182,26 @@ if (arguments.Contains("--dump-single-json"))
             metadata["is_live"] = status == "is_live";
             metadata["was_live"] = status == "was_live";
             metadata["release_date"] = "20260829";
-            metadata["release_timestamp"] = 1787990400;
+            metadata["release_timestamp"] = sourceUri.Query.Contains("id=visual", StringComparison.Ordinal)
+                ? DateTimeOffset.UtcNow.AddHours(2).ToUnixTimeSeconds() : 1787990400;
             metadata["extractor_key"] = "Youtube";
             metadata["extractor"] = "youtube";
         }
         if (sourceUri is not null)
         {
-            var id = sourceUri.Query.Split('&').FirstOrDefault(value => value.TrimStart('?').StartsWith("id=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2).Last();
+            var id = MediaQueryId(sourceUri, richPlaylist);
             if (!string.IsNullOrWhiteSpace(id))
             {
                 metadata["id"] = id;
                 metadata["title"] = $"Playlist sample {id}";
+                if (richPlaylist && id.StartsWith('p') && int.TryParse(id.AsSpan(1), out var ordinal))
+                {
+                    metadata["title"] = PlaylistTitle(ordinal);
+                    metadata["duration"] = PlaylistDuration(ordinal);
+                    metadata["thumbnail"] = ordinal == 4 ? null : $"https://example.test/dashboard/fixture-{(ordinal - 1) % 6}.png";
+                    if (ordinal == 5 && metadata["formats"] is JsonArray formats)
+                        metadata["formats"] = new JsonArray(formats.Where(format => format?["vcodec"]?.GetValue<string>() == "none").Select(format => format!.DeepClone()).ToArray());
+                }
                 metadata["webpage_url"] = sourceUrl;
                 metadata["original_url"] = sourceUrl;
             }
@@ -231,7 +249,7 @@ if (arguments.Contains("-f"))
     var videoId = "sample123";
     if (Uri.TryCreate(sourceUrl, UriKind.Absolute, out var videoUri))
     {
-        var queryId = videoUri.Query.Split('&').FirstOrDefault(value => value.TrimStart('?').StartsWith("id=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2).Last();
+        var queryId = MediaQueryId(videoUri, Environment.GetEnvironmentVariable("MTD_FAKE_PLAYLIST_VISUAL") == "1");
         if (!string.IsNullOrWhiteSpace(queryId)) videoId = queryId;
     }
     Directory.CreateDirectory(outputDirectory);
@@ -315,6 +333,41 @@ if (arguments.Contains("-f"))
             await Task.Delay(20);
     }
     var output = Path.Combine(outputDirectory, $"Integration Sample [{videoId}].{extension}");
+    var playlistTransfer = Environment.GetEnvironmentVariable("MTD_FAKE_PLAYLIST_VISUAL") == "1";
+    if (playlistTransfer && videoId == "p002")
+    {
+        var attemptDirectory = Path.GetDirectoryName(outputDirectory)!;
+        await File.WriteAllTextAsync(Path.Combine(attemptDirectory, ".playlist-failure-ready"), "synthetic");
+        if (!File.Exists(Path.Combine(attemptDirectory, ".playlist-retry-allow")))
+        {
+            Console.Error.WriteLine("ERROR: Unsupported URL: synthetic playlist failure");
+            return 1;
+        }
+    }
+    if (sourceUrl.Contains("/review-transfer", StringComparison.Ordinal) || (playlistTransfer && videoId == "p001"))
+    {
+        // Isolated visual QA only: progress derives from bytes written by this
+        // process. The normal executor/parser/queue/widget paths consume it.
+        const int total = 6 * 1024 * 1024;
+        var block = new byte[256 * 1024];
+        var watch = Stopwatch.StartNew();
+        await using (var file = new FileStream(output, FileMode.Create, FileAccess.Write, FileShare.Read))
+        {
+            for (var step = 0; step < 16; step++)
+            {
+                await file.WriteAsync(block); await file.FlushAsync();
+                var count = file.Length; var speed = count / Math.Max(.001, watch.Elapsed.TotalSeconds);
+                Console.WriteLine(FormattableString.Invariant($"MTD_PROGRESS|downloading|{count}|{total}|{total}|{speed:F0}|2|{100d * count / total:F1}%"));
+                await Task.Delay(150);
+            }
+            await File.WriteAllTextAsync(Path.Combine(outputDirectory, ".review-transfer-ready"), Environment.ProcessId.ToString());
+            while (!File.Exists(Path.Combine(outputDirectory, ".review-transfer-release"))) await Task.Delay(20);
+            while (file.Length < total) await file.WriteAsync(block);
+        }
+        Console.WriteLine($"MTD_PROGRESS|finished|{total}|{total}|{total}|0|0|100.0%");
+        Console.WriteLine($"MTD_FILE|{output}");
+        return 0;
+    }
     Console.WriteLine("MTD_PROGRESS|downloading|50|100|100|25|2| 50.0%");
     if (int.TryParse(Environment.GetEnvironmentVariable("MTD_FAKE_DOWNLOAD_DELAY_MS"), out var downloadDelay) && downloadDelay > 0)
         await Task.Delay(Math.Min(downloadDelay, 10000));
@@ -380,4 +433,29 @@ static string? ValueAfter(IReadOnlyList<string> values, string option)
         if (values[index] == option)
             return values[index + 1];
     return null;
+}
+
+// Deterministic metadata for opt-in native QA; never used by the application.
+static string PlaylistTitle(int index) => index switch
+{
+    1 => "SYNTHETIC QA — Szwajcaria: jeziora, góry i długa podróż przez alpejskie przełęcze — pełny tytuł filmu 🌄",
+    2 => "SYNTHETIC QA — 日本の風景と静かな音楽 • Zażółć gęślą jaźń 🎬",
+    3 => "[Private video]",
+    4 => "SYNTHETIC QA — Bez miniatury i czasu trwania",
+    5 => "SYNTHETIC QA — Tylko audio • nocne radio 🎵",
+    6 => "SYNTHETIC QA — Krótki klip",
+    9 => "[Deleted video]",
+    12 => "SYNTHETIC QA — Ostatnia pozycja: bardzo długi tytuł sprawdza przewijanie i zachowanie wyboru po zmianie strony 日本語",
+    _ => $"SYNTHETIC QA — Materiał {index:000}"
+};
+static double? PlaylistDuration(int index) => index switch { 2 => 90061, 4 => null, 5 => 10800, 6 => 3, _ => 40 + index };
+
+static string? MediaQueryId(Uri uri, bool allowVideoKey)
+{
+    var parameters = uri.Query.TrimStart('?').Split('&');
+    // Existing fixtures use id= even when v= is also present. The additional
+    // YouTube-shaped key is opt-in for visual playlist fixtures only.
+    var pair = parameters.FirstOrDefault(value => value.StartsWith("id=", StringComparison.OrdinalIgnoreCase))
+        ?? (allowVideoKey ? parameters.FirstOrDefault(value => value.StartsWith("v=", StringComparison.OrdinalIgnoreCase)) : null);
+    return pair?.Split('=', 2).Last();
 }

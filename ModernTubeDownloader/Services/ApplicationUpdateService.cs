@@ -86,6 +86,7 @@ public sealed class ApplicationUpdateService : IDisposable
     private readonly IAppLogger logger;
     private readonly string root, stateFile;
     private readonly TimeSpan checkTimeout;
+    private readonly TimeProvider checkClock;
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly CancellationTokenSource lifetime = new();
     private Task? monitor;
@@ -99,11 +100,12 @@ public sealed class ApplicationUpdateService : IDisposable
     public bool Ready => State.StagedArchive is not null && State.StagedHash is not null && File.Exists(State.StagedArchive);
 
     public ApplicationUpdateService(AppPaths paths, SettingsService settings, HttpClient http, IAppLogger logger,
-        IApplicationReleaseSource? releases = null, string? currentVersion = null, TimeSpan? checkTimeout = null)
+        IApplicationReleaseSource? releases = null, string? currentVersion = null, TimeSpan? checkTimeout = null, TimeProvider? checkClock = null)
     {
         this.settings = settings; this.http = http; this.logger = logger;
         this.releases = releases ?? new GitHubApplicationReleaseSource(http);
         this.checkTimeout = checkTimeout ?? TimeSpan.FromSeconds(30);
+        this.checkClock = checkClock ?? TimeProvider.System;
         if (this.checkTimeout <= TimeSpan.Zero || this.checkTimeout > TimeSpan.FromMinutes(5)) throw new ArgumentOutOfRangeException(nameof(checkTimeout));
         root = Path.Combine(paths.RootDirectory, "Updates"); stateFile = Path.Combine(root, "state.json");
         CurrentVersion = currentVersion ?? typeof(ApplicationUpdateService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
@@ -155,7 +157,11 @@ public sealed class ApplicationUpdateService : IDisposable
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
         var callerToken = token;
         await gate.WaitAsync(linked.Token);
-        linked.CancelAfter(checkTimeout);
+        // Start after admission to the serialized check, exactly as CancelAfter did.
+        // Production uses the system clock; tests can advance this same deadline
+        // independently of runner scheduling and durable filesystem latency.
+        using var deadline = new CancellationTokenSource(checkTimeout, checkClock);
+        using var deadlineRegistration = deadline.Token.Register(linked.Cancel);
         token = linked.Token;
         try
         {

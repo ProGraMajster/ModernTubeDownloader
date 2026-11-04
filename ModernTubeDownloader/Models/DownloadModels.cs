@@ -134,7 +134,9 @@ public sealed record DownloadHistoryEntry(
     DateTimeOffset? RecordingEndedAt = null,
     TimeSpan? RecordedDuration = null,
     bool WasPartial = false,
-    int? PartsCount = null);
+    int? PartsCount = null,
+    double? DurationSeconds = null,
+    long? FileSizeBytes = null);
 
 public enum QueueChangeKind
 {

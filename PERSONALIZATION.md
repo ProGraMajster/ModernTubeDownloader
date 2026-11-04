@@ -1,4 +1,15 @@
-# Appearance and accessibility (1.2.0)
+# Appearance and accessibility
+
+## Optional Modern Dashboard (1.3.0 candidate)
+
+Schema 2 adds an explicit Classic/Modern dashboard choice and a dashboard-specific
+section. Schema 1 defaults to Classic. Interface previews and live selection are
+in Settings → Personalization. Sidebar, inspector, widgets, density, thumbnail and
+metadata choices are independent of Classic. Import/export/reset use the same
+closed profile contract. A Modern Dashboard preset is available; `--classic-ui`
+forces Classic for one session without rewriting the preference. See
+[the dashboard guide](MODERN_DASHBOARD_UI.md) for layout, lifecycle and recovery.
+
 
 The application stores presentation independently in `appearance.json` under the
 application data directory. It contains no output paths, URLs, credentials or jobs.

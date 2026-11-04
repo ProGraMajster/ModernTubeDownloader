@@ -10,7 +10,7 @@ internal sealed class TextScaleSettingsPanel : Panel
     private readonly Label title = AppUi.Heading("", 15), hint = AppUi.Muted();
     private readonly ComboBox presets = new() { AccessibleAutomationId = "AppearanceTextPreset" };
     private readonly NumericUpDown scale = new() { Minimum = 80, Maximum = 200, AccessibleAutomationId = "AppearanceTextScale" };
-    private readonly Button reset = new() { AccessibleAutomationId = "AppearanceTextReset" };
+    private readonly Button reset = new DashboardButton { AccessibleAutomationId = "AppearanceTextReset" };
     private bool applying;
     public TextScaleSettingsPanel(AppServices services)
     {
@@ -30,6 +30,19 @@ internal sealed class TextScaleSettingsPanel : Panel
         presets.SetBounds(24, AppTypography.TextHeight(60), 150, AppTypography.TextHeight(38)); scale.SetBounds(190, AppTypography.TextHeight(60), 110, AppTypography.TextHeight(38));
         reset.SetBounds(24, AppTypography.TextHeight(112), Math.Min(500, width - 48), AppTypography.TextHeight(38));
         hint.SetBounds(24, AppTypography.TextHeight(158), width - 48, AppTypography.TextHeight(46));
+        if (AppTypography.IsDashboard(this))
+        {
+            title.SetBounds(16, 16, width - 32, AppTypography.TextHeight(32));
+            var line = AppTypography.TextHeight(38);
+            var presetWidth = Math.Min(AppTypography.TextHeight(150), (width - 44) / 2);
+            presets.SetBounds(16, title.Bottom + 12, presetWidth, line);
+            scale.SetBounds(presets.Right + 12, presets.Top, Math.Min(AppTypography.TextHeight(110), width - presets.Right - 28), line);
+            DashboardVisual.Button(reset); reset.SetBounds(16, presets.Bottom + 12, width - 32, line);
+            var style = hint.CurrentStyle;
+            var measured = TextMeasurer.MeasureText(hint.Text, style.GetFont(), style.GetFontSize(), new System.Drawing.Size(width - 32, int.MaxValue), style.GetFontStyle());
+            hint.SetBounds(16, reset.Bottom + 12, width - 32, Math.Max(AppTypography.TextHeight(40), (int)Math.Ceiling(measured.Height) + 4));
+            Height = hint.Bottom + 16;
+        }
     }
     private void ApplyText() { title.Text = services.Localization["Appearance.TextTitle"]; hint.Text = services.Localization["Appearance.TextHint"]; reset.Text = services.Localization["Appearance.ResetText"]; applying = true; try { presets.Items.Clear(); foreach (var percent in new[] { 80, 90, 100, 110, 125, 150, 175, 200 }) presets.Items.Add(percent + "%"); presets.SelectedIndex = Array.IndexOf(new[] { 80, 90, 100, 110, 125, 150, 175, 200 }, (int)scale.Value); } finally { applying = false; } }
     private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(ApplyText);

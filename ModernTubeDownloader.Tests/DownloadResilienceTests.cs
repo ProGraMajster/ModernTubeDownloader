@@ -276,18 +276,29 @@ public sealed class DownloadResilienceTests
             await queue.LoadAsync();
             queue.Add(new DownloadQueueItem { VideoId = "a" });
             queue.Add(new DownloadQueueItem { VideoId = "b" });
-            var executor = new HoldExecutor();
-            using var processor = new QueueProcessor(queue, executor, settings, logger, new FixedTiming());
+            var timing = new AdmissionClock();
+            var executor = new HoldExecutor(() => timing.UtcNow);
+            using var processor = new QueueProcessor(queue, executor, settings, logger, timing);
             processor.Start();
-            await WaitUntilAsync(() => executor.Starts.Count == 1, TimeSpan.FromSeconds(3));
-            queue.SetPaused(true);
-            await Task.Delay(650);
-            Assert.Single(executor.Starts);
-            queue.SetPaused(false);
-            await WaitUntilAsync(() => executor.Starts.Count == 2, TimeSpan.FromSeconds(3));
-            executor.Release();
-            await WaitUntilAsync(() => queue.Snapshot().All(item => item.Status == DownloadStatus.Completed), TimeSpan.FromSeconds(3));
-            await processor.StopAsync();
+            try
+            {
+                await WaitUntilAsync(() => executor.Starts.Count == 1, TimeSpan.FromSeconds(3));
+                await WaitUntilAsync(() => processor.NextAdmissionAt == timing.UtcNow + TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(3));
+                queue.SetPaused(true);
+                await WaitUntilAsync(() => processor.NextAdmissionAt is null, TimeSpan.FromSeconds(3));
+                timing.Advance(TimeSpan.FromMilliseconds(650));
+                await Task.Delay(650);
+                Assert.Single(executor.Starts);
+                queue.SetPaused(false);
+                await WaitUntilAsync(() => processor.NextAdmissionAt == timing.UtcNow + TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(3));
+                Assert.Single(executor.Starts);
+                timing.Advance(TimeSpan.FromMilliseconds(500));
+                await settings.SaveAsync(); // Wake the canonical scheduler after advancing its test clock.
+                await WaitUntilAsync(() => executor.Starts.Count == 2, TimeSpan.FromSeconds(3));
+                executor.Release();
+                await WaitUntilAsync(() => queue.Snapshot().All(item => item.Status == DownloadStatus.Completed), TimeSpan.FromSeconds(3));
+            }
+            finally { await processor.StopAsync(); await queue.SaveAsync(); }
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
     }

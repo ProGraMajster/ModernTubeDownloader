@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Optional Modern Dashboard interface, retaining Classic as the default.
+- Runtime interface selection and session-only `--classic-ui` recovery.
+- Dashboard queue inspector and editable queued options.
+- Real download speed, storage and observed-process widgets.
+- Responsive shell layout, bounded queue/history pages and shared navigation.
+- Modern LIVE, History, Other, Batch and categorized Settings presentation.
+- Reference-based rebuild of all six Modern pages: readable text, subtle surfaces,
+  vector actions, thumbnail duration, aligned history and grouped inspectors.
+- Real History date ranges, date sorting and audio/video/playlist filters.
+- Modern native switch/progress/text presentation with Classic recipe restoration.
+
+Development identity: **1.3.0-candidate.1**, local only; no 1.3.0 release published.
+
+
 ## 1.2.1 — 2026-10-18
 
 Stability/performance patch; Classic UI and the existing download/LIVE ownership remain.

@@ -27,6 +27,8 @@ const syntheticFixtures = new Map([
   ['ModernTubeDownloader.Tests/ExternalLinkTests.cs:credential-url', ['https://user:pass@']],
   ['ModernTubeDownloader.Tests/SupportedSourcesTests.cs:credential-url', ['https://user:password@']],
   ['ModernTubeDownloader.Tests/ExternalMediaPolicyTests.cs:credential-url', ['https://user:password@']],
+  // Reserved .example IDN, never requested: verifies credentials do not enter the provider caption.
+  ['ModernTubeDownloader.Tests/SourceBrandTests.cs:credential-url', ['https://user:secret@']],
   ['browser-extension/tests/extension.test.cjs:credential-url', ['https://user:secret@']],
   ['ModernTubeDownloader.Tests/WebRemoteIntegrationTests.cs:private-lan-url', ['http://192.168.1.50']]
 ]);
