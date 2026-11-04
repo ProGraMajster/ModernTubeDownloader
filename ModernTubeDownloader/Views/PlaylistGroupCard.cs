@@ -11,6 +11,8 @@ internal sealed class PlaylistGroupCard : Panel
 {
     private readonly Button toggle = new DashboardButton(), more = new DashboardButton();
     private readonly Label counts = AppUi.Muted(), completion = AppUi.Muted(), provider = AppUi.Muted();
+    private readonly Label jobs = AppUi.Muted();
+    private readonly AppVectorIcon chevron = new(AppIconKind.ChevronRight, 18), menuIcon = new(AppIconKind.More, 18);
     private readonly DownloadsPictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom, RoundedPreview = true };
     private readonly DashboardProgress progress = new();
     private readonly SourceVectorIcon sourceIcon = new() { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
@@ -35,22 +37,32 @@ internal sealed class PlaylistGroupCard : Panel
         more.AccessibleAutomationId = "PlaylistGroupMenu-" + suffix;
         counts.AccessibleAutomationId = "PlaylistGroupCounts-" + suffix;
         completion.AccessibleAutomationId = "PlaylistGroupCompletion-" + suffix;
+        jobs.AccessibleAutomationId = "PlaylistGroupJobs-" + suffix;
         AppUi.Secondary(toggle); AppUi.Secondary(more);
         toggle.TextAlign = ContentAlignment.MiddleLeft;
         toggle.AutoEllipsis = true;
         foreach (var style in new[] { toggle.Style, toggle.StyleHover, toggle.StylePressed, toggle.StyleDisabled })
         { style.Border.Width = 0; style.BackgroundBrush = null; style.BackgroundColor = SKColors.Transparent; }
         toggle.StyleFocused.Border.Width = 1; toggle.StyleFocused.Border.Color = AppUi.GetColor(AppThemeTokens.Accent);
-        more.Text = "⋮"; more.AccessibleName = text["PlaylistGroup.Actions"];
+        more.AccessibleName = text["PlaylistGroup.Actions"];
+        chevron.AccessibilityView = menuIcon.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden;
+        chevron.TabStop = menuIcon.TabStop = false;
+        ExcludeDecorationFromTabOrder(menuIcon);
+        toggle.Controls.Add(chevron); more.Controls.Add(menuIcon);
+        chevron.Click += (_, _) => toggle.PerformClick(); menuIcon.Click += (_, _) => more.PerformClick();
+        DashboardVisual.SetPadding(toggle, new Padding(28, 0, 4, 0));
         AppTypography.Bind(toggle, 10.5f, FontStyle.Bold);
         counts.Multiline = true; counts.AutoEllipsis = true; completion.AutoEllipsis = true;
         AppTypography.Bind(counts, 9.5f); AppTypography.Bind(completion, 9.5f);
         AppTypography.Bind(provider, 9); provider.AutoEllipsis = true;
+        AppTypography.Bind(jobs, 9, FontStyle.Bold); jobs.TextAlign = ContentAlignment.MiddleCenter;
+        AppUi.BindBackground(jobs, DownloadsVisual.Selected); AppUi.BindForeground(jobs, AppThemeTokens.TextPrimary);
+        jobs.Style.Border.Radius = 4; jobs.Style.Border.Width = 0;
         toggle.Click += (_, _) => ToggleRequested?.Invoke(this, EventArgs.Empty);
         more.Click += (_, _) => MenuRequested?.Invoke(this, EventArgs.Empty);
         toggle.KeyDown += NavigateGroupActions;
         more.KeyDown += NavigateGroupActions;
-        foreach (var control in new Control[] { this, counts, completion, image, provider, progress })
+        foreach (var control in new Control[] { this, counts, completion, image, provider, progress, jobs })
             control.Click += (_, _) => ToggleRequested?.Invoke(this, EventArgs.Empty);
         toggle.KeyDown += async (_, e) =>
         {
@@ -62,7 +74,7 @@ internal sealed class PlaylistGroupCard : Panel
                 catch (Exception) { tips.Show(text["Error.Generic"], toggle, new System.Drawing.Point(0, toggle.Height), 5000); }
             }
         };
-        Controls.AddRange([toggle, more, counts, completion, image, provider, progress, sourceIcon]);
+        Controls.AddRange([toggle, more, counts, completion, image, provider, progress, sourceIcon, jobs]);
         AppTypography.SetDashboardPresentation(this, true);
         Margin = new Padding(0, 0, 0, 4);
         SizeChanged += (_, _) => Arrange();
@@ -88,11 +100,20 @@ internal sealed class PlaylistGroupCard : Panel
             DownloadsVisual.Card(this);
             if (hasSelection) { AppUi.BindGradient(this, DownloadsVisual.Selected, DownloadsVisual.SelectedEnd); AppUi.BindBorder(this, AppThemeTokens.Accent); }
         }
-        toggle.Text = (expanded ? "⌄  " : "›  ") + group.Title;
+        toggle.Text = group.Title;
+        chevron.SetKind(expanded ? AppIconKind.ChevronDown : AppIconKind.ChevronRight);
+        ExcludeDecorationFromTabOrder(chevron);
         toggle.AccessibleName = text[expanded ? "PlaylistGroup.Collapse" : "PlaylistGroup.Expand"] + ": " + group.Title;
         tips.SetToolTip(toggle, group.Title + " · F1 · Ctrl+C");
-        counts.Text = text.Get("PlaylistGroup.Counts", c.Completed, c.Active, c.Queued, c.Failed, c.Interrupted, c.Cancelled);
-        tips.SetToolTip(counts, counts.Text);
+        var fullCounts = text.Get("PlaylistGroup.Counts", c.Completed, c.Active, c.Queued, c.Failed, c.Interrupted, c.Cancelled);
+        var totals = new[] { c.Completed, c.Active, c.Queued, c.Failed, c.Interrupted, c.Cancelled };
+        var keys = new[] { "Completed", "Active", "Queued", "Failed", "Interrupted", "Cancelled" };
+        counts.Text = string.Join(" · ", keys.Select((key, i) => totals[i] > 0 ? text.Get("PlaylistGroup.Count" + key, totals[i]) : null).Where(value => value is not null));
+        counts.AccessibleName = fullCounts;
+        tips.SetToolTip(counts, fullCounts);
+        jobs.Text = c.Total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        jobs.AccessibleName = text.Get("PlaylistGroup.Jobs", c.Total);
+        tips.SetToolTip(jobs, jobs.AccessibleName);
         completion.Text = text.Get("PlaylistGroup.Completion", c.Completed, c.Total) + (hasSelection ? " · " + text["PlaylistGroup.SelectedChild"] : "");
         progress.Value = c.Total == 0 ? 0 : (int)(100d * c.Completed / c.Total);
         var source = SourceBrandLookup.Resolve(group.Children[0].SourceUrl);
@@ -119,16 +140,24 @@ internal sealed class PlaylistGroupCard : Panel
             image.Image = null; ownedImage?.Dispose(); ownedImage = bitmap; image.Image = bitmap;
         });
     }
+    private static void ExcludeDecorationFromTabOrder(Control control)
+    {
+        control.TabStop = false;
+        foreach (var child in control.Controls) ExcludeDecorationFromTabOrder(child);
+    }
     private void Arrange()
     {
         int T(int n) => AppTypography.TextHeight(n);
         var w = Math.Max(300, Width); var thumbnailWidth = Math.Min(124, w / 5);
         image.SetBounds(8, 10, thumbnailWidth, thumbnailWidth * 9 / 16);
+        jobs.SetBounds(image.Right - Math.Min(thumbnailWidth, T(42)), image.Bottom - T(24), Math.Min(thumbnailWidth, T(42)), T(24));
         sourceIcon.SetBounds(8, image.Bottom + 8, 16, 16);
         provider.SetBounds(30, image.Bottom + 4, thumbnailWidth - 22, T(24));
         var left = image.Right + 16;
         more.SetBounds(w - 42, 10, 32, T(34));
         toggle.SetBounds(left, 8, Math.Max(0, more.Left - left - 8), T(34));
+        chevron.SetBounds(4, (toggle.Height - 18) / 2, 18, 18);
+        menuIcon.SetBounds((more.Width - 18) / 2, (more.Height - 18) / 2, 18, 18);
         var textWidth = Math.Max(0, w - left - 12);
         counts.SetBounds(left, toggle.Bottom + 5, textWidth, DashboardVisual.LabelHeight(counts, textWidth, 3));
         completion.SetBounds(left, counts.Bottom + 3, counts.Width, T(24));

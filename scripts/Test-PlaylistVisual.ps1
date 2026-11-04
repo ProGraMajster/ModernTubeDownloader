@@ -1,7 +1,8 @@
 ﻿[CmdletBinding()]
 param([Parameter(Mandatory)][int]$ProcessId, [Parameter(Mandatory)][string]$DataRoot,
     [int]$Count = 12, [int]$TextScale = 100, [string]$Interface = 'ModernDashboard',
-    [switch]$ClassicRecovery, [switch]$Transfer, [switch]$Groups, [string]$SourceCommit, [switch]$SourceDirty)
+    [switch]$ClassicRecovery, [switch]$Transfer, [switch]$Groups, [string]$SourceCommit, [switch]$SourceDirty,
+    [ValidateRange(0, 100)][int]$ShellSwitchCycles = 0)
 # External Windows UIA client: runs against Debug normal startup and the production
 # Release binary. No automation bridge, desktop capture, cursor movement or input injection.
 $ErrorActionPreference = 'Stop'
@@ -33,6 +34,7 @@ public static class PlaylistWindow {
         } finally { SetThreadDpiAwarenessContext(old); }
     }
     [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr h,uint m,IntPtr w,IntPtr l,uint f,uint t,out IntPtr result);
+    public static bool Heartbeat(IntPtr h,int pid) { uint owner; IntPtr result; GetWindowThreadProcessId(h,out owner); return owner==pid && SendMessageTimeout(h,0,IntPtr.Zero,IntPtr.Zero,2,2000,out result)!=IntPtr.Zero; }
     public static bool Key(IntPtr h,int pid,int key) { uint owner; IntPtr result; GetWindowThreadProcessId(h,out owner); return owner==pid && SendMessageTimeout(h,0x100,(IntPtr)key,IntPtr.Zero,2,2000,out result)!=IntPtr.Zero && SendMessageTimeout(h,0x101,(IntPtr)key,IntPtr.Zero,2,2000,out result)!=IntPtr.Zero; }
     public static IntPtr Popup(int pid,IntPtr main) {
         IntPtr found=IntPtr.Zero;
@@ -48,14 +50,19 @@ $script:hwnd = $owned.MainWindowHandle
 $originalBounds = [PlaylistWindow]::Bounds($hwnd)
 $script:root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
 $script:playlistCaptures = [System.Collections.Generic.List[object]]::new()
+$script:lookupTimings = [System.Collections.Generic.List[object]]::new()
 function Find([string]$Id) {
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,$Id)
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
         $element = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
-        if ($element) { return $element }
+        if ($element) {
+            $script:lookupTimings.Add(@{id=$Id;ms=$timer.Elapsed.TotalMilliseconds;pid=$owned.Id;hwnd=$hwnd.ToInt64();utc=[DateTime]::UtcNow.ToString('O');found=$true})
+            return $element
+        }
         Start-Sleep -Milliseconds 100
     } while ($timer.Elapsed.TotalSeconds -lt 15)
+    $script:lookupTimings.Add(@{id=$Id;ms=$timer.Elapsed.TotalMilliseconds;pid=$owned.Id;hwnd=$hwnd.ToInt64();utc=[DateTime]::UtcNow.ToString('O');found=$false})
     throw "Missing playlist UIA element: $Id"
 }
 function Reveal($Element) {
@@ -300,10 +307,16 @@ function RunGroupFixtures($Template) {
         $clock=[Diagnostics.Stopwatch]::StartNew(); ExpandPlaylistGroups
         WaitCheck { @(QueueRows).Count -eq 39 } 'Expanded group exceeded or missed its 39-child page budget.'
         $elapsed=$clock.Elapsed.TotalMilliseconds
+        $pageClock=[Diagnostics.Stopwatch]::StartNew()
         Invoke 'DashboardNextPage'
         WaitCheck { @(QueueRows).Count -eq 39 } 'Second group page did not preserve bounded task controls.'
         $target='QueueItem-'+([guid]$jobs[40].id).ToString('N')
-        SelectRow (Find $target); Capture ('downloads-group-'+$size+'-page2')
+        $currentRow=Find $target
+        $pageMs=$pageClock.Elapsed.TotalMilliseconds
+        $currentIds=@(QueueRows | ForEach-Object { $_.Current.AutomationId })
+        $expectedIds=@($jobs[39..77] | ForEach-Object { 'QueueItem-'+([guid]$_.id).ToString('N') })
+        if(($currentIds -join ',') -ne ($expectedIds -join ',')) { throw 'Reused group page exposes stale/out-of-order canonical IDs.' }
+        SelectRow $currentRow; Capture ('downloads-group-'+$size+'-page2')
         $id=@(GroupToggles)[0].Current.AutomationId; Invoke $id
         WaitCheck { @(QueueRows).Count -eq 0 } 'Large collapse retained child controls.'
         Invoke ($id.Replace('PlaylistGroupToggle-','PlaylistGroupMenu-'))
@@ -311,7 +324,7 @@ function RunGroupFixtures($Template) {
         WaitCheck { $null -ne ($root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,$target))) } 'Go to selected child lost its page.'
         if(-not (Find $target).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) { throw 'Large paging changed selected GUID.' }
         if((Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash -ne $hash) { throw 'Large projection changed queue bytes.' }
-        $owned.Refresh(); $perf+=@{jobs=$size;liveTaskCards=@(QueueRows).Count;headers=@(GroupToggles).Count;expandAndUiaObservationMs=$elapsed;workingSetBytes=$owned.WorkingSet64;queueHash=$hash}
+        $owned.Refresh(); $perf+=@{jobs=$size;liveTaskCards=@(QueueRows).Count;headers=@(GroupToggles).Count;expandAndUiaObservationMs=$elapsed;pageAndUiaObservationMs=$pageMs;workingSetBytes=$owned.WorkingSet64;queueHash=$hash}
     }
     $perf | ConvertTo-Json | Set-Content (Join-Path $DataRoot 'playlist-group-performance.json') -Encoding utf8
     Invoke 'NavSettings'; Invoke 'SettingsCategoryPersonalization'
@@ -338,6 +351,15 @@ function RunGroupFixtures($Template) {
     if($reset.global.colors.Accent) { throw 'Confirmed appearance reset retained the custom accent.' }
     if((Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash -ne $hash) { throw 'Appearance reset changed canonical queue bytes.' }
     Write-Output 'MessageBoxForm appearance reset PASS: cancel preserves profile hash; confirmation resets only appearance, queue unchanged.'
+    $singles=@((MakeJob 2001 '' 'www.youtube.com' 0),(MakeJob 2002 '' 'www.youtube.com' 13),
+        (MakeJob 2003 '' 'www.youtube.com' 7),(MakeJob 2004 '' 'www.youtube.com' 6),(MakeJob 2005 '' 'www.youtube.com' 8))
+    Seed $singles
+    WaitCheck { @(QueueRows).Count -eq 5 -and @(GroupToggles).Count -eq 0 } 'Five ordinary jobs were hidden or incorrectly grouped.'
+    $singleHash=(Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash
+    $singleId='QueueItem-'+([guid]$singles[2].id).ToString('N')
+    SelectRow (Find $singleId); Capture 'downloads-five-singles'
+    if(-not (Find $singleId).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) { throw 'Ordinary row selection points to another GUID.' }
+    if((Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash -ne $singleHash) { throw 'Ordinary row selection mutated the queue.' }
     Write-Output 'Group fixtures PASS: mixed/singles; Space/Enter; selection; shell/session; ON/OFF restart; queue hashes; child removal; 120/1300 paged39 children+1header, go-to-selected-child.'
 }
 
@@ -354,7 +376,7 @@ function Capture([string]$Name, [IntPtr]$Window = $hwnd) {
         $c=$_.Current; $r=$c.BoundingRectangle
         @{id=$c.AutomationId;name=$c.Name;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen;bounds=@($r.X,$r.Y,$r.Width,$r.Height)}
     })
-    $nodes | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $DataRoot ($Name+'-uia.json')) -Encoding UTF8
+    ConvertTo-Json -InputObject $nodes -Depth 6 | Set-Content (Join-Path $DataRoot ($Name+'-uia.json')) -Encoding UTF8
     ConvertTo-Json -InputObject @(ReadQueue) -Depth 30 | Set-Content (Join-Path $DataRoot ($Name+'-queue.json')) -Encoding UTF8
     $script:playlistCaptures.Add(@{file=$Name+'.png';width=$b.R-$b.L;height=$b.B-$b.T;dpi=[PlaylistWindow]::GetDpiForWindow($hwnd);textScale=$TextScale;
         sha256=(Get-FileHash $path -Algorithm SHA256).Hash;sourceCommit=$SourceCommit;sourceDirty=[bool]$SourceDirty;kind=$(if($Window -eq $hwnd){'full-window'}else{'owned-popup'});pid=$owned.Id;binarySha256=(Get-FileHash $appPath -Algorithm SHA256).Hash;
@@ -597,10 +619,43 @@ try {
         Capture 'playlist-audio-only-completed'
     }
     if($Groups) { RunGroupFixtures $before[0] }
+    if($ShellSwitchCycles -gt 0) {
+        if($Interface -ne 'ModernDashboard' -or $ClassicRecovery) { throw 'Shell boundary diagnostic requires Modern startup.' }
+        $queueHash=(Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash
+        for($cycle=1;$cycle -le $ShellSwitchCycles;$cycle++) {
+            foreach($choice in @('InterfaceClassic','InterfaceModernDashboard')) {
+                Write-Output "Shell boundary cycle=$cycle target=$choice PID=$($owned.Id) HWND=$hwnd UTC=$([DateTime]::UtcNow.ToString('O'))"
+                Invoke 'NavSettings'; Invoke 'SettingsCategoryPersonalization'; Invoke $choice; Invoke 'NavDownloads'
+                $nav=Find 'NavDownloads'; $c=$nav.Current; $r=$c.BoundingRectangle
+                if($c.ProcessId -ne $owned.Id -or $c.IsOffscreen -or -not $c.IsEnabled -or $r.Width -le 0 -or $r.Height -le 0) { throw 'NavDownloads is not an interactive owned navigation control.' }
+                if(-not [PlaylistWindow]::Heartbeat($hwnd,$owned.Id)) { throw 'Shell UI thread did not answer the owned HWND heartbeat.' }
+            }
+        }
+        if((Get-FileHash (Join-Path $DataRoot 'queue.json')).Hash -ne $queueHash) { throw 'Shell cycles modified canonical queue bytes.' }
+        Capture 'shell-boundary-after-cycles'
+        Write-Output "Shell boundary PASS: $ShellSwitchCycles Classic/Modern cycles, unchanged 15-second Find budget, queue bytes preserved."
+    }
     Write-Output "Playlist Windows UIA PASS: $Count metadata entries; private+deleted excluded; 3 selected/added; repeat add skipped 3; 1080/Mkv; ordered IDs and thumbnails persisted through restart; watch+list single video. Profile: $DataRoot"
 }
-catch { Write-Output ($_.ToString() + "`n" + $_.ScriptStackTrace); throw }
+catch {
+    $failure=$_
+    Write-Output ($failure.ToString() + "`n" + $failure.ScriptStackTrace)
+    # Evidence only AFTER the original failure. Never refresh/retry the assertion
+    # or convert a later successful tree read into a passing result.
+    $diagnostic=@{error=$failure.ToString();stack=$failure.ScriptStackTrace;pid=$owned.Id;hwnd=$hwnd.ToInt64();utc=[DateTime]::UtcNow.ToString('O')}
+    try {
+        $diagnostic.heartbeat=[PlaylistWindow]::Heartbeat($hwnd,$owned.Id)
+        $diagnostic.visible=[PlaylistWindow]::IsWindowVisible($hwnd)
+        $diagnostic.dpi=[PlaylistWindow]::GetDpiForWindow($hwnd)
+        $c=$root.Current; $r=$c.BoundingRectangle
+        $diagnostic.root=@{pid=$c.ProcessId;hwnd=$c.NativeWindowHandle;id=$c.AutomationId;offscreen=$c.IsOffscreen;focus=$c.HasKeyboardFocus;bounds=@($r.X,$r.Y,$r.Width,$r.Height)}
+    } catch { $diagnostic.metadataError=$_.ToString() }
+    try { Capture 'playlist-failure' } catch { $diagnostic.captureError=$_.ToString() }
+    ConvertTo-Json -InputObject $diagnostic -Depth 6 | Set-Content (Join-Path $DataRoot 'playlist-failure.json') -Encoding UTF8
+    throw $failure
+}
 finally {
+    ConvertTo-Json -InputObject @($script:lookupTimings.ToArray()) -Depth 5 | Set-Content (Join-Path $DataRoot 'playlist-uia-lookup-timings.json') -Encoding UTF8
     if($owned -and -not $owned.HasExited) {
         CloseOwned
     }

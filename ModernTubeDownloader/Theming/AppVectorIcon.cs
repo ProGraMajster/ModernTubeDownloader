@@ -12,7 +12,7 @@ internal enum AppIconKind
     Queue,
     Live,
     History,
-    Settings, Help, Info, Link, Search, Play, Close, More, Retry, Folder, Plus, Pause, Trash, ChevronDown, Check, Sun, Media, Audio, Resolution, Storage, Stop
+    Settings, Help, Info, Link, Search, Play, Close, More, Retry, Folder, Plus, Pause, Trash, ChevronDown, Check, Sun, Media, Audio, Resolution, Storage, Stop, ChevronRight
 }
 
 internal sealed class AppVectorIcon : UserControl
@@ -96,6 +96,8 @@ internal sealed class AppVectorIcon : UserControl
                 AddPath(scale, [OpenFigure((4,6),(20,6)), ClosedFigure((6,6),(7,21),(17,21),(18,6)), OpenFigure((9,6),(9,3),(15,3),(15,6)), OpenFigure((10,10),(10,17)), OpenFigure((14,10),(14,17))]); break;
             case AppIconKind.ChevronDown:
                 AddPath(scale, [OpenFigure((5,9),(12,16),(19,9))]); break;
+            case AppIconKind.ChevronRight:
+                AddPath(scale, [OpenFigure((9,5),(16,12),(9,19))]); break;
             case AppIconKind.Folder:
                 AddPath(scale, [ClosedFigure((2,7),(10,7),(12,10),(22,10),(20,21),(2,21)), OpenFigure((2,7),(2,4),(9,4),(12,7),(21,7),(21,10))]); break;
             case AppIconKind.Link:

@@ -34,53 +34,58 @@ internal sealed partial class DownloadsView
         var position = parent?.Controls.GetChildIndex(queueHost) ?? 0;
         var projectionMs = measurement.Elapsed.TotalMilliseconds;
         double preparedMs = 0, attachedMs = 0;
-        parent?.SuspendLayout(); queueHost.SuspendLayout();
-        try
+        var reusedRows = !rebuild && TryRefreshVisibleQueueRows(rows);
+        if (reusedRows) preparedMs = attachedMs = measurement.Elapsed.TotalMilliseconds;
+        else
         {
-            // A single completed subtree reaches native accessibility, rather than one
-            // synchronous native structure scan per removed/inserted child.
-            parent?.Controls.Remove(queueHost);
-            foreach (var oldId in cards.Keys.Where(id => rebuild || !visibleIds.Contains(id)).ToArray())
-            { var old = cards[oldId]; queueHost.Controls.Remove(old); old.Dispose(); cards.Remove(oldId); }
-            foreach (var oldKey in groupCards.Keys.Where(key => rebuild || !visibleGroups.Contains(key)).ToArray())
-            { var old = groupCards[oldKey]; queueHost.Controls.Remove(old); old.Dispose(); groupCards.Remove(oldKey); }
-            foreach (var row in rows)
+            parent?.SuspendLayout(); queueHost.SuspendLayout();
+            try
             {
-                if (row.Item is { } item)
+                // A single completed subtree reaches native accessibility, rather than one
+                // synchronous native structure scan per removed/inserted child.
+                parent?.Controls.Remove(queueHost);
+                foreach (var oldId in cards.Keys.Where(id => rebuild || !visibleIds.Contains(id)).ToArray())
+                { var old = cards[oldId]; queueHost.Controls.Remove(old); old.Dispose(); cards.Remove(oldId); }
+                foreach (var oldKey in groupCards.Keys.Where(key => rebuild || !visibleGroups.Contains(key)).ToArray())
+                { var old = groupCards[oldKey]; queueHost.Controls.Remove(old); old.Dispose(); groupCards.Remove(oldKey); }
+                foreach (var row in rows)
                 {
-                    if (!cards.TryGetValue(item.Id, out var card))
+                    if (row.Item is { } item)
                     {
-                        card = new QueueItemCard(services.Thumbnails, text); card.SetDashboard(true);
-                        card.KeyDown += DashboardKeys; card.ActionRequested += CardActionRequested;
-                        cards.Add(item.Id, card); queueHost.Controls.Add(card);
+                        if (!cards.TryGetValue(item.Id, out var card))
+                        {
+                            card = new QueueItemCard(services.Thumbnails, text); card.SetDashboard(true);
+                            card.KeyDown += DashboardKeys; card.ActionRequested += CardActionRequested;
+                            cards.Add(item.Id, card); queueHost.Controls.Add(card);
+                        }
+                        card.BringToFront(); card.UpdateItem(item, item.Id == selectedItemId);
                     }
-                    card.BringToFront(); card.UpdateItem(item, item.Id == selectedItemId);
-                }
-                else if (row.Group is { } group)
-                {
-                    if (!groupCards.TryGetValue(group.Key, out var card))
+                    else if (row.Group is { } group)
                     {
-                        card = new PlaylistGroupCard(group, services.Thumbnails, text);
-                        card.ToggleRequested += (_, _) => TogglePlaylistGroup(group.Key);
-                        card.MenuRequested += (_, _) => ShowPlaylistGroupMenu(group.Key);
-                        groupCards.Add(group.Key, card); queueHost.Controls.Add(card);
+                        if (!groupCards.TryGetValue(group.Key, out var card))
+                        {
+                            card = new PlaylistGroupCard(group, services.Thumbnails, text);
+                            card.ToggleRequested += (_, _) => TogglePlaylistGroup(group.Key);
+                            card.MenuRequested += (_, _) => ShowPlaylistGroupMenu(group.Key);
+                            groupCards.Add(group.Key, card); queueHost.Controls.Add(card);
+                        }
+                        card.BringToFront(); card.Update(group, expandedPlaylistGroups.Contains(group.Key), selectedItemId);
                     }
-                    card.BringToFront(); card.Update(group, expandedPlaylistGroups.Contains(group.Key), selectedItemId);
                 }
+                // Size and settle the new rows while the host is detached. Otherwise
+                // each of forty width changes republishes the attached native subtree.
+                ResizeCards();
             }
-            // Size and settle the new rows while the host is detached. Otherwise
-            // each of forty width changes republishes the attached native subtree.
-            ResizeCards();
-        }
-        finally
-        {
-            queueHost.ResumeLayout(true);
-            queueHost.SuspendLayout();
-            try { ResizeCards(); }
-            finally { queueHost.ResumeLayout(true); }
-            preparedMs = measurement.Elapsed.TotalMilliseconds;
-            if (parent is not null) { parent.Controls.Add(queueHost); parent.Controls.SetChildIndex(queueHost, Math.Min(position, parent.Controls.Count - 1)); parent.ResumeLayout(true); }
-            attachedMs = measurement.Elapsed.TotalMilliseconds;
+            finally
+            {
+                queueHost.ResumeLayout(true);
+                queueHost.SuspendLayout();
+                try { ResizeCards(); }
+                finally { queueHost.ResumeLayout(true); }
+                preparedMs = measurement.Elapsed.TotalMilliseconds;
+                if (parent is not null) { parent.Controls.Add(queueHost); parent.Controls.SetChildIndex(queueHost, Math.Min(position, parent.Controls.Count - 1)); parent.ResumeLayout(true); }
+                attachedMs = measurement.Elapsed.TotalMilliseconds;
+            }
         }
         queueBuilt = true; queueEmpty.Visible = items.Count == 0; queueHost.Visible = items.Count != 0;
         if (queueEmpty.Visible) queueEmpty.BringToFront(); else queueHost.BringToFront();
@@ -88,7 +93,37 @@ internal sealed partial class DownloadsView
         if (reveal is { } revealed) ScrollQueueCardIntoView(revealed);
         BuildQueueMenu(); UpdateQueueSummary(); RefreshDashboardSelection(); UpdateLayout();
         UiCrashDiagnostics.Record("queue.groups.rebuild", "queueHost", queueHost.Controls.Count);
-        services.Logger.Info($"Playlist queue projection: jobs={items.Count}, cards={cards.Count}, headers={groupCards.Count}, elapsedMs={measurement.Elapsed.TotalMilliseconds:F1}, projectionMs={projectionMs:F1}, prepareMs={preparedMs - projectionMs:F1}, attachMs={attachedMs - preparedMs:F1}, finishMs={measurement.Elapsed.TotalMilliseconds - attachedMs:F1}.");
+        services.Logger.Info($"Playlist queue projection: jobs={items.Count}, cards={cards.Count}, headers={groupCards.Count}, elapsedMs={measurement.Elapsed.TotalMilliseconds:F1}, projectionMs={projectionMs:F1}, prepareMs={preparedMs - projectionMs:F1}, attachMs={attachedMs - preparedMs:F1}, finishMs={measurement.Elapsed.TotalMilliseconds - attachedMs:F1}, reusedRows={reusedRows}.");
+    }
+
+    private bool TryRefreshVisibleQueueRows(IReadOnlyList<PlaylistQueueRow> rows)
+    {
+        // Paging through the same group changes values, not structure. Keep the
+        // bounded native subtree attached: reparenting invalidates providers and
+        // republishes hundreds of descendants. Structural changes still use the
+        // detached rebuild below; never retain a pool of hidden, off-page rows.
+        if (queueHost.Controls.Count != rows.Count) return false;
+        for (var i = 0; i < rows.Count; i++)
+            if (rows[i].Item is not null ? queueHost.Controls[i] is not QueueItemCard :
+                queueHost.Controls[i] is not PlaylistGroupCard header || header.Group.Key != rows[i].Group!.Key)
+                return false;
+
+        queueHost.SuspendLayout();
+        try
+        {
+            cards.Clear();
+            for (var i = 0; i < rows.Count; i++)
+                if (rows[i].Item is { } item)
+                {
+                    var card = (QueueItemCard)queueHost.Controls[i];
+                    card.UpdateItem(item, item.Id == selectedItemId);
+                    cards.Add(item.Id, card);
+                }
+                else if (rows[i].Group is { } group)
+                    ((PlaylistGroupCard)queueHost.Controls[i]).Update(group, expandedPlaylistGroups.Contains(group.Key), selectedItemId);
+        }
+        finally { queueHost.ResumeLayout(true); }
+        return true;
     }
     private void TogglePlaylistGroup(PlaylistGroupKey key)
     {

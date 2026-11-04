@@ -17,6 +17,7 @@ param(
     [switch]$PlaylistVisualSmoke,
     [switch]$PlaylistTransferSmoke,
     [switch]$PlaylistGroupsSmoke,
+    [ValidateRange(0, 100)][int]$PlaylistShellSwitchCycles = 0,
     [switch]$PreviewOnly,
     [switch]$ClearPreviewSmoke,
     [switch]$ScrollProbe,
@@ -77,7 +78,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if ($PlaylistTransferSmoke -or $PlaylistGroupsSmoke) { $PlaylistVisualSmoke = $true }
+if ($PlaylistTransferSmoke -or $PlaylistGroupsSmoke -or $PlaylistShellSwitchCycles -gt 0) { $PlaylistVisualSmoke = $true }
 if ($PlaylistVisualSmoke) { $PlaylistSmoke = $true; $CaptureVisual = $true }
 if ($DownloadsTooltipSmoke) { $DownloadsInputSmoke = $true }
 if ($DownloadsFullValuesSmoke) { $DownloadsInputSmoke = $true }
@@ -588,6 +589,7 @@ try {
         if ($ClassicUiRecovery) { $command += ' -ClassicRecovery' }
         if ($PlaylistTransferSmoke) { $command += ' -Transfer' }
         if ($PlaylistGroupsSmoke) { $command += ' -Groups' }
+        $command += " -ShellSwitchCycles $PlaylistShellSwitchCycles"
         & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command $command
         if ($LASTEXITCODE -ne 0) { throw 'Playlist Windows UIA qualification failed.' }
         return

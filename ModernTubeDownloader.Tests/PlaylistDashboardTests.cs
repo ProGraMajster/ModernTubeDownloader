@@ -13,6 +13,44 @@ namespace ModernTubeDownloader.Tests;
 public sealed class PlaylistDashboardTests
 {
     [Fact]
+    public async Task ReusedRowActionsAndProgressBelongToTheNewCanonicalJob()
+    {
+        var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "mtd-row-reuse-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = AppPaths.Create(directory); paths.EnsureCreated();
+            const string imageUrl = "https://example.test/reused-row.png";
+            var cacheFile = System.IO.Path.Combine(paths.ThumbnailCacheDirectory,
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(imageUrl))) + ".img");
+            using var bitmap = new SkiaSharp.SKBitmap(32, 18); bitmap.Erase(SkiaSharp.SKColors.CornflowerBlue);
+            using var encoded = bitmap.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+            File.WriteAllBytes(cacheFile, encoded.ToArray());
+            using var thumbnails = new ThumbnailCacheService(paths, new NullAppLogger());
+            var cached = await thumbnails.GetAsync(imageUrl);
+            Assert.NotNull(cached);
+            using var host = ModernFormsTestHost.Create();
+            using var row = new QueueItemCard(thumbnails, new("pl")); row.SetDashboard(true);
+            host.Show(row, 960, 160);
+            var old = new DownloadQueueItem { Title = "Old", Status = DownloadStatus.Completed, ProgressPercent = 100, ThumbnailUrl = imageUrl };
+            var current = new DownloadQueueItem { Title = "Current", Status = DownloadStatus.Failed, ProgressPercent = 17 };
+            row.UpdateItem(old, true); host.ProcessPendingWork();
+            var preview = row.Controls.OfType<PictureBox>().First();
+            Assert.Same(cached, preview.Image);
+            row.UpdateItem(current, false);
+            Assert.Null(preview.Image);
+            Assert.True(preview.Controls.OfType<PictureBox>().Single().Visible);
+            QueueItemActionEventArgs? action = null; row.ActionRequested += (_, e) => action = e;
+            var retry = row.Controls.OfType<Button>().Single(c => c.AccessibleAutomationId == $"QueuePrimaryAction-{current.Id:N}");
+            Assert.True(retry.Enabled); retry.PerformClick();
+            Assert.Equal(current.Id, action!.ItemId); Assert.Equal(QueueItemAction.Retry, action.Action);
+            Assert.Equal(17, row.Controls.OfType<ProgressBar>().Single().Value);
+            Assert.False(row.AccessibilityObject.State.HasFlag(ModernFormsNext.Accessibility.AccessibleStates.Selected));
+            Assert.DoesNotContain(row.Controls, c => c.AccessibleAutomationId?.Contains(old.Id.ToString("N")) == true);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public void GroupActionsUseCanonicalForwardAndReverseFocusTraversal()
     {
         using var host = ModernFormsTestHost.Create();

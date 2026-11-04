@@ -238,6 +238,52 @@ public sealed class DashboardShellTests
     }
 
     [Fact]
+    public async Task GroupPagingReusesBoundedRowsWithoutDetachingAndRoutesActionsToCurrentJobs()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-group-paging-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            var items = Enumerable.Range(1, 1300).Select(i => new DownloadQueueItem
+            {
+                VideoId = "qa-" + i, Title = "QA " + i, SourceUrl = "https://example.test/" + i,
+                PlaylistId = "group", PlaylistTitle = "Group", PlaylistIndex = i, Status = DownloadStatus.Completed
+            }).ToArray();
+            services.Queue.AddRangeSkippingDuplicates(items);
+            var before = JsonSerializer.Serialize(services.Queue.Snapshot());
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize();
+                var view = new DownloadsView(services); view.SetDashboard(true);
+                host.Show(view, 1536, 1024); view.RevealQueueItem(items[0].Id); host.ProcessPendingWork();
+                var list = Find<FlowLayoutPanel>(view, "QueueList");
+                var controls = list.Controls.ToArray();
+                var parentChanges = 0; list.ParentChanged += (_, _) => parentChanges++;
+                var actions = new List<QueueItemActionEventArgs>();
+                foreach (var card in controls.OfType<QueueItemCard>()) card.ActionRequested += (_, e) => actions.Add(e);
+                for (var page = 1; page <= 2; page++)
+                {
+                    Find<Button>(view, "DashboardNextPage").PerformClick(); host.ProcessPendingWork();
+                    Assert.Equal(0, parentChanges);
+                    Assert.Equal(controls, list.Controls.ToArray());
+                    Assert.Equal(40, list.Controls.Count);
+                    Assert.Equal(items.Skip(page * 39).Take(39).Select(item => $"QueueItem-{item.Id:N}"),
+                        list.Controls.OfType<QueueItemCard>().Select(card => card.AccessibleAutomationId));
+                    var current = items[page * 39];
+                    var row = Find<QueueItemCard>(list, $"QueueItem-{current.Id:N}");
+                    Assert.True(row.AccessibilityObject.PerformAction(ModernFormsNext.Accessibility.AccessibleActions.Select));
+                    Assert.Equal(current.Id, view.SelectedItemId);
+                    Assert.Equal(current.Id, actions[^1].ItemId);
+                    Assert.False(Find<Button>(row, $"QueuePrimaryAction-{current.Id:N}").Enabled); // No invented output file.
+                }
+                Assert.Equal(before, JsonSerializer.Serialize(services.Queue.Snapshot()));
+            }
+            await services.ShutdownAsync();
+        }
+        finally { AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public async Task GroupArrowSelectionKeepsVisibleTreeAndRevealsNextPage()
     {
         var directory = Path.Combine(Path.GetTempPath(), "mtd-group-arrows-" + Guid.NewGuid().ToString("N"));

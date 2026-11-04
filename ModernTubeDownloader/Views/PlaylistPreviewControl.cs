@@ -123,6 +123,8 @@ internal sealed class PlaylistPreviewControl : UserControl
         previewOptions.Click += (_, _) => { optionsExpanded = !optionsExpanded; LayoutControls(); };
         collapseEntries.Click += (_, _) => { entriesCollapsed = !entriesCollapsed; LayoutControls(); };
         Controls.AddRange([previewOptions, collapseEntries]);
+        quality.SelectedIndexChanged += (_, _) => RefreshSelectionCount();
+        container.SelectedIndexChanged += (_, _) => RefreshSelectionCount();
         SizeChanged += (_, _) => LayoutControls();
         text.LanguageChanged += LanguageChanged;
         ApplyLocalization();
@@ -134,6 +136,8 @@ internal sealed class PlaylistPreviewControl : UserControl
     {
         if (dashboard == value) return;
         dashboard = value;
+        AppUi.BindForeground(selectedCount, value ? AppThemeTokens.Accent : AppThemeTokens.TextSecondary);
+        selectedCount.AutoEllipsis = value;
         closePreview.Visible = value;
         previewOptions.Visible = collapseEntries.Visible = value;
         if (!value)
@@ -277,6 +281,7 @@ internal sealed class PlaylistPreviewControl : UserControl
     {
         if (selection is null) return;
         selectedCount.Text = text.Get("Playlist.SelectedCount", selection.SelectedCount, selection.Playlist.EntryCount);
+        if (dashboard) selectedCount.Text += " · " + text[$"Quality.{SelectedPreset.Id}"] + " · " + text[$"Container.{SelectedContainer}"];
         addSelected.Enabled = selection.SelectedCount > 0;
     }
 

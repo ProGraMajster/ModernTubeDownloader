@@ -51,6 +51,7 @@ internal sealed partial class QueueItemCard : UserControl
     private Guid itemId;
     private bool selected;
     private readonly CancellationTokenSource lifetimeCancellation = new();
+    private CancellationTokenSource? thumbnailRequest;
     private bool disposed;
 
     public QueueItemCard(ThumbnailCacheService thumbnails, LocalizationService text)
@@ -127,6 +128,13 @@ internal sealed partial class QueueItemCard : UserControl
 
     public void UpdateItem(DownloadQueueItem item, bool isSelected)
     {
+        if (dashboard && currentItem is not null && itemId != item.Id)
+        {
+            // A visible page slot now represents another canonical GUID. Do not
+            // animate from the previous job's progress or show its thumbnail.
+            progress.CancelAnimations();
+            progress.Value = (int)Math.Clamp(Math.Round(item.ProgressPercent), 0, 100);
+        }
         currentItem = item;
         itemId = item.Id;
         AccessibleAutomationId = $"QueueItem-{item.Id:N}";
@@ -170,8 +178,12 @@ internal sealed partial class QueueItemCard : UserControl
         if (dashboard) UpdateDashboardRow(item);
         if (!string.Equals(loadedThumbnail, item.ThumbnailUrl, StringComparison.Ordinal))
         {
+            thumbnailRequest?.Cancel(); thumbnailRequest?.Dispose();
+            thumbnailRequest = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
             loadedThumbnail = item.ThumbnailUrl;
-            _ = LoadThumbnailAsync(item.ThumbnailUrl);
+            thumbnail.Image = null;
+            thumbnailPlaceholder.Visible = true;
+            _ = LoadThumbnailAsync(item.ThumbnailUrl, thumbnailRequest.Token);
         }
     }
 
@@ -230,17 +242,17 @@ internal sealed partial class QueueItemCard : UserControl
             Easings.CubicOut);
     }
 
-    private async Task LoadThumbnailAsync(string? url)
+    private async Task LoadThumbnailAsync(string? url, CancellationToken cancellationToken)
     {
         var expected = url;
         SKBitmap? image;
-        try { image = await thumbnails.GetAsync(url, lifetimeCancellation.Token).ConfigureAwait(false); }
+        try { image = await thumbnails.GetAsync(url, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }
         if (image is null || !string.Equals(expected, loadedThumbnail, StringComparison.Ordinal))
             return;
         Application.RunOnUIThread(() =>
         {
-            if (disposed || lifetimeCancellation.IsCancellationRequested || !string.Equals(expected, loadedThumbnail, StringComparison.Ordinal))
+            if (disposed || cancellationToken.IsCancellationRequested || !string.Equals(expected, loadedThumbnail, StringComparison.Ordinal))
                 return;
             thumbnail.Image = image;
             thumbnailPlaceholder.Visible = false;
@@ -379,10 +391,11 @@ internal sealed partial class QueueItemCard : UserControl
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !disposed)
         {
             disposed = true;
             lifetimeCancellation.Cancel();
+            thumbnailRequest?.Dispose();
             dashboardTips.Dispose();
             SizeChanged -= CardSizeChanged;
             text.LanguageChanged -= LanguageChanged;
