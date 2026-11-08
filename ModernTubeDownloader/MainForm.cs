@@ -58,6 +58,7 @@ public sealed class MainForm : Form
 
     public MainForm(AppServices services, bool enableAutomation = false, ExternalMediaRequest? initialExternalRequest = null, bool classicUi = false)
     {
+        using var constructionTiming = PerformanceDiagnostics.Measure("main.constructor");
         this.services = services;
         if (classicUi) services.Appearance.ForceClassicForSession();
         this.initialExternalRequest = initialExternalRequest;
@@ -72,6 +73,7 @@ public sealed class MainForm : Form
             automation = new DevelopmentAutomationHost();
 #endif
         AppBranding.Apply(this);
+        PerformanceDiagnostics.AttachWindow(this);
         AppUi.BindForeground(caption); AppTypography.Bind(caption, 12, FontStyle.Bold);
         AppUi.Secondary(captionTheme); captionTheme.AccessibleAutomationId = "CaptionTheme";
         captionTheme.Click += async (_, _) => await services.Appearance.SetModeAsync(
@@ -177,6 +179,7 @@ public sealed class MainForm : Form
         shellHost.Apply(services.Appearance.InterfaceMode);
         ApplyInterface();
         services.Appearance.ModeChanged += AppearanceChanged;
+        services.Appearance.BeginPresentationUpdate = () => PresentationUpdate.Begin(shellHost);
         tray = new TrayApplicationController(this, services, BeginShutdown, () => ShowView(liveView));
 #if DEBUG
         if (automation is not null) tray.RegisterDialog = automation.RegisterWindow;
@@ -292,21 +295,24 @@ public sealed class MainForm : Form
     }
     private void ApplyInterfaceCore()
     {
-        shellHost.Apply(services.Appearance.InterfaceMode);
-        var modern = shellHost.Mode == AppInterfaceMode.ModernDashboard;
-        if (!modern) foreach (var view in pages.Keys) DashboardVisual.RestoreTree(view);
-        downloadsView.SetDashboard(modern); liveView.SetDashboard(modern);
-        historyView.SetDashboard(modern); otherView.SetDashboard(modern); settingsView.SetDashboard(modern); batchView.SetDashboard(modern);
-        Text = modern ? "ModernTubeDownloader   v" + AppBranding.Version : text["App.Title"];
-        AppTypography.SetDashboardPresentation(TitleBar, modern);
-        AppTypography.Bind(caption, modern ? 10.5f : 12, FontStyle.Bold);
-        AppTypography.Bind(captionVersion, 10, FontStyle.Regular);
-        TitleBar.Height = modern ? AppTypography.TextHeight(48) : 34;
-        AppUi.BindBackground(TitleBar, modern ? AppThemeTokens.Background : AppThemeTokens.Surface);
-        foreach (var view in pages.Keys) AppTypography.SetDashboardPresentation(view, modern);
-        if (!modern && currentView == batchView) ShowView(otherView);
-        LayoutCaption();
-        UpdateLayout(); UpdateStatus();
+        using var presentationTiming = PerformanceDiagnostics.Measure("interface.presentation");
+        shellHost.Apply(services.Appearance.InterfaceMode, mode =>
+        {
+            var modern = mode == AppInterfaceMode.ModernDashboard;
+            if (!modern) foreach (var view in pages.Keys) DashboardVisual.RestoreTree(view);
+            downloadsView.SetDashboard(modern); liveView.SetDashboard(modern);
+            historyView.SetDashboard(modern); otherView.SetDashboard(modern); settingsView.SetDashboard(modern); batchView.SetDashboard(modern);
+            Text = modern ? "ModernTubeDownloader   v" + AppBranding.Version : text["App.Title"];
+            AppTypography.SetDashboardPresentation(TitleBar, modern);
+            AppTypography.Bind(caption, modern ? 10.5f : 12, FontStyle.Bold);
+            AppTypography.Bind(captionVersion, 10, FontStyle.Regular);
+            TitleBar.Height = modern ? AppTypography.TextHeight(48) : 34;
+            AppUi.BindBackground(TitleBar, modern ? AppThemeTokens.Background : AppThemeTokens.Surface);
+            foreach (var view in pages.Keys) AppTypography.SetDashboardPresentation(view, modern);
+            if (!modern && currentView == batchView) ShowView(otherView);
+            LayoutCaption();
+            UpdateLayout(); UpdateStatus();
+        });
     }
 
     private void LayoutCaption()
@@ -543,12 +549,20 @@ public sealed class MainForm : Form
 
     public void RestoreWindow() { if (!shutdownStarted) tray.Restore(); }
 
+    private bool measuredFirstPaint;
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        if (!measuredFirstPaint) { measuredFirstPaint = true; PerformanceDiagnostics.Emit("ui.first-paint"); }
+    }
+
     private void InitializeRuntime()
     {
         if (uiLoopReady) return;
         // The constructor runs before Application.Run installs the UI synchronization context.
         // Do not start the asynchronous ready transition until its continuations can return to it.
         uiLoopReady = true;
+        PerformanceDiagnostics.UiReady();
         UiCrashDiagnostics.RegisterStateProvider(onUiThread =>
         {
             var items = services.Queue.Snapshot();
@@ -741,6 +755,7 @@ public sealed class MainForm : Form
             Shown -= FormShown;
             content.SizeChanged -= LayoutChanged;
             services.Appearance.ModeChanged -= AppearanceChanged;
+            services.Appearance.BeginPresentationUpdate = null;
         }
         base.Dispose(disposing);
     }

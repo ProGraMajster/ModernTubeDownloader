@@ -1,4 +1,5 @@
 {
+  "History.PageSummary": "Page {0} of {1} • Results: {2} / {3}",
   "Appearance.TextTitle": "Personalization • Text size",
   "Appearance.TextHint": "Logical text size, independent of Windows DPI. Small 90%, Default 100%, Large 125%, Extra large 150%; Custom 80–200%. Icons keep their own size.",
   "Appearance.ResetText": "Restore default text size",

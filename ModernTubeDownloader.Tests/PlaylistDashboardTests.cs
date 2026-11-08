@@ -26,7 +26,7 @@ public sealed class PlaylistDashboardTests
             using var encoded = bitmap.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
             File.WriteAllBytes(cacheFile, encoded.ToArray());
             using var thumbnails = new ThumbnailCacheService(paths, new NullAppLogger());
-            var cached = await thumbnails.GetAsync(imageUrl);
+            using var cached = await thumbnails.GetAsync(imageUrl);
             Assert.NotNull(cached);
             using var host = ModernFormsTestHost.Create();
             using var row = new QueueItemCard(thumbnails, new("pl")); row.SetDashboard(true);
@@ -35,7 +35,9 @@ public sealed class PlaylistDashboardTests
             var current = new DownloadQueueItem { Title = "Current", Status = DownloadStatus.Failed, ProgressPercent = 17 };
             row.UpdateItem(old, true); host.ProcessPendingWork();
             var preview = row.Controls.OfType<PictureBox>().First();
-            Assert.Same(cached, preview.Image);
+            Assert.IsType<SkiaSharp.SKBitmap>(preview.Image);
+            Assert.NotSame(cached, preview.Image);
+            Assert.Equal(cached.GetPixel(0, 0), ((SkiaSharp.SKBitmap)preview.Image).GetPixel(0, 0));
             row.UpdateItem(current, false);
             Assert.Null(preview.Image);
             Assert.True(preview.Controls.OfType<PictureBox>().Single().Visible);

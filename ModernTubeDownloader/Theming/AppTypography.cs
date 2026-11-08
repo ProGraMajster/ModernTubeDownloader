@@ -85,6 +85,7 @@ public static class AppTypography
     }
     internal static void SetDashboardPresentation(Control root, bool dashboard)
     {
+        if (presentationRoots.TryGetValue(root, out var current) && current.Dashboard == dashboard) return;
         presentationRoots.Remove(root); presentationRoots.Add(root, new(dashboard));
         RefreshPresentation(root);
     }
@@ -96,12 +97,16 @@ public static class AppTypography
     public static void SetScale(int percent)
     {
         if (percent is < 80 or > 200) throw new ArgumentOutOfRangeException(nameof(percent));
-        TextScale = percent;
-        for (var index = targets.Count - 1; index >= 0; index--)
+        if (TextScale != percent)
         {
-            if (!targets[index].TryGetTarget(out var control) || !bindings.TryGetValue(control, out var binding)) targets.RemoveAt(index);
-            else Apply(control, binding);
+            TextScale = percent;
+            for (var index = targets.Count - 1; index >= 0; index--)
+            {
+                if (!targets[index].TryGetTarget(out var control) || !bindings.TryGetValue(control, out var binding)) targets.RemoveAt(index);
+                else Apply(control, binding);
+            }
         }
+        // A profile can change density without changing text scale.
         foreach (var action in layouts.Values.ToArray()) action();
     }
     public static IDisposable RegisterLayout(Action action)

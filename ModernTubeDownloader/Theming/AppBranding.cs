@@ -36,6 +36,7 @@ internal static class AppBranding
     public static void Apply(Form form)
     {
         ArgumentNullException.ThrowIfNull(form);
+        Infrastructure.AppWindowLifetime.Attach(form);
         form.Image = NativeIcon.Value;
         form.TitleBar.Image = TitleBarIcon.Value;
     }

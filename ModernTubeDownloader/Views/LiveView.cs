@@ -343,12 +343,9 @@ internal sealed partial class LiveSessionCard : Panel
         folder.Text = text["Common.OpenFolder"]; folder.AccessibleAutomationId = "LiveOpenFolderButton-" + session.Id.ToString("N");
         LayoutCard();
     }
-    private async Task LoadImageAsync(string? expected)
-    {
-        try { var image = await services.Thumbnails.GetAsync(expected, imageLifetime.Token); if (!imageDisposed && imageUrl == expected) { thumbnail.Image = image; if (dashboard) LayoutCard(); } }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { services.Logger.Error("LIVE thumbnail unavailable.", ex); }
-    }
+    private Task LoadImageAsync(string? expected)
+        => ThumbnailImageBinding.For(thumbnail).LoadAsync(services.Thumbnails, expected, imageLifetime.Token,
+            () => { if (dashboard) LayoutCard(); }, () => !imageDisposed && imageUrl == expected);
     private void Act()
     {
         if (current is null) return;

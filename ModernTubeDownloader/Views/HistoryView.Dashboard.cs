@@ -12,7 +12,21 @@ internal sealed partial class HistoryView
 {
     public event EventHandler<string>? RetryRequested;
     private bool dashboard;
-    private int dashboardPage;
+    private IReadOnlyList<DownloadHistoryEntry> historySnapshot = Array.Empty<DownloadHistoryEntry>();
+    private Dictionary<string,int> filterCounts = new();
+    private DownloadHistoryEntry? inspectedEntry;
+    private void SelectHistory(object? sender, DownloadHistoryEntry selected)
+    {
+        selectedId = selected.QueueItemId; selectedPath = selected.FinalPath;
+        inspector?.ShowHistory(selected); inspectedEntry = selected;
+        foreach (var row in cards) row.SetDashboard(dashboard, row.ItemId == selectedId && row.ItemPath == selectedPath);
+    }
+    private void InvalidateProjection()
+    {
+        dirty = true; generation++; filtering?.Cancel(); RefreshItems();
+    }
+    private bool Matches(DownloadHistoryEntry entry, string query)
+        => HistoryPage.Filter(new[] { entry }, query, text.Culture, default).Length != 0;
     private string dashboardFilter = "All";
     private Guid? selectedId;
     private string? selectedPath;
@@ -46,20 +60,20 @@ internal sealed partial class HistoryView
             foreach (var id in new[] { "All", "Completed", "Errors", "Audio", "Video", "Playlists", "Live" })
             {
                 var button = new DashboardButton { AccessibleAutomationId = "HistoryFilter" + id, Width = 154, Height = 36, Margin = new Padding(0, 0, 10, 6) };
-                filterButtons[button] = id; button.Click += (_, _) => { dashboardFilter = id; dashboardPage = 0; RefreshItems(); }; filters.Controls.Add(button);
+                filterButtons[button] = id; button.Click += (_, _) => { dashboardFilter = id; page = 0; InvalidateProjection(); }; filters.Controls.Add(button);
             }
             export = new DashboardButton { AccessibleAutomationId = "HistoryExport" }; AppUi.Primary(export); export.Click += async (_, _) => await ExportAsync();
             previous = new Button { Text = "‹", AccessibleAutomationId = "HistoryPrevious" }; next = new Button { Text = "›", AccessibleAutomationId = "HistoryNext" };
-            AppUi.Secondary(previous); AppUi.Secondary(next); previous.Click += (_, _) => { dashboardPage--; RefreshItems(); }; next.Click += (_, _) => { dashboardPage++; RefreshItems(); };
+            AppUi.Secondary(previous); AppUi.Secondary(next); previous.Click += (_, _) => ChangePage(-1); next.Click += (_, _) => ChangePage(1);
             dateRange = new ComboBox { AccessibleAutomationId = "HistoryDateRange" }; AppUi.Input(dateRange);
             dateRange.Items.Add(services.Localization["Dashboard.AllDates"]); dateRange.Items.Add(services.Localization["Dashboard.Last7Days"]); dateRange.Items.Add(services.Localization["Dashboard.Last30Days"]); dateRange.SelectedIndex = 0;
-            dateRange.SelectedIndexChanged += (_,_) => { days = dateRange.SelectedIndex switch { 1 => 7, 2 => 30, _ => 0 }; dashboardPage = 0; RefreshItems(); }; Controls.Add(dateRange);
-            dateSort = new DashboardButton { AccessibleAutomationId = "HistoryDateSort" }; dateSort.Click += (_,_) => { oldestFirst = !oldestFirst; dashboardPage = 0; RefreshItems(); };
+            dateRange.SelectedIndexChanged += (_,_) => { days = dateRange.SelectedIndex switch { 1 => 7, 2 => 30, _ => 0 }; page = 0; InvalidateProjection(); }; Controls.Add(dateRange);
+            dateSort = new DashboardButton { AccessibleAutomationId = "HistoryDateSort" }; dateSort.Click += (_,_) => { oldestFirst = !oldestFirst; page = 0; InvalidateProjection(); };
             tableHeader = new Panel { AccessibleAutomationId = "HistoryTableHeader" }; tableHeader.Controls.Add(dateSort); AppUi.BindBackground(tableHeader, AppThemeTokens.Surface);
             foreach (var key in new[] { "Dashboard.Title", "Dashboard.Source", "Dashboard.Date", "Dashboard.Time", "Dashboard.Format", "Dashboard.Size", "Dashboard.Status" })
             { var label = AppUi.Muted(); label.Tag = key; label.TextAlign = ContentAlignment.MiddleLeft; label.AutoEllipsis = true; AppTypography.Bind(label, 9.5f); tableHeadings.Add(label); tableHeader.Controls.Add(label); }
             Controls.Add(tableHeader);
-            paging = AppUi.Muted(); Controls.AddRange([inspector, filters, export, previous, next, paging]);
+            paging = AppUi.Muted(); paging.AccessibleAutomationId = "HistoryPageSummary"; Controls.AddRange([inspector, filters, export, previous, next, paging]);
             searchIcon = new AppVectorIcon(AppIconKind.Search, 18) { AccessibilityView = AccessibilityView.Hidden };
             searchIcon.Click += (_, _) => search.Select(); searchPanel.Controls.Add(searchIcon);
         }
@@ -67,7 +81,9 @@ internal sealed partial class HistoryView
         foreach (var control in new Control?[] { inspector, filters, export, previous, next, paging, tableHeader, dateRange })
             if (control is not null) { control.Visible = value; if (!value) control.SetBounds(0, 0, 0, 0); }
         AppTypography.SetDashboardPresentation(this, value);
-        RefreshItems(); UpdateLayout();
+        pageSummary.AccessibleAutomationId = value ? "HistoryClassicPageSummary" : "HistoryPageSummary";
+        if (paging is not null) paging.AccessibleAutomationId = value ? "HistoryPageSummary" : "HistoryDashboardPageSummary";
+        InvalidateProjection(); UpdateLayout();
     }
     private static bool Completed(DownloadHistoryEntry entry) => !entry.WasPartial && entry.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase);
     private bool FilterHistory(DownloadHistoryEntry entry) => InDateRange(entry) && MatchesFilter(entry, dashboardFilter);
@@ -85,7 +101,19 @@ internal sealed partial class HistoryView
         {
             var dialog = new SaveFileDialog { FileName = "history.json", DefaultExtension = "json" }; dialog.AddFilter("JSON", "*.json");
             if (await dialog.ShowDialog(form) == DialogResult.OK && dialog.FileName is { } path)
-                await File.WriteAllTextAsync(path, JsonSerializer.Serialize(services.History.Snapshot().Where(e => FilterHistory(e) && Matches(e, search.Text.Trim())), Infrastructure.JsonDefaults.Options));
+            {
+                var snapshot = services.History.Snapshot(); var query = search.Text.Trim(); var culture = text.Culture;
+                var filter = dashboardFilter; var cutoff = days == 0 ? DateTimeOffset.MinValue : DateTimeOffset.UtcNow.AddDays(-days);
+                var ascending = oldestFirst;
+                var json = await Task.Run(() =>
+                {
+                    var matches = HistoryPage.Filter(snapshot, query, culture, default)
+                        .Where(e => e.CompletedAt >= cutoff && MatchesFilter(e, filter)).ToArray();
+                    if (ascending) Array.Reverse(matches);
+                    return JsonSerializer.Serialize(matches, Infrastructure.JsonDefaults.Options);
+                });
+                await File.WriteAllTextAsync(path, json);
+            }
         }
         catch (Exception error) { services.Logger.Error("History export failed.", error); }
     }
@@ -117,11 +145,11 @@ internal sealed partial class HistoryView
         export.SetBounds(18 + origin.X + width - Math.Min(exportWidth, width / 2 - 6), toolsTop, Math.Min(exportWidth, width / 2 - 6), line);
         dateRange!.SetBounds(inlineTools ? searchPanel.Right + 12 : searchPanel.Left, toolsTop, inlineTools ? dateWidth : Math.Min(dateWidth, export.Left - searchPanel.Left - 12), line);
         DashboardVisual.Icon(export, AppIconKind.Download);
-        var entries = services.History.Snapshot();
+        var entries = historySnapshot;
         var filterRows = 1; var filterX = 0; var filterHeight = AppTypography.TextHeight(36);
         foreach (var (button, filter) in filterButtons)
         {
-            var count = entries.Count(e => InDateRange(e) && MatchesFilter(e, filter));
+            var count = filterCounts.GetValueOrDefault(filter);
             button.Text = text[filter == "Live" ? "Nav.Live" : "Dashboard." + filter] + $" ({count})";
             DashboardVisual.Button(button, dashboardFilter == filter);
             button.Width = Math.Min(width, Math.Max(AppTypography.TextHeight(94), DashboardVisual.ActionWidth(button, true)));
@@ -140,16 +168,21 @@ internal sealed partial class HistoryView
         else inspector.SetBounds(0, 0, 0, 0);
         previous!.SetBounds(list.Right - 88, list.Bottom + 10, 34, line); next!.SetBounds(previous.Right + 10, previous.Top, 34, line);
         paging!.SetBounds(list.Left + 12, previous.Top + 4, Math.Max(120, previous.Left - list.Left - 24), line);
-        var countFiltered = entries.Count(e => FilterHistory(e) && Matches(e, search.Text.Trim())); var pages = Math.Max(1, (countFiltered + 39) / 40);
-        var first = countFiltered == 0 ? 0 : dashboardPage * 40 + 1; var last = Math.Min(countFiltered, (dashboardPage + 1) * 40);
-        paging.Text = $"{first}–{last} / {countFiltered}     ·     {dashboardPage + 1} / {pages}"; previous.Enabled = dashboardPage > 0; next.Enabled = dashboardPage < pages - 1;
+        var countFiltered = filtered.Length; var pages = Math.Max(1, (countFiltered + 39) / 40);
+        var first = countFiltered == 0 ? 0 : page * 40 + 1; var last = Math.Min(countFiltered, (page + 1) * 40);
+        paging.Text = $"{first}–{last} / {countFiltered}     ·     {page + 1} / {pages}"; previous.Enabled = page > 0; next.Enabled = page < pages - 1;
+        paging.AccessibleName = text.Get("History.PageSummary", page + 1, pages, countFiltered, total);
         previous.AccessibleName = text["Batch.Previous"]; next.AccessibleName = text["Batch.Next"]; dashboardTips.SetToolTip(previous, previous.AccessibleName); dashboardTips.SetToolTip(next, next.AccessibleName);
         emptyIcon.SetBounds((center - 44) / 2, Math.Max(20, height / 2 - 80), 44, 44);
         emptyTitle.SetBounds(20, emptyIcon.Bottom + 8, center - 40, AppTypography.TextHeight(40)); emptyBody.SetBounds(20, emptyTitle.Bottom + 8, center - 40, AppTypography.TextHeight(60));
         DashboardVisual.Button(previous); DashboardVisual.Button(next!);
         ResizeCards();
         var entry = entries.FirstOrDefault(e => e.QueueItemId == selectedId && e.FinalPath == selectedPath);
-        if (entry is not null) inspector.ShowHistory(entry); else inspector.Clear();
+        if (entry != inspectedEntry)
+        {
+            inspectedEntry = entry;
+            if (entry is not null) inspector.ShowHistory(entry); else inspector.Clear();
+        }
     }
 
     private void LayoutDashboardTableHeading(int rowWidth)
@@ -196,8 +229,11 @@ internal sealed partial class HistoryEntryCard
         }
     }
     public event EventHandler<DownloadHistoryEntry>? SelectionRequested;
+    private bool presentationInitialized;
     public void SetDashboard(bool value, bool selected)
     {
+        if (presentationInitialized && dashboard == value && rowSelected == selected) return;
+        presentationInitialized = true;
         dashboard = value; rowSelected = selected; TabStop = value; SetControlBehavior(ControlBehaviors.Selectable, value);
         AccessibleAutomationId = $"HistoryItem-{entry.QueueItemId:N}-{entry.LivePartIndex?.ToString() ?? "vod"}"; AccessibleName = entry.Title;
         AppTypography.SetDashboardPresentation(this, value);
@@ -277,7 +313,8 @@ internal sealed partial class HistoryEntryCard
         cells[5].Text = text["Status." + (entry.WasPartial ? "Partial" : entry.Status)];
         for (var i = 0; i < cells.Count; i++)
         {
-            var c = columns[i + 1]; cells[i].SetBounds(c.Left, 10, Math.Max(1, c.Width - 8), Height - 20);
+            var c = columns[i + 1]; var inset = i == 5 ? 22 : 0;
+            cells[i].SetBounds(c.Left + inset, 10, Math.Max(1, c.Width - 8 - inset), Height - 20);
             cells[i].Visible = !compact; cells[i].AutoEllipsis = true;
         }
         var completed = entry.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase);
@@ -285,7 +322,7 @@ internal sealed partial class HistoryEntryCard
         AppUi.BindForeground(cells[5], statusColor);
         if (compact)
         {
-            cells[5].Visible = true; cells[5].SetBounds(title.Left, facts.Bottom + 6, title.Width, statusHeight);
+            cells[5].Visible = true; cells[5].SetBounds(title.Left + 22, facts.Bottom + 6, Math.Max(1, title.Width - 22), statusHeight);
         }
         if (statusIcon is null)
         {
@@ -294,8 +331,7 @@ internal sealed partial class HistoryEntryCard
         }
         statusIcon.SetKind(entry.WasPartial ? AppIconKind.Info : completed ? AppIconKind.Check : AppIconKind.Close);
         statusIcon.SetColorToken(statusColor); statusIcon.Visible = true;
-        statusIcon.SetBounds(cells[5].Left, cells[5].Top + (cells[5].Height - 16) / 2, 16, 16);
-        cells[5].SetBounds(cells[5].Left + 22, cells[5].Top, Math.Max(1, cells[5].Width - 22), cells[5].Height);
+        statusIcon.SetBounds(cells[5].Left - 22, cells[5].Top + (cells[5].Height - 16) / 2, 16, 16);
         if (folderIcon is null) { folderIcon = new AppVectorIcon(AppIconKind.Folder, 20); folderIcon.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden; folderIcon.Click += (_,_) => openFolder.PerformClick(); openFolder.Controls.Add(folderIcon); }
         folderIcon.SetBounds(6,7,20,20);
         openFile.Visible = false; openFolder.SetBounds(Width - 42, (Height - 34) / 2, 32, 34); openFolder.Text = ""; openFolder.AccessibleName = text["Common.OpenFolder"];

@@ -64,14 +64,20 @@ public sealed class AppAppearanceService : IDisposable
     }
 
     public event EventHandler? ModeChanged;
+    // The single window owner can prepare presentation off-window. Scope completion
+    // runs before persistence and also on failure; it never owns services or storage.
+    internal Func<IDisposable?>? BeginPresentationUpdate { get; set; }
     public async Task ApplyProfileAsync(AppearanceProfile profile)
     {
         var elapsed = Stopwatch.StartNew();
-        Profile = profile.Copy();
-        AppearancePresentation.Current = Profile;
-        if (Profile.Global.Theme != AppearanceTheme.Custom) settings.Current.ThemeMode = (AppThemeMode)(int)Profile.Global.Theme;
-        ApplyCurrent(animated: false); AppTypography.SetScale(Profile.Typography.AppTextScale); UpdateSystemMonitoring();
-        ModeChanged?.Invoke(this, EventArgs.Empty);
+        using (BeginPresentationUpdate?.Invoke())
+        {
+            Profile = profile.Copy();
+            AppearancePresentation.Current = Profile;
+            if (Profile.Global.Theme != AppearanceTheme.Custom) settings.Current.ThemeMode = (AppThemeMode)(int)Profile.Global.Theme;
+            ApplyCurrent(animated: false); AppTypography.SetScale(Profile.Typography.AppTextScale); UpdateSystemMonitoring();
+            ModeChanged?.Invoke(this, EventArgs.Empty);
+        }
         logger.Info($"Appearance UI apply completed in {elapsed.Elapsed.TotalMilliseconds:F1} ms before persistence.");
         if (profiles is not null) await profiles.SaveAsync(Profile);
     }
@@ -79,8 +85,11 @@ public sealed class AppAppearanceService : IDisposable
     {
         var elapsed = Stopwatch.StartNew();
         if (percent is < 80 or > 200) throw new ArgumentOutOfRangeException(nameof(percent));
-        Profile.Typography.AppTextScale = percent; AppTypography.SetScale(percent);
-        ModeChanged?.Invoke(this, EventArgs.Empty);
+        using (BeginPresentationUpdate?.Invoke())
+        {
+            Profile.Typography.AppTextScale = percent; AppTypography.SetScale(percent);
+            ModeChanged?.Invoke(this, EventArgs.Empty);
+        }
         logger.Info($"Text scale UI apply completed in {elapsed.Elapsed.TotalMilliseconds:F1} ms before persistence.");
         if (profiles is not null) await profiles.SaveAsync(Profile);
     }
@@ -106,13 +115,16 @@ public sealed class AppAppearanceService : IDisposable
 
     public async Task SetModeAsync(AppThemeMode mode)
     {
-        settings.Current.ThemeMode = mode;
-        Profile.Global.Theme = (AppearanceTheme)(int)mode;
-        AppearancePresentation.Current = Profile;
-        ApplyCurrent(animated: true);
-        UpdateSystemMonitoring();
-        // Subscribers own native controls; publish before the asynchronous file continuation.
-        ModeChanged?.Invoke(this, EventArgs.Empty);
+        using (BeginPresentationUpdate?.Invoke())
+        {
+            settings.Current.ThemeMode = mode;
+            Profile.Global.Theme = (AppearanceTheme)(int)mode;
+            AppearancePresentation.Current = Profile;
+            ApplyCurrent(animated: true);
+            UpdateSystemMonitoring();
+            // Subscribers own native controls; publish before the asynchronous file continuation.
+            ModeChanged?.Invoke(this, EventArgs.Empty);
+        }
         await settings.SaveAsync().ConfigureAwait(false);
         if (profiles is not null) await profiles.SaveAsync(Profile);
     }

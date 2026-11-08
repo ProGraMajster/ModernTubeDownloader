@@ -67,10 +67,11 @@ public sealed class AppServices : IDisposable
         IToolBinaryValidator? toolValidator = null,
         ModernFormsNext.Notifications.ISystemNotificationService? notifications = null)
     {
+        using var createTiming = PerformanceDiagnostics.Measure("services.create");
         paths.EnsureCreated();
         var logger = new FileAppLogger(paths.LogDirectory);
         var settings = new SettingsService(paths, logger);
-        settings.LoadAsync().GetAwaiter().GetResult();
+        using (PerformanceDiagnostics.Measure("settings.load")) settings.LoadAsync().GetAwaiter().GetResult();
         var localization = new LocalizationService(settings.Current.Language);
         var appearance = new AppAppearanceService(settings, logger, Path.Combine(paths.RootDirectory, "appearance.json"));
         var processRunner = new AsyncProcessRunner(logger);
@@ -86,16 +87,16 @@ public sealed class AppServices : IDisposable
         var ytDlpRunner = new YtDlpProcessRunner(processRunner, tools, logger, authentication);
         var metadata = new YtDlpMetadataService(ytDlpRunner, settings, logger);
         var history = new HistoryService(paths, logger);
-        history.LoadAsync().GetAwaiter().GetResult();
+        using (PerformanceDiagnostics.Measure("history.load")) history.LoadAsync().GetAwaiter().GetResult();
         var queueStore = new QueuePersistenceService(paths, logger);
         var liveStore = new LiveSessionPersistenceService(paths, logger);
-        liveStore.MigrateLegacyQueueAsync(settings).GetAwaiter().GetResult();
+        using (PerformanceDiagnostics.Measure("live.migrate")) liveStore.MigrateLegacyQueueAsync(settings).GetAwaiter().GetResult();
         var live = new LiveSessionService(liveStore, settings, logger);
-        live.LoadAsync().GetAwaiter().GetResult();
+        using (PerformanceDiagnostics.Measure("live.load")) live.LoadAsync().GetAwaiter().GetResult();
         var storageSafety = new QueueStorageSafety(directories: () =>
             [paths.RootDirectory, paths.AuthenticationDirectory, settings.Current.TemporaryDirectory, settings.Current.FinalOutputDirectory]);
         var queue = new DownloadQueueService(queueStore, logger, settings, storageSafety);
-        queue.LoadAsync().GetAwaiter().GetResult();
+        using (PerformanceDiagnostics.Measure("queue.load")) queue.LoadAsync().GetAwaiter().GetResult();
         var ffmpeg = new FfmpegService(processRunner, tools, logger);
         var downloader = new DownloadJobExecutor(paths, settings, ytDlpRunner, metadata, ffmpeg, history, logger, storageSafety);
         var processor = new QueueProcessor(queue, downloader, settings, logger);
@@ -115,6 +116,20 @@ public sealed class AppServices : IDisposable
                 thumbnails.GetCachedNotificationPath);
             services.Notifications.Attach(queue, live);
         }
+        if (PerformanceDiagnostics.Enabled)
+        {
+            PerformanceDiagnostics.Set("history.records", history.Snapshot().Count);
+            PerformanceDiagnostics.Set("queue.records", queue.Snapshot().Count);
+            PerformanceDiagnostics.BitmapBytes = () => thumbnails.DecodedBytes + Views.ThumbnailImageBinding.OwnedBytes;
+            PerformanceDiagnostics.SampleSources = () =>
+            {
+                PerformanceDiagnostics.Set("thumbnail.cachedBytes", thumbnails.CachedBytes);
+                PerformanceDiagnostics.Set("thumbnail.cachedCount", thumbnails.CachedCount);
+                PerformanceDiagnostics.Set("thumbnail.pending", thumbnails.PendingCount);
+                PerformanceDiagnostics.Set("thumbnail.active", thumbnails.ActiveLoads);
+                PerformanceDiagnostics.Set("thumbnail.displayCopiesBytes", Views.ThumbnailImageBinding.OwnedBytes);
+            };
+        }
         processor.Start();
         liveScheduler.Start();
         tools.Start();
@@ -125,7 +140,7 @@ public sealed class AppServices : IDisposable
         services.Updates.UpdatePrepared += (_, version) => services.Notifications?.UpdateReady(version);
         services.Batch.AnalysisCompleted += (_, counts) => services.Notifications?.BatchCompleted(counts.Analyzed, counts.Total);
         services.WebRemote = new WebRemoteHost(services);
-        services.WebRemote.ReconcileAsync().GetAwaiter().GetResult();
+        using (PerformanceDiagnostics.Measure("remote.initialize")) services.WebRemote.ReconcileAsync().GetAwaiter().GetResult();
         return services;
     }
 

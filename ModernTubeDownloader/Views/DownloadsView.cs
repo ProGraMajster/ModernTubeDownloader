@@ -851,23 +851,13 @@ internal sealed partial class DownloadsView : UserControl
             quality.SelectedIndex = 0;
     }
 
-    private async Task LoadPreviewThumbnailAsync(string? url)
+    private Task LoadPreviewThumbnailAsync(string? url)
     {
-        if (!services.Settings.Current.DownloadThumbnail)
-            return;
+        if (!services.Settings.Current.DownloadThumbnail) return Task.CompletedTask;
         var expectedMetadata = analyzedMetadata;
-        SKBitmap? image;
-        try { image = await services.Thumbnails.GetAsync(url, lifetimeCancellation.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException) { return; }
-        if (image is not null && ReferenceEquals(expectedMetadata, analyzedMetadata))
-            Application.RunOnUIThread(() =>
-            {
-                if (disposed || lifetimeCancellation.IsCancellationRequested || !ReferenceEquals(expectedMetadata, analyzedMetadata))
-                    return;
-                previewImage.Image = image;
-                previewImage.Visible = true;
-                previewPlaceholder.Visible = false;
-            });
+        return ThumbnailImageBinding.For(previewImage).LoadAsync(services.Thumbnails, url, lifetimeCancellation.Token,
+            () => { previewImage.Visible = true; previewPlaceholder.Visible = false; },
+            () => !disposed && ReferenceEquals(expectedMetadata, analyzedMetadata));
     }
 
     private void AddClicked(object? sender, EventArgs e)
@@ -1172,8 +1162,14 @@ internal sealed partial class DownloadsView : UserControl
             scroll.Value = targetValue;
     }
 
+    private bool resizingQueueCards;
     private void ResizeCards()
     {
+        if (resizingQueueCards) return;
+        resizingQueueCards = true;
+        queueHost.SuspendLayout();
+        try
+        {
         // DisplayRectangle reflects the space left after FlowLayoutPanel padding and any
         // visible vertical scrollbar. Size cards to that viewport so vertical overflow does
         // not create a secondary horizontal scrollbar.
@@ -1181,6 +1177,8 @@ internal sealed partial class DownloadsView : UserControl
         foreach (var card in cards.Values)
             card.Width = width;
         foreach (var card in groupCards.Values) card.Width = width;
+        }
+        finally { queueHost.ResumeLayout(true); resizingQueueCards = false; }
     }
 
     private void BuildQueueMenu()

@@ -74,7 +74,20 @@ internal sealed partial class QueueItemCard
         AppTypography.SetDashboardPresentation(this, value);
         LayoutControls();
     }
+    private bool arrangingDashboardRow;
     private void LayoutDashboardRow()
+    {
+        if (arrangingDashboardRow) return;
+        arrangingDashboardRow = true;
+        SuspendLayout();
+        try { LayoutDashboardRowCore(); }
+        finally
+        {
+            try { ResumeLayout(true); }
+            finally { arrangingDashboardRow = false; }
+        }
+    }
+    private void LayoutDashboardRowCore()
     {
         var p = AppearancePresentation.Current.ModernDashboardShell;
         var narrow = Width < AppTypography.TextHeight(860);

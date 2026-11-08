@@ -107,7 +107,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     public void Clear()
     {
-        historyMode = false; hasSelection = false; queueId = null; source = finalPath = folderPath = null; thumbnailUrl = null; image.Image = null;
+        historyMode = false; hasSelection = false; queueId = null; source = finalPath = folderPath = null; thumbnailUrl = null; ThumbnailImageBinding.For(image).Clear();
         imageDuration.Text = "";
         title.Text = services.Localization["Dashboard.SelectItem"]; author.Text = link.Text = factText = ""; copy.Enabled = openFile.Enabled = openFolder.Enabled = false;
         queued = false; options.Visible = false; showOptions = false; RefreshText(); LayoutInspector();
@@ -207,12 +207,10 @@ internal sealed class DashboardInspector : AppScrollPanel
         link.AccessibleName = queueId is not null ? identity.Name + ": " + url : url;
         if (thumbnailUrl != thumbnail) { thumbnailUrl = thumbnail; thumbnailFailed = false; image.Image = null; _ = LoadAsync(thumbnail); }
     }
-    private async Task LoadAsync(string? expected)
-    {
-        try { var bitmap = await services.Thumbnails.GetAsync(expected, lifetime.Token); Application.RunOnUIThread(() => { if (!disposed && thumbnailUrl == expected) { image.Image = bitmap; thumbnailFailed = bitmap is null; LayoutInspector(); } }); }
-        catch (OperationCanceledException) { }
-        catch (Exception error) { services.Logger.Error("Inspector thumbnail could not be loaded.", error); }
-    }
+    private Task LoadAsync(string? expected)
+        => ThumbnailImageBinding.For(image).LoadAsync(services.Thumbnails, expected, lifetime.Token,
+            () => { thumbnailFailed = false; LayoutInspector(); }, () => !disposed && thumbnailUrl == expected,
+            () => { thumbnailFailed = true; LayoutInspector(); });
     private async Task AdvancedAsync()
     {
         if (!CanEditOptions || FindForm() is not { } owner || container.SelectedItem is not Localization.LocalizedOption<PreferredVideoContainer> selected) return;

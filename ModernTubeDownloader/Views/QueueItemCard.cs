@@ -242,21 +242,15 @@ internal sealed partial class QueueItemCard : UserControl
             Easings.CubicOut);
     }
 
-    private async Task LoadThumbnailAsync(string? url, CancellationToken cancellationToken)
+    private Task LoadThumbnailAsync(string? url, CancellationToken cancellationToken)
+        => ThumbnailImageBinding.For(thumbnail).LoadAsync(thumbnails, url, cancellationToken,
+            () => thumbnailPlaceholder.Visible = false,
+            () => !disposed && string.Equals(url, loadedThumbnail, StringComparison.Ordinal));
+
+    internal void SuspendThumbnail()
     {
-        var expected = url;
-        SKBitmap? image;
-        try { image = await thumbnails.GetAsync(url, cancellationToken).ConfigureAwait(false); }
-        catch (OperationCanceledException) { return; }
-        if (image is null || !string.Equals(expected, loadedThumbnail, StringComparison.Ordinal))
-            return;
-        Application.RunOnUIThread(() =>
-        {
-            if (disposed || cancellationToken.IsCancellationRequested || !string.Equals(expected, loadedThumbnail, StringComparison.Ordinal))
-                return;
-            thumbnail.Image = image;
-            thumbnailPlaceholder.Visible = false;
-        });
+        thumbnailRequest?.Cancel(); thumbnailRequest?.Dispose(); thumbnailRequest = null;
+        ThumbnailImageBinding.For(thumbnail).Clear(); loadedThumbnail = null; thumbnailPlaceholder.Visible = true;
     }
 
     private string BuildTransferText(DownloadQueueItem item)

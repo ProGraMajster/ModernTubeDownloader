@@ -31,19 +31,19 @@ internal sealed partial class DownloadsView
         var visibleGroups = rows.Where(row => row.Item is null).Select(row => row.Group!.Key).ToHashSet();
         if (selectedItemId is { } selected && items.All(item => item.Id != selected)) selectedItemId = null;
         var parent = queueHost.Parent;
-        var position = parent?.Controls.GetChildIndex(queueHost) ?? 0;
         var projectionMs = measurement.Elapsed.TotalMilliseconds;
         double preparedMs = 0, attachedMs = 0;
         var reusedRows = !rebuild && TryRefreshVisibleQueueRows(rows);
         if (reusedRows) preparedMs = attachedMs = measurement.Elapsed.TotalMilliseconds;
         else
         {
+            var additions = new List<Control>();
             parent?.SuspendLayout(); queueHost.SuspendLayout();
             try
             {
-                // A single completed subtree reaches native accessibility, rather than one
-                // synchronous native structure scan per removed/inserted child.
-                parent?.Controls.Remove(queueHost);
+                // Keep the viewport and existing providers attached. Prepare new rows
+                // off-window, then attach only those rows at their final size. Reparenting
+                // the entire viewport repeats parent/font/visibility work for every child.
                 foreach (var oldId in cards.Keys.Where(id => rebuild || !visibleIds.Contains(id)).ToArray())
                 { var old = cards[oldId]; queueHost.Controls.Remove(old); old.Dispose(); cards.Remove(oldId); }
                 foreach (var oldKey in groupCards.Keys.Where(key => rebuild || !visibleGroups.Contains(key)).ToArray())
@@ -54,11 +54,11 @@ internal sealed partial class DownloadsView
                     {
                         if (!cards.TryGetValue(item.Id, out var card))
                         {
-                            card = new QueueItemCard(services.Thumbnails, text); card.SetDashboard(true);
+                            card = new QueueItemCard(services.Thumbnails, text) { Width = Math.Max(320, queueHost.DisplayRectangle.Width - 4) }; card.SetDashboard(true);
                             card.KeyDown += DashboardKeys; card.ActionRequested += CardActionRequested;
-                            cards.Add(item.Id, card); queueHost.Controls.Add(card);
+                            cards.Add(item.Id, card); additions.Add(card);
                         }
-                        card.BringToFront(); card.UpdateItem(item, item.Id == selectedItemId);
+                        card.UpdateItem(item, item.Id == selectedItemId);
                     }
                     else if (row.Group is { } group)
                     {
@@ -67,23 +67,22 @@ internal sealed partial class DownloadsView
                             card = new PlaylistGroupCard(group, services.Thumbnails, text);
                             card.ToggleRequested += (_, _) => TogglePlaylistGroup(group.Key);
                             card.MenuRequested += (_, _) => ShowPlaylistGroupMenu(group.Key);
-                            groupCards.Add(group.Key, card); queueHost.Controls.Add(card);
+                            groupCards.Add(group.Key, card); additions.Add(card);
                         }
-                        card.BringToFront(); card.Update(group, expandedPlaylistGroups.Contains(group.Key), selectedItemId);
+                        card.Update(group, expandedPlaylistGroups.Contains(group.Key), selectedItemId);
                     }
                 }
-                // Size and settle the new rows while the host is detached. Otherwise
-                // each of forty width changes republishes the attached native subtree.
                 ResizeCards();
+                preparedMs = measurement.Elapsed.TotalMilliseconds;
+                foreach (var addition in additions) queueHost.Controls.Add(addition);
+                // ControlCollection z-order is the canonical FlowLayoutPanel row order.
+                foreach (var row in rows)
+                    (row.Item is { } item ? (Control)cards[item.Id] : groupCards[row.Group!.Key]).BringToFront();
             }
             finally
             {
                 queueHost.ResumeLayout(true);
-                queueHost.SuspendLayout();
-                try { ResizeCards(); }
-                finally { queueHost.ResumeLayout(true); }
-                preparedMs = measurement.Elapsed.TotalMilliseconds;
-                if (parent is not null) { parent.Controls.Add(queueHost); parent.Controls.SetChildIndex(queueHost, Math.Min(position, parent.Controls.Count - 1)); parent.ResumeLayout(true); }
+                parent?.ResumeLayout(true);
                 attachedMs = measurement.Elapsed.TotalMilliseconds;
             }
         }
@@ -100,8 +99,8 @@ internal sealed partial class DownloadsView
     {
         // Paging through the same group changes values, not structure. Keep the
         // bounded native subtree attached: reparenting invalidates providers and
-        // republishes hundreds of descendants. Structural changes still use the
-        // detached rebuild below; never retain a pool of hidden, off-page rows.
+        // republishes hundreds of descendants. Structural changes prepare only new
+        // rows off-window; never retain a pool of hidden, off-page rows.
         if (queueHost.Controls.Count != rows.Count) return false;
         for (var i = 0; i < rows.Count; i++)
             if (rows[i].Item is not null ? queueHost.Controls[i] is not QueueItemCard :

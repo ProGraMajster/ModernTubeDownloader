@@ -26,6 +26,7 @@ internal sealed class AppShellHost : Panel
     private readonly IAppLogger logger;
     private readonly Func<AppInterfaceMode, Action<AppPageId>, IAppShell> factory;
     private IAppShell? shell;
+    private int shellGeneration;
     public AppInterfaceMode Mode => shell?.Mode ?? AppInterfaceMode.Classic;
     public AppPageId CurrentPage { get; private set; }
     public event EventHandler<AppPageId>? Navigate;
@@ -44,12 +45,16 @@ internal sealed class AppShellHost : Panel
         AppUi.BindBackground(this);
     }
 
-    public void Apply(AppInterfaceMode requested)
+    public void Apply(AppInterfaceMode requested, Action<AppInterfaceMode>? preparePages = null)
     {
-        if (shell?.Mode == requested) { shell.Refresh(); return; }
+        if (shell?.Mode == requested && preparePages is null) { shell.Refresh(); return; }
+        PerformanceDiagnostics.Set("shell.generation", ++shellGeneration);
+        PerformanceDiagnostics.Set("shell.requestedMode", (int)requested);
+        PerformanceDiagnostics.Set("shell.hwnd", FindForm()?.PlatformHandle.Handle.ToInt64() ?? 0);
+        PerformanceDiagnostics.Emit("shell.apply.begin");
         // Construct before detaching the working shell. A failed construction cannot lose pages.
         IAppShell next;
-        try { next = factory(requested, page => Navigate?.Invoke(this, page)); }
+        try { next = shell?.Mode == requested ? shell : factory(requested, page => Navigate?.Invoke(this, page)); }
         catch (Exception error) when (requested == AppInterfaceMode.ModernDashboard)
         {
             logger.Error("Modern Dashboard construction failed; Classic recovery selected.", error);
@@ -59,12 +64,34 @@ internal sealed class AppShellHost : Panel
         SuspendLayout();
         try
         {
-            pages.Parent?.Controls.Remove(pages);
-            if (shell is { } previous) { Controls.Remove(previous.Root); previous.Dispose(); }
-            shell = next; pages.Dock = DockStyle.Fill; next.PageHost.Controls.Add(pages);
-            Controls.Add(next.Root); AppTypography.SetDashboardPresentation(next.Root, next.Mode == AppInterfaceMode.ModernDashboard); next.Select(CurrentPage); next.Refresh();
+            pages.Parent?.Controls.Remove(pages); PerformanceDiagnostics.Emit("shell.pages.detached");
+            if (shell is { } previous)
+            {
+                Controls.Remove(previous.Root);
+                if (!ReferenceEquals(previous, next)) { previous.Dispose(); PerformanceDiagnostics.Emit("shell.previous.disposed"); }
+            }
+            shell = next;
+            // Prepare the final presentation before its first publication. Previously the
+            // same page tree was attached by Apply, then detached and attached again by MainForm.
+            next.Root.Bounds = DisplayRectangle;
+            AppTypography.SetDashboardPresentation(next.Root, next.Mode == AppInterfaceMode.ModernDashboard);
+            next.Select(CurrentPage); next.Refresh(); next.Root.PerformLayout();
+            try { preparePages?.Invoke(next.Mode); }
+            finally
+            {
+                // A presentation failure must not leave the canonical pages orphaned.
+                pages.Dock = DockStyle.Fill;
+                next.Root.Bounds = DisplayRectangle; next.Root.PerformLayout();
+                pages.Bounds = next.PageHost.DisplayRectangle; pages.PerformLayout();
+                next.PageHost.Controls.Add(pages);
+                Controls.Add(next.Root);
+            }
         }
         finally { ResumeLayout(true); }
+        PerformanceDiagnostics.Set("shell.rootIdentity", System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(next.Root));
+        PerformanceDiagnostics.Set("shell.pagesIdentity", System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(pages));
+        PerformanceDiagnostics.Set("shell.currentMode", (int)next.Mode);
+        PerformanceDiagnostics.Emit("shell.apply.end");
     }
 
     public void Select(AppPageId page) { CurrentPage = page; shell?.Select(page); }
@@ -174,7 +201,7 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         AppUi.BindBackground(sectionRule, AppThemeTokens.Border); DashboardVisual.Flat(sectionRule);
         AppUi.BindBackground(activeMarker, AppThemeTokens.Accent); DashboardVisual.Flat(activeMarker); activeMarker.Style.Border.Radius = 2;
         Sidebar.Controls.AddRange([sectionRule, activeMarker]);
-        Sidebar.AutoScroll = true;
+        Sidebar.AutoScroll = true; Sidebar.AccessibleAutomationId = "NavigationSidebar";
         AppUi.BindGradient(Sidebar, AppThemeTokens.Surface, AppThemeTokens.Navigation);
         Sidebar.Style.Border.Right.Width = 1; Sidebar.Style.Border.Right.Color = AppUi.GetColor(AppThemeTokens.Border);
         AppUi.BindGradient(Footer, AppThemeTokens.Surface, AppThemeTokens.Background);
@@ -214,11 +241,11 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         foreach (var page in new[] { AppPageId.Downloads, AppPageId.Live, AppPageId.Other, AppPageId.Batch, AppPageId.History, AppPageId.Settings })
         {
             if (page == AppPageId.Settings) y += 22;
-            SetButton(page, compact, 12, y, Sidebar.Width - 26, row); y += row + 8;
+            SetButton(page, compact, compact ? 4 : 12, y, compact ? 40 : Sidebar.Width - 41, row); y += row + 8;
         }
         var bottom = Math.Max(y + 20, Sidebar.Height - 2 * (row + 6) - 36);
-        SetButton(AppPageId.Help, compact, 12, bottom, Sidebar.Width - 26, row);
-        SetButton(AppPageId.About, compact, 12, bottom + row + 6, Sidebar.Width - 26, row);
+        SetButton(AppPageId.Help, compact, compact ? 4 : 12, bottom, compact ? 40 : Sidebar.Width - 41, row);
+        SetButton(AppPageId.About, compact, compact ? 4 : 12, bottom + row + 6, compact ? 40 : Sidebar.Width - 41, row);
         sectionRule.SetBounds(18, Buttons[AppPageId.Settings].Top - 16, Sidebar.Width - 36, 1);
         Footer.Height = AppTypography.TextHeight(32); identity.Width = Math.Min(DashboardVisual.TextWidth(identity, identity.Text) + 30, Root.Width / 2);
         statusDot.SetBounds(identity.Width + 8, (Footer.Height - 8) / 2, 8, 8);

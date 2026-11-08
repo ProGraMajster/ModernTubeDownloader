@@ -14,6 +14,7 @@ internal static class Program
     {
         UiCrashDiagnostics.RegisterUiThread();
         var paths = AppPaths.CreateDefault();
+        PerformanceDiagnostics.Start(paths);
         AppServices? services = null;
         IAppLogger? logger = null;
         ExternalLinkInstance? instance = null;
@@ -110,6 +111,11 @@ internal static class Program
             if (enableAutomation || Environment.GetEnvironmentVariable("MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL") == "1")
                 configureProtocol = false;
 #endif
+            // Explicit isolated QA never changes the owner's registered protocol, including Release QA.
+            if (Environment.GetEnvironmentVariable("MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL") == "1" &&
+                paths.RootDirectory.StartsWith(System.IO.Path.GetFullPath(System.IO.Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) &&
+                System.IO.Path.GetFileName(paths.RootDirectory).StartsWith("mtd-automation-smoke-", StringComparison.Ordinal))
+                configureProtocol = false;
             if (configureProtocol)
             {
                 try
@@ -124,7 +130,7 @@ internal static class Program
                     logger.Error("Browser protocol integration could not be configured.", error);
                 }
             }
-            var form = new MainForm(services, enableAutomation, initialRequest, classicUi);
+            using var form = new MainForm(services, enableAutomation, initialRequest, classicUi);
             if (services.Notifications is { } notifications)
                 notifications.Navigate += (_, request) => Application.RunOnUIThread(() => form.HandleNotification(request));
             instance.Start(request =>
@@ -159,6 +165,7 @@ internal static class Program
             TaskScheduler.UnobservedTaskException -= taskHandler;
             instance?.Dispose();
             services?.Dispose();
+            PerformanceDiagnostics.Stop();
         }
     }
 

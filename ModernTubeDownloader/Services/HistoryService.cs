@@ -13,6 +13,7 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
 
     public IReadOnlyList<DownloadHistoryEntry> Snapshot()
     {
+        using var timing = PerformanceDiagnostics.Measure("history.snapshot.sort");
         lock (sync)
             return entries.OrderByDescending(entry => entry.CompletedAt).ToArray();
     }

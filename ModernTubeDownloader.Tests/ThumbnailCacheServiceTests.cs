@@ -33,10 +33,12 @@ public sealed class ThumbnailCacheServiceTests : IDisposable
             Assert.NotNull(preview);
             Assert.Equal((320, 180), (preview.Width, preview.Height));
         }
-        var shared = await cache.GetAsync(url);
+        using var shared = await cache.GetAsync(url);
         Assert.NotNull(shared);
         using (var second = await cache.GetPreviewCopyAsync(url, CancellationToken.None)) Assert.NotSame(shared, second);
-        Assert.Equal((1280, 720), (shared.Width, shared.Height));
+        Assert.Equal((512, 288), (shared.Width, shared.Height));
+        using var exported = await cache.GetExportCopyAsync(url);
+        Assert.NotNull(exported); Assert.Equal((1280, 720), (exported.Width, exported.Height));
         Assert.Equal(SKColors.CornflowerBlue, shared.GetPixel(0, 0));
         enabled = false;
         Assert.Null(await cache.GetPreviewCopyAsync(url, CancellationToken.None));

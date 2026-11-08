@@ -93,6 +93,42 @@ public sealed class DashboardShellTests
         var fallbacks = 0; host.Fallback += (_, _) => fallbacks++; host.Select(AppPageId.Live); host.Apply(AppInterfaceMode.ModernDashboard);
         Assert.Equal(1, fallbacks); Assert.Equal(AppInterfaceMode.Classic, host.Mode); Assert.Equal(AppPageId.Live, host.CurrentPage); Assert.NotNull(pages.Parent);
     }
+    [Fact]
+    public void PresentationIsPreparedOnceOffWindowAndRecoveredWhenPreparationThrows()
+    {
+        using var test = ModernFormsTestHost.Create(); using var pages = new Panel();
+        var child = new TextBox { AccessibleAutomationId = "PersistentEditor", Text = "retained value" }; pages.Controls.Add(child);
+        using var host = new AppShellHost(pages, new("en"), new NullAppLogger());
+        host.Apply(AppInterfaceMode.Classic); test.Show(host, 1536, 960);
+        var window = child.FindForm(); var calls = 0;
+        host.Apply(AppInterfaceMode.ModernDashboard, mode =>
+        {
+            calls++; Assert.Equal(AppInterfaceMode.ModernDashboard, mode);
+            Assert.Null(child.FindForm()); Assert.Null(pages.Parent);
+        });
+        Assert.Equal(1, calls); Assert.Same(window, child.FindForm());
+        Assert.Throws<InvalidOperationException>(() => host.Apply(AppInterfaceMode.Classic, _ => throw new InvalidOperationException("fixture")));
+        Assert.Same(window, child.FindForm()); Assert.Equal("retained value", child.Text);
+        Assert.Single(host.Controls); Assert.Same(child, pages.Controls.Single());
+    }
+    [Fact]
+    public void PresentationScopeRestoresTheSameRootOnExceptionAndRepeatedDispose()
+    {
+        using var test = ModernFormsTestHost.Create(); using var container = new Panel();
+        var first = new Panel(); var root = new Panel(); var last = new Panel();
+        var editor = new TextBox { Text = "unchanged" }; root.Controls.Add(editor);
+        container.Controls.AddRange([first, root, last]); test.Show(container, 900, 700);
+        var owner = editor.FindForm(); var index = container.Controls.GetChildIndex(root);
+        IDisposable? scope = null;
+        Assert.Throws<InvalidOperationException>((Action)(() =>
+        {
+            using (scope = PresentationUpdate.Begin(root))
+            { Assert.Null(editor.FindForm()); throw new InvalidOperationException("fixture"); }
+        }));
+        scope!.Dispose();
+        Assert.Same(owner, editor.FindForm()); Assert.Equal(index, container.Controls.GetChildIndex(root));
+        Assert.Equal(3, container.Controls.Count); Assert.Equal("unchanged", editor.Text);
+    }
     [Theory]
     [InlineData(1280, 720, 100)] [InlineData(1366, 768, 100)] [InlineData(1600, 900, 100)]
     [InlineData(1920, 1080, 150)] [InlineData(2560, 1440, 200)] [InlineData(2276, 1280, 100)]
@@ -179,8 +215,9 @@ public sealed class DashboardShellTests
     public void ExternalLinksUseTheSharedNavigationContract(string url, AppPageId expected)
         => Assert.Equal(expected, AppNavigation.ForExternalRequest(new(url, true)));
 
-    [Fact]
-    public async Task ActualInterfaceChangesKeepTheQueueProcessorSchedulerHistoryBatchAndRemoteInstances()
+    [Theory]
+    [InlineData(100)] [InlineData(200)]
+    public async Task ActualInterfaceChangesKeepTheQueueProcessorSchedulerHistoryBatchAndRemoteInstances(int scale)
     {
         var directory = Path.Combine(Path.GetTempPath(), "mtd-runtime-shell-" + Guid.NewGuid().ToString("N"));
         try
@@ -190,7 +227,9 @@ public sealed class DashboardShellTests
             using (var test = ModernFormsTestHost.Create())
             {
                 services.Appearance.Profile.Global.Animations = false;
+                services.Appearance.Profile.Typography.AppTextScale = scale;
                 using var form = new MainForm(services);
+                var historySearch = Find<TextBox>(form.Controls.OfType<AppShellHost>().Single(), "HistorySearch");
                 var processor = services.Processor; var queue = services.Queue; var scheduler = services.LiveScheduler;
                 var history = services.History; var batch = services.Batch; var remote = services.WebRemote;
                 form.Navigate(AppPageId.History);
@@ -199,8 +238,12 @@ public sealed class DashboardShellTests
                     var p = services.Appearance.Profile.Copy(); p.InterfaceMode = AppInterfaceMode.ModernDashboard;
                     pendingWrites.Add(services.Appearance.ApplyProfileAsync(p)); test.ProcessPendingWork();
                     Assert.True(form.InterfaceMode == AppInterfaceMode.ModernDashboard, ReadLogs(services.Paths.LogDirectory)); Assert.Equal(AppPageId.History, form.CurrentPage);
+                    Assert.Same(historySearch, Find<TextBox>(form.Controls.OfType<AppShellHost>().Single(), "HistorySearch"));
+                    Assert.Same(form, historySearch.FindForm());
                     p.InterfaceMode = AppInterfaceMode.Classic; pendingWrites.Add(services.Appearance.ApplyProfileAsync(p)); test.ProcessPendingWork();
                     Assert.Equal(AppInterfaceMode.Classic, form.InterfaceMode);
+                    Assert.Same(historySearch, Find<TextBox>(form.Controls.OfType<AppShellHost>().Single(), "HistorySearch"));
+                    Assert.Same(form, historySearch.FindForm());
                     Assert.Same(processor, services.Processor); Assert.Same(queue, services.Queue); Assert.Same(scheduler, services.LiveScheduler);
                     Assert.Same(history, services.History); Assert.Same(batch, services.Batch); Assert.Same(remote, services.WebRemote);
                 }
@@ -385,17 +428,24 @@ public sealed class DashboardShellTests
                 var view = new HistoryView(services, true); AppTypography.SetDashboardPresentation(view, true);
                 host.Show(view, 1536, 1024);
                 var list = Find<FlowLayoutPanel>(view, "HistoryList");
-                Assert.Equal(recent.QueueItemId, list.Controls.OfType<HistoryEntryCard>().First().ItemId);
-                Find<Button>(view, "HistoryDateSort").PerformClick();
-                Assert.Equal(old.QueueItemId, list.Controls.OfType<HistoryEntryCard>().First().ItemId);
-                Find<Button>(view, "HistoryFilterAudio").PerformClick(); Assert.Single(list.Controls.OfType<HistoryEntryCard>());
-                Assert.Equal(recent.QueueItemId, list.Controls.OfType<HistoryEntryCard>().Single().ItemId);
-                Find<Button>(view, "HistoryFilterPlaylists").PerformClick(); Assert.Equal(old.QueueItemId, list.Controls.OfType<HistoryEntryCard>().Single().ItemId);
-                Find<Button>(view, "HistoryFilterAll").PerformClick();
-                Find<ComboBox>(view, "HistoryDateRange").SelectedIndex = 1;
-                Assert.Equal(recent.QueueItemId, list.Controls.OfType<HistoryEntryCard>().Single().ItemId);
+                WaitFor(recent.QueueItemId, old.QueueItemId);
+                var retainedRows = list.Controls.OfType<HistoryEntryCard>().ToArray();
+                Find<Button>(view, "HistoryDateSort").PerformClick(); WaitFor(old.QueueItemId, recent.QueueItemId);
+                Find<Button>(view, "HistoryFilterAudio").PerformClick(); WaitFor(recent.QueueItemId);
+                Find<Button>(view, "HistoryFilterPlaylists").PerformClick(); WaitFor(old.QueueItemId);
+                Find<Button>(view, "HistoryFilterAll").PerformClick(); WaitFor(old.QueueItemId, recent.QueueItemId);
+                Find<ComboBox>(view, "HistoryDateRange").SelectedIndex = 1; WaitFor(recent.QueueItemId);
                 Assert.Equal(before, JsonSerializer.Serialize(services.History.Snapshot()));
-                view.SetDashboard(false); Assert.Equal(2, list.Controls.OfType<HistoryEntryCard>().Count());
+                Assert.Equal(retainedRows, list.Controls.OfType<HistoryEntryCard>().ToArray());
+                view.SetDashboard(false); WaitFor(recent.QueueItemId, old.QueueItemId);
+                void WaitFor(params Guid[] ids)
+                {
+                    var deadline = System.Diagnostics.Stopwatch.StartNew();
+                    Guid[] VisibleIds() => list.Controls.OfType<HistoryEntryCard>().Where(card => card.Visible).Select(card => card.ItemId).ToArray();
+                    while (!VisibleIds().SequenceEqual(ids) && deadline.Elapsed < TimeSpan.FromSeconds(5))
+                    { host.ProcessPendingWork(); host.Clock.Advance(TimeSpan.FromMilliseconds(5)); Thread.Sleep(5); }
+                    Assert.Equal(ids, VisibleIds());
+                }
             }
             await services.ShutdownAsync();
         }

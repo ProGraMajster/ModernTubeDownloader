@@ -92,11 +92,9 @@ internal sealed class VideoDetailsForm : Form
             page.Controls.Add(image); _ = LoadImageAsync(image);
         }
     }
-    private async Task LoadImageAsync(PictureBox image)
-    {
-        try { var bitmap = await thumbnails!.GetAsync(metadata.ThumbnailUrl, lifetime.Token); if (!disposed && image.Parent is not null) image.Image = bitmap; }
-        catch (OperationCanceledException) { }
-    }
+    private Task LoadImageAsync(PictureBox image)
+        => ThumbnailImageBinding.For(image).LoadAsync(thumbnails!, metadata.ThumbnailUrl, lifetime.Token,
+            accept: () => !disposed && image.Parent is not null);
 
     private string BuildOverview() => string.Join(Environment.NewLine,
     [
