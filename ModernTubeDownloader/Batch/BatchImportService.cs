@@ -36,12 +36,20 @@ public sealed class BatchImportService : IDisposable
         lock (sync) { if (loaded.TryGetValue(id, out var existing)) return existing; loaded.Add(id, session); }
         await RefreshQueueAsync(session, token); return session;
     }
-    public async Task<BatchImportSession> ImportAsync(string file, string quality = "best", PreferredVideoContainer container = PreferredVideoContainer.Auto,
+    public Task<BatchImportSession> ImportAsync(string file, string quality = "best", PreferredVideoContainer container = PreferredVideoContainer.Auto,
         int workers = 1, CancellationToken token = default, IProgress<BatchOperationProgress>? progress = null)
+        => ImportCoreAsync(Path.GetFileName(file), cancellation => BatchImportParser.ParseAsync(file, cancellation), quality, container, workers, token, progress);
+
+    public Task<BatchImportSession> ImportTextAsync(string text, string quality = "best", PreferredVideoContainer container = PreferredVideoContainer.Auto,
+        int workers = 1, CancellationToken token = default, IProgress<BatchOperationProgress>? progress = null)
+        => ImportCoreAsync("clipboard.txt", cancellation => BatchImportParser.ParseTextAsync(text, cancellation), quality, container, workers, token, progress);
+
+    private async Task<BatchImportSession> ImportCoreAsync(string name, Func<CancellationToken, IAsyncEnumerable<BatchRawEntry>> source,
+        string quality, PreferredVideoContainer container, int workers, CancellationToken token, IProgress<BatchOperationProgress>? progress)
     {
         if (!QualityPreset.All.Any(value => value.Id == quality) || !Enum.IsDefined(container) || workers is < 1 or > 8)
             throw new ArgumentException("Batch.Error.Options");
-        var session = new BatchImportSession { FileName = Path.GetFileName(file), DefaultQuality = quality, DefaultContainer = container, AnalysisWorkers = workers };
+        var session = new BatchImportSession { FileName = name, DefaultQuality = quality, DefaultContainer = container, AnalysisWorkers = workers };
         await Task.Run(() => store.CreateAsync(session, Rows(token), token), token);
         lock (sync) loaded.Add(session.Id, session);
         progress?.Report(new("Import", session.ImportedCount, session.ImportedCount));
@@ -49,7 +57,7 @@ public sealed class BatchImportService : IDisposable
         async IAsyncEnumerable<BatchImportEntry> Rows([EnumeratorCancellation] CancellationToken cancellation)
         {
             var identities = new HashSet<string>(StringComparer.Ordinal); var ordinal = 0;
-            await foreach (var raw in BatchImportParser.ParseAsync(file, cancellation))
+            await foreach (var raw in source(cancellation))
             {
                 var entry = BatchImportParser.Validate(raw, session, ++ordinal);
                 if (entry.Status == BatchEntryStatus.Pending && !identities.Add(entry.Identity)) entry.Status = BatchEntryStatus.Duplicate;

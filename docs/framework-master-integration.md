@@ -1,5 +1,10 @@
 # Framework master integration for 1.3.0-candidate.1
 
+Follow-up: the [2026-11-10 Dashboard stage](dashboard-completion-20261110.md)
+implements the owner's component-test strategy. Historical native failures below
+remain preserved as **DEFERRED / NOT QUALIFIED** until final controlled qualification.
+The results below describe their original revision, not subsequent UI changes.
+
 The central `ModernFormsNextCommit` now points to
 `7bf58d06d795d7298c86d9bf9471bbfb46852bab`, the merged result of
 [ModernFormsNext PR #433](https://github.com/ProGraMajster/ModernFormsNext/pull/433).

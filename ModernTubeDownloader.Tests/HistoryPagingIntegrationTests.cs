@@ -53,8 +53,21 @@ public sealed class HistoryPagingIntegrationTests
                 Assert.Equal(originals, list.Controls.OfType<HistoryEntryCard>().ToArray());
                 if (modern)
                 {
+                    Find<Button>(view, "HistoryLast").PerformClick();
+                    Assert.Equal(originals, list.Controls.OfType<HistoryEntryCard>().ToArray());
+                    Assert.Equal(entries[9960].QueueItemId, originals[0].ItemId);
+                    Assert.Equal(entries[9960].Title, Find<Label>(view, "InspectorTitle").Text);
+                    Assert.False(Find<Button>(view, "HistoryLast").Enabled);
+                    Find<NumericUpDown>(view, "HistoryJumpPage").Value = 20;
+                    Assert.Equal(entries[760].QueueItemId, originals[0].ItemId);
+                    Assert.Equal(entries[760].Title, Find<Label>(view, "InspectorTitle").Text);
+                    Find<Button>(view, "HistoryFirst").PerformClick();
+                    Assert.Equal(entries[0].QueueItemId, originals[0].ItemId);
+                    Assert.False(Find<Button>(view, "HistoryFirst").Enabled);
                     Find<Button>(view, "HistoryFilterErrors").PerformClick();
                     PumpUntil(() => summary.AccessibleName!.Contains("Results: 0 / 10000"));
+                    Assert.False(Find<NumericUpDown>(view, "HistoryJumpPage").Enabled);
+                    Assert.Equal(services.Localization["Dashboard.SelectItem"], Find<Label>(view, "InspectorTitle").Text);
                     Find<Button>(view, "HistoryFilterAll").PerformClick();
                     PumpUntil(() => summary.AccessibleName!.Contains("Results: 10000 / 10000"));
                     Find<Button>(view, "HistoryDateSort").PerformClick();

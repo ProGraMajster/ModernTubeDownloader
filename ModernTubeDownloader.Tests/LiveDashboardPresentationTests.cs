@@ -11,7 +11,7 @@ using Path = System.IO.Path;
 namespace ModernTubeDownloader.Tests;
 
 [Collection("ModernFormsNext TestHost")]
-public sealed class LiveDashboardPresentationTests
+public sealed partial class LiveDashboardPresentationTests
 {
     [Theory]
     [InlineData(100, 900)] [InlineData(150, 1536)] [InlineData(200, 1920)]

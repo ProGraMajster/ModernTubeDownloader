@@ -23,6 +23,7 @@ param(
     [switch]$ScrollProbe,
     [switch]$CaptureVisual,
     [switch]$DashboardSmoke,
+    [ValidateSet('Live', 'History', 'Batch', 'Other', 'Settings')][string]$DashboardScreenSmoke,
     [switch]$DashboardLayoutSmoke,
     [switch]$DashboardTransferSmoke,
     [switch]$DownloadsReviewSmoke,
@@ -78,6 +79,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($DashboardScreenSmoke) { $DashboardPopulatedFixture = $true; $DashboardFixtureCount = 5; $CaptureVisual = $true }
 if ($PlaylistTransferSmoke -or $PlaylistGroupsSmoke -or $PlaylistShellSwitchCycles -gt 0) { $PlaylistVisualSmoke = $true }
 if ($PlaylistVisualSmoke) { $PlaylistSmoke = $true; $CaptureVisual = $true }
 if ($DownloadsTooltipSmoke) { $DownloadsInputSmoke = $true }
@@ -772,6 +774,60 @@ try {
             }
             if ($script:automationProcess.ExitCode -ne 0) { throw "Dashboard exited with code $($script:automationProcess.ExitCode)." }
             Wait-Bridge $script:automationProcess.Id $false
+        }
+        if ($DashboardScreenSmoke) {
+            Invoke-NodeAction (Find-Node ('Nav' + $DashboardScreenSmoke) $mainRoot) $mainRoot 'Invoke' | Out-Null
+            if ($DashboardScreenSmoke -eq 'Live') {
+                Wait-Node ('LiveSession-' + $liveFixture[0].SessionId.ToString('N')) $mainRoot | Out-Null
+                Capture-Dashboard 'live-current'
+                Invoke-NodeAction (Find-Node ('LiveSession-' + $liveFixture[1].SessionId.ToString('N')) $mainRoot) $mainRoot 'Select' | Out-Null
+                Wait-Node 'InspectorLiveAction' $mainRoot 'Enabled' | Out-Null
+                Capture-Dashboard 'live-scheduled-selected'
+                Invoke-NodeAction (Find-Node 'LiveSourceYouTube' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-Node ('LiveSession-' + $liveFixture[0].SessionId.ToString('N')) $mainRoot 'NodeNotExposed' | Out-Null
+                Capture-Dashboard 'live-filter-empty'
+                Invoke-NodeAction (Find-Node 'LiveSourceAll' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Invoke-NodeAction (Find-Node 'LiveSearch' $mainRoot) $mainRoot 'SetValue' 'Studio' | Out-Null
+                Wait-Node ('LiveSession-' + $liveFixture[1].SessionId.ToString('N')) $mainRoot | Out-Null
+                Wait-Node ('LiveSession-' + $liveFixture[0].SessionId.ToString('N')) $mainRoot 'NodeNotExposed' | Out-Null
+                Capture-Dashboard 'live-search'
+                Invoke-NodeAction (Find-Node 'LiveSearch' $mainRoot) $mainRoot 'SetValue' '' | Out-Null
+                Invoke-NodeAction (Find-Node 'DashboardLiveRecent' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-Node 'InspectorLiveAnalyze' $mainRoot 'Enabled' | Out-Null
+                Capture-Dashboard 'live-recent'
+            }
+            elseif ($DashboardScreenSmoke -eq 'History') {
+                Invoke-NodeAction (Find-Node ('HistoryItem-' + $seededQueue[0].Id.ToString('N') + '-vod') $mainRoot) $mainRoot 'Select' | Out-Null
+                Capture-Dashboard 'history-selected'
+            }
+            elseif ($DashboardScreenSmoke -eq 'Batch') {
+                Wait-Node 'BatchPaste' $mainRoot 'Enabled' | Out-Null
+                $batchFixture = Join-Path $dataRoot 'screen-batch.csv'
+                $batchRows = @('url,quality') + @(1..10 | ForEach-Object { "https://example.test/watch/visual$_,1080" }) + @('https://example.test/watch/visual2,1080', 'not-a-url,1080')
+                $batchRows | Set-Content -LiteralPath $batchFixture -Encoding utf8
+                Invoke-NodeAction (Find-Node 'BatchFilePath' $mainRoot) $mainRoot 'SetValue' $batchFixture | Out-Null
+                Invoke-NodeAction (Find-Node 'BatchImport' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-Node 'BatchEntryTitle12' $mainRoot | Out-Null
+                Capture-Dashboard 'batch-import-parsed'
+                Invoke-NodeAction (Find-Node 'BatchAnalyze' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-Node 'BatchAnalyze' $mainRoot 'Enabled' | Out-Null
+                Capture-Dashboard 'batch-import-analyzed'
+            }
+            elseif ($DashboardScreenSmoke -eq 'Settings') {
+                Capture-Dashboard 'settings-general'
+                $settingsQuery = if ($Language -eq 'pl') { 'Pliki tymczasowe' } else { 'Temporary files' }
+                Invoke-NodeAction (Find-Node 'SettingsCategorySearch' $mainRoot) $mainRoot 'SetValue' $settingsQuery | Out-Null
+                Invoke-NodeAction (Find-Node 'SettingsCategoryDownloads' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Capture-Dashboard 'settings-search-downloads'
+            }
+            elseif ($DashboardScreenSmoke -eq 'Other') {
+                Wait-Node 'OtherPickBatchFile' $mainRoot 'Enabled' | Out-Null
+                Capture-Dashboard 'other-tools'
+            }
+            else { Capture-Dashboard ('screen-' + $DashboardScreenSmoke.ToLowerInvariant()) }
+            Close-DashboardProcess
+            Write-Output "Targeted dashboard screen PASS: $DashboardScreenSmoke; profile: $dataRoot. This is not full native qualification."
+            return
         }
         if ($ClassicUiRecovery) {
             [void](Find-Node 'NavDownloads' $mainRoot)

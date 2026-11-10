@@ -36,6 +36,15 @@ public sealed class SettingsDashboardPresentationTests
                 host.Show(view, 1853, 900); view.Dock = DockStyle.None; host.ProcessPendingWork();
                 var search = Find<TextBox>(view, "SettingsCategorySearch");
                 Assert.True(DashboardVisual.TextWidth(search, search.Placeholder) + 20 <= search.Width);
+                search.Text = services.Localization["Settings.TemporaryDirectory"];
+                Assert.True(Find<Button>(view, "SettingsCategoryDownloads").Visible);
+                Assert.False(Find<Button>(view, "SettingsCategoryLive").Visible);
+                search.Text = "no matching option 7cf312";
+                Assert.False(Find<Button>(view, "SettingsCategoryDownloads").Visible);
+                Assert.True(Find<Label>(view, "SettingsSearchEmpty").Visible);
+                search.Text = "";
+                Assert.True(Find<Button>(view, "SettingsCategoryLive").Visible);
+                Assert.False(Find<Label>(view, "SettingsSearchEmpty").Visible);
                 Find<Button>(view, "SettingsCategoryPersonalization").PerformClick();
                 foreach (var width in new[] { 0, 40, 1853, 1600, 1853 }) { view.Width = width; host.ProcessPendingWork(); }
                 var first = Find<Button>(view, "AppearancePresetDefault");

@@ -51,6 +51,8 @@ internal sealed partial class BatchImportView : UserControl
         foreach (var value in Enum.GetValues<BatchFilter>()) filter.Items.Add(services.Localization["Batch.Filter." + value]); filter.SelectedIndex = 0;
         void Add(string key, Action action) { var button = new DashboardButton { Width = 160, Height = 38, Margin = new Padding(0, 0, 8, 8), AccessibleAutomationId = "Batch" + key }; AppUi.Secondary(button); button.Click += (_, _) => action(); toolbar.Controls.Add(button); buttons.Add(key, button); }
         Add("Browse", () => _ = RunAsync(BrowseAsync)); Add("Import", () => _ = RunAsync(ImportAsync));
+        Add("Paste", () => _ = RunAsync(async () => await ImportClipboardTextAsync(await Clipboard.GetTextAsync() ?? "")));
+        buttons["Paste"].Visible = false;
         Add("Examples", () => _ = RunAsync(ShowExamplesAsync));
         Add("Analyze", () => _ = RunAsync(AnalyzeAsync)); Add("Pause", () => _ = RunAsync(async () => { if (this.session is { } s) await services.Batch.SetPausedAsync(s, !s.Paused); }));
         Add("Cancel", () => { if (busy) operationCancellation?.Cancel(); else _ = RunAsync(services.Batch.CancelAsync); });
@@ -70,6 +72,7 @@ internal sealed partial class BatchImportView : UserControl
         AppTypography.RegisterLayout(body, () => { signature = ""; LayoutPage(); Render(); });
     }
     public event EventHandler? CloseRequested;
+    internal Task BrowseSourceAsync() => RunAsync(BrowseAsync);
     public Task ImportDroppedFilesAsync(IReadOnlyList<string> files) => RunAsync(async () =>
     {
         if (files.Count != 1) throw new InvalidDataException("Batch.Error.SingleFile");
@@ -148,6 +151,12 @@ internal sealed partial class BatchImportView : UserControl
             (PreferredVideoContainer)container.SelectedIndex, (int)workers.Value, OperationToken, OperationProgress());
         selection.Clear(); page = 0;
     }
+    internal async Task ImportClipboardTextAsync(string content)
+    {
+        session = await services.Batch.ImportTextAsync(content, QualityPreset.All[quality.SelectedIndex].Id,
+            (PreferredVideoContainer)container.SelectedIndex, (int)workers.Value, OperationToken, OperationProgress());
+        path.Text = ""; selection.Clear(); page = 0; signature = ""; Render();
+    }
     private Task AnalyzeAsync()
     {
         if (session is not { } s) return Task.CompletedTask;
@@ -168,7 +177,7 @@ internal sealed partial class BatchImportView : UserControl
     {
         if (disposed) return;
         RefreshDashboardCounters();
-        foreach (var (key, button) in buttons) button.Enabled = !busy && (session is not null || key is "Browse" or "Import" or "Examples" or "Close");
+        foreach (var (key, button) in buttons) button.Enabled = !busy && (session is not null || key is "Browse" or "Import" or "Paste" or "Examples" or "Close");
         buttons["Cancel"].Enabled = busy || services.Batch.IsAnalyzing;
         buttons["Close"].Enabled = true;
         buttons["Analyze"].Enabled &= !services.Batch.IsAnalyzing; buttons["Pause"].Enabled &= services.Batch.IsAnalyzing;

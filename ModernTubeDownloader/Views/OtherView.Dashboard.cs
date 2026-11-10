@@ -15,6 +15,8 @@ internal sealed partial class OtherView
     private readonly List<Button> quickButtons = [];
     private DashboardDropZone? importDropZone;
     private Label? importDropTitle, importDropHint;
+    private Button? importPickFile;
+    public event EventHandler? PickBatchFileRequested;
 
     public void SetDashboard(bool value)
     {
@@ -123,7 +125,11 @@ internal sealed partial class OtherView
                 importDropZone = new(); importDropTitle = AppUi.Heading("", 12); importDropHint = AppUi.Muted();
                 importDropTitle.TextAlign = importDropHint.TextAlign = ContentAlignment.MiddleCenter;
                 importDropHint.Multiline = true;
-                importDropZone.Controls.AddRange([importDropTitle, importDropHint]); card.Controls.Add(importDropZone);
+                importPickFile = new DashboardButton { AccessibleAutomationId = "OtherPickBatchFile" };
+                importPickFile.Click += (_, _) => PickBatchFileRequested?.Invoke(this, EventArgs.Empty);
+                foreach (var surface in new Control[] { importDropZone, importDropTitle, importDropHint })
+                    surface.Click += (_, _) => importPickFile.PerformClick();
+                importDropZone.Controls.AddRange([importDropTitle, importDropHint, importPickFile]); card.Controls.Add(importDropZone);
             }
             importDropZone.Visible = true;
             importDropZone.SetBounds(24, module.Description.Bottom + 16, card.Width - 48, AppTypography.TextHeight(110));
@@ -131,6 +137,11 @@ internal sealed partial class OtherView
             importDropHint!.Text = services.Localization["Dashboard.DropFormats"];
             importDropTitle.SetBounds(12, 20, importDropZone.Width - 24, AppTypography.TextHeight(28));
             importDropHint.SetBounds(12, importDropTitle.Bottom + 6, importDropZone.Width - 24, DashboardVisual.LabelHeight(importDropHint, importDropZone.Width - 24, 2));
+            importPickFile!.Text = services.Localization["Batch.Browse"]; DownloadsVisual.Button(importPickFile, true);
+            var pickWidth = Math.Min(importDropZone.Width - 24, DashboardVisual.ActionWidth(importPickFile, true));
+            importPickFile.SetBounds((importDropZone.Width - pickWidth) / 2, importDropHint.Bottom + 12, pickWidth, AppTypography.TextHeight(36));
+            DashboardVisual.Icon(importPickFile, AppIconKind.Folder);
+            importDropZone.Height = importPickFile.Bottom + 16;
             if (!moduleWorkflows.TryGetValue(card, out var workflow))
             {
                 workflow = new Panel(); DashboardVisual.Flat(workflow); AppUi.BindBackground(workflow, AppThemeTokens.SurfaceSecondary);

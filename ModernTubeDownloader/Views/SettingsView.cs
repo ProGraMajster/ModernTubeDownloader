@@ -13,7 +13,7 @@ using SkiaSharp;
 
 namespace ModernTubeDownloader.Views;
 
-internal sealed class SettingsView : UserControl
+internal sealed partial class SettingsView : UserControl
 {
     private readonly AppServices services;
     private readonly LocalizationService text;
@@ -54,7 +54,7 @@ internal sealed class SettingsView : UserControl
         dashboardHeadingIcon.Visible = value;
         if (!value) foreach (var button in categoryButtons.Values) foreach (var icon in button.Controls.OfType<AppVectorIcon>()) icon.Visible = false;
         if (!value) foreach (var icon in overviewIcons.Values) icon.Visible = false;
-        foreach (var button in categoryButtons.Values) button.Visible = !value || button.Text.Contains(categorySearch.Text.Trim(), StringComparison.CurrentCultureIgnoreCase);
+        FilterSettingsCategories();
         UpdateLayout();
     }
 
@@ -464,8 +464,16 @@ internal sealed class SettingsView : UserControl
             AppUi.Secondary(button); button.Click += (_, _) => ShowCategory(name); categories.Controls.Add(button); categoryButtons[name] = button;
         }
         AppUi.Input(categorySearch);
-        categorySearch.TextChanged += (_, _) => { foreach (var button in categoryButtons.Values) button.Visible = button.Text.Contains(categorySearch.Text.Trim(), StringComparison.CurrentCultureIgnoreCase); UpdateLayout(); };
-        AppUi.BindBackground(categories); Controls.AddRange([header, categories, scroll, categorySearch]);
+        categorySearch.TextChanged += (_, _) => { FilterSettingsCategories(); UpdateLayout(); };
+        categorySearch.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Enter || !dashboard) return;
+            var matches = categoryButtons.Where(pair => pair.Value.Visible).ToArray();
+            if (matches.Length != 1) return;
+            e.Handled = e.SuppressKeyPress = true; ShowCategory(matches[0].Key);
+        };
+        categoryEmpty.AccessibleAutomationId = "SettingsSearchEmpty";
+        AppUi.BindBackground(categories); Controls.AddRange([header, categories, scroll, categorySearch, categoryEmpty]);
         SizeChanged += ViewSizeChanged;
         scroll.SizeChanged += ScrollSizeChanged;
         services.Tools.Changed += ToolsChanged;
@@ -649,6 +657,9 @@ internal sealed class SettingsView : UserControl
             categories.SetBounds(24, (searchInline ? header.Bottom : categorySearch.Bottom) + 12, categoryWidth, categoryRows * (AppTypography.TextHeight(40) + 8));
             scroll.SetBounds(0, categories.Bottom + 14, ClientSize.Width, Math.Max(120, ClientSize.Height - categories.Bottom - 26));
         }
+        categoryEmpty.Visible = dashboard && !categoryButtons.Values.Any(button => button.Visible);
+        categoryEmpty.Text = text["Settings.NoMatches"];
+        categoryEmpty.Bounds = categoryEmpty.Visible ? categories.Bounds : System.Drawing.Rectangle.Empty;
         var contentWidth = dashboard ? scroll.DisplayRectangle.Width : scroll.ClientSize.Width;
         // Reparenting the shared page during a shell swap briefly gives the
         // viewport zero width. Wait for its real allocation before laying out cards.
@@ -1407,6 +1418,7 @@ internal sealed class SettingsView : UserControl
         pageSubtitle.Text = text["Settings.Subtitle"];
         foreach (var pair in localizedText)
             pair.Key.Text = text[pair.Value];
+        FilterSettingsCategories();
         applyingValues = true;
         try
         {

@@ -33,6 +33,9 @@ internal sealed partial class HistoryView
     private DashboardInspector? inspector;
     private FlowLayoutPanel? filters;
     private Button? export, previous, next;
+    private Button? firstPage, lastPage;
+    private NumericUpDown? jumpPage;
+    private bool updatingPageNumber;
     private Label? paging;
     private Panel? tableHeader;
     private ComboBox? dateRange;
@@ -65,6 +68,13 @@ internal sealed partial class HistoryView
             export = new DashboardButton { AccessibleAutomationId = "HistoryExport" }; AppUi.Primary(export); export.Click += async (_, _) => await ExportAsync();
             previous = new Button { Text = "‹", AccessibleAutomationId = "HistoryPrevious" }; next = new Button { Text = "›", AccessibleAutomationId = "HistoryNext" };
             AppUi.Secondary(previous); AppUi.Secondary(next); previous.Click += (_, _) => ChangePage(-1); next.Click += (_, _) => ChangePage(1);
+            firstPage = new DashboardButton { Text = "«", AccessibleAutomationId = "HistoryFirst" };
+            lastPage = new DashboardButton { Text = "»", AccessibleAutomationId = "HistoryLast" };
+            firstPage.Click += (_, _) => GoToPage(0); lastPage.Click += (_, _) => GoToPage(HistoryPage.Count(filtered.Length) - 1);
+            jumpPage = new NumericUpDown { Minimum = 1, Maximum = 1, Value = 1, AccessibleAutomationId = "HistoryJumpPage" };
+            AppUi.Input(jumpPage);
+            jumpPage.ValueChanged += (_, _) => { if (!updatingPageNumber) GoToPage((int)jumpPage.Value - 1); };
+            Controls.AddRange([firstPage, lastPage, jumpPage]);
             dateRange = new ComboBox { AccessibleAutomationId = "HistoryDateRange" }; AppUi.Input(dateRange);
             dateRange.Items.Add(services.Localization["Dashboard.AllDates"]); dateRange.Items.Add(services.Localization["Dashboard.Last7Days"]); dateRange.Items.Add(services.Localization["Dashboard.Last30Days"]); dateRange.SelectedIndex = 0;
             dateRange.SelectedIndexChanged += (_,_) => { days = dateRange.SelectedIndex switch { 1 => 7, 2 => 30, _ => 0 }; page = 0; InvalidateProjection(); }; Controls.Add(dateRange);
@@ -78,7 +88,7 @@ internal sealed partial class HistoryView
             searchIcon.Click += (_, _) => search.Select(); searchPanel.Controls.Add(searchIcon);
         }
         if (searchIcon is not null) searchIcon.Visible = value;
-        foreach (var control in new Control?[] { inspector, filters, export, previous, next, paging, tableHeader, dateRange })
+        foreach (var control in new Control?[] { inspector, filters, export, previous, next, paging, tableHeader, dateRange, firstPage, lastPage, jumpPage })
             if (control is not null) { control.Visible = value; if (!value) control.SetBounds(0, 0, 0, 0); }
         AppTypography.SetDashboardPresentation(this, value);
         pageSummary.AccessibleAutomationId = value ? "HistoryClassicPageSummary" : "HistoryPageSummary";
@@ -166,16 +176,28 @@ internal sealed partial class HistoryView
         if (inspector.Visible)
             inspector.SetBounds(inline ? list.Right + 12 : list.Left, inline ? tableTop : list.Bottom + line + 20, inline ? right : center, inline ? tableHeader.Height + height + line + 12 : AppTypography.TextHeight(380));
         else inspector.SetBounds(0, 0, 0, 0);
-        previous!.SetBounds(list.Right - 88, list.Bottom + 10, 34, line); next!.SetBounds(previous.Right + 10, previous.Top, 34, line);
-        paging!.SetBounds(list.Left + 12, previous.Top + 4, Math.Max(120, previous.Left - list.Left - 24), line);
-        var countFiltered = filtered.Length; var pages = Math.Max(1, (countFiltered + 39) / 40);
+        var pagerButtonWidth = AppTypography.TextHeight(32); var jumpWidth = AppTypography.TextHeight(76);
+        firstPage!.SetBounds(list.Right - pagerButtonWidth * 4 - jumpWidth - 40, list.Bottom + 10, pagerButtonWidth, line);
+        previous!.SetBounds(firstPage.Right + 8, firstPage.Top, pagerButtonWidth, line);
+        jumpPage!.SetBounds(previous.Right + 8, previous.Top, jumpWidth, line);
+        next!.SetBounds(jumpPage.Right + 8, previous.Top, pagerButtonWidth, line);
+        lastPage!.SetBounds(next.Right + 8, previous.Top, pagerButtonWidth, line);
+        paging!.SetBounds(list.Left + 12, previous.Top + 4, Math.Max(1, firstPage.Left - list.Left - 24), line);
+        var countFiltered = filtered.Length; var pages = HistoryPage.Count(countFiltered);
         var first = countFiltered == 0 ? 0 : page * 40 + 1; var last = Math.Min(countFiltered, (page + 1) * 40);
         paging.Text = $"{first}–{last} / {countFiltered}     ·     {page + 1} / {pages}"; previous.Enabled = page > 0; next.Enabled = page < pages - 1;
         paging.AccessibleName = text.Get("History.PageSummary", page + 1, pages, countFiltered, total);
+        firstPage.Enabled = previous.Enabled; lastPage.Enabled = next.Enabled;
+        firstPage.AccessibleName = text["History.FirstPage"]; lastPage.AccessibleName = text["History.LastPage"];
+        jumpPage.AccessibleName = text["History.GoToPage"]; jumpPage.Enabled = pages > 1;
+        updatingPageNumber = true;
+        try { jumpPage.Maximum = pages; jumpPage.Value = page + 1; }
+        finally { updatingPageNumber = false; }
         previous.AccessibleName = text["Batch.Previous"]; next.AccessibleName = text["Batch.Next"]; dashboardTips.SetToolTip(previous, previous.AccessibleName); dashboardTips.SetToolTip(next, next.AccessibleName);
         emptyIcon.SetBounds((center - 44) / 2, Math.Max(20, height / 2 - 80), 44, 44);
         emptyTitle.SetBounds(20, emptyIcon.Bottom + 8, center - 40, AppTypography.TextHeight(40)); emptyBody.SetBounds(20, emptyTitle.Bottom + 8, center - 40, AppTypography.TextHeight(60));
         DashboardVisual.Button(previous); DashboardVisual.Button(next!);
+        DashboardVisual.Button(firstPage); DashboardVisual.Button(lastPage);
         ResizeCards();
         var entry = entries.FirstOrDefault(e => e.QueueItemId == selectedId && e.FinalPath == selectedPath);
         if (entry != inspectedEntry)

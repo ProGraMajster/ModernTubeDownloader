@@ -118,6 +118,7 @@ public sealed class MainForm : Form
         liveView.SupportedSourcesRequested += OpenSupportedSources;
         otherView.NavigateRequested += (_, page) => Navigate(page);
         batchView = new BatchImportView(services) { Visible = false };
+        otherView.PickBatchFileRequested += async (_, _) => { Navigate(AppPageId.Batch); await batchView.BrowseSourceAsync(); };
 #if DEBUG
         if (automation is not null) batchView.RegisterDialog = automation.RegisterWindow;
 #endif

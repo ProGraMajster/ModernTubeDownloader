@@ -7,7 +7,7 @@ namespace ModernTubeDownloader.Views;
 
 internal sealed partial class BatchImportView
 {
-    private static readonly string[] SourceActions = ["Browse", "Import", "Examples"];
+    private static readonly string[] SourceActions = ["Browse", "Paste", "Import", "Examples"];
     private static readonly string[] PrimaryActions = ["Add", "Analyze", "Pause", "Cancel", "Export"];
     private static readonly string[] SelectionActions = ["SelectPage", "ClearSelection", "Apply", "Remove"];
     private bool dashboard, dashboardOptionsExpanded;
@@ -33,6 +33,7 @@ internal sealed partial class BatchImportView
         if (dashboard == value) return;
         if (value) { restoreDashboardTypography = AppTypography.CaptureRecipes(this); restoreDashboardLabels = DashboardVisual.CaptureLabels(this); }
         dashboard = value;
+        buttons["Paste"].Visible = value;
         range.ResponsiveLayout = value;
         AppTypography.SetDashboardPresentation(this, value);
         if (value && sourceCard is null) CreateDashboardChrome();
@@ -103,6 +104,9 @@ internal sealed partial class BatchImportView
             AppTypography.Bind(label, 9); dashboardHeadings = [.. dashboardHeadings, label]; dashboardHeader.Controls.Add(label);
         }
         body.Controls.AddRange([sourceTabs, sourceCard, resultCard, dashboardOptions, dashboardOptionsButton, dashboardHeader, summaryCard]);
+        // Labels were composed while their cards were detached. Apply their existing
+        // typography recipes after attachment so the first frame uses Modern sizes.
+        AppTypography.CaptureRecipes(body).Invoke();
         range.ModeChanged += (_, _) => { if (dashboard && dashboardOptionsExpanded) LayoutPage(); };
     }
 
@@ -232,7 +236,7 @@ internal sealed partial class BatchImportView
         {
             DashboardVisual.Button(button, button == buttons["Add"] || button == buttons["Browse"]);
             var icon = button == buttons["Add"] ? AppIconKind.Download : button == buttons["Analyze"] ? AppIconKind.Search :
-                button == buttons["Browse"] ? AppIconKind.Folder : (AppIconKind?)null;
+                button == buttons["Browse"] ? AppIconKind.Folder : button == buttons["Paste"] ? AppIconKind.Clipboard : (AppIconKind?)null;
             var actionWidth = Math.Min(width, DashboardVisual.ActionWidth(button, icon is not null));
             if (x > left && x + actionWidth > left + width) { x = left; y += line + 8; }
             button.SetBounds(x, y, actionWidth, line); button.Margin = new Padding(0, 0, 8, 8);

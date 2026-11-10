@@ -40,6 +40,7 @@ internal sealed partial class LiveView : UserControl
     private Guid? editingId;
     private int refreshPending;
     private bool disposed;
+    private bool analysisPresented;
 #if DEBUG
     internal Func<Form, IDisposable?>? RegisterDetailsForAutomation { get; set; }
 #endif
@@ -64,10 +65,12 @@ internal sealed partial class LiveView : UserControl
         start.Click += (_, _) => StartOrSchedule();
         vod.Click += (_, _) => OpenDownloadsRequested?.Invoke(this, url.Text);
         SizeChanged += (_, _) => LayoutPage();
+        VisibleChanged += (_, _) => { if (Visible && !disposed) RefreshSessions(); };
+        ParentChanged += (_, _) => { if (Parent is not null && Visible && !disposed) RefreshSessions(); };
         scroll.SizeChanged += (_, _) => LayoutPage();
         services.Live.Changed += StateChanged; text.LanguageChanged += LanguageChanged;
         clock = new System.Threading.Timer(_ => QueueRefresh(), null, 1000, 1000);
-        ApplyText(); RefreshSessions(); LayoutPage();
+        ApplyText(); LayoutPage();
         AppTypography.RegisterLayout(this, LayoutPage);
     }
 
@@ -76,6 +79,7 @@ internal sealed partial class LiveView : UserControl
     { url.Text = sourceUrl; await AnalyzeAsync(sourceUrl); }
     public void Present(LiveNavigationRequest request)
     {
+        analysisPresented = true;
         dashboardSubmitted = false;
         url.Text = request.SourceUrl; metadata = request.Metadata; availability = request.Kind;
         editingId = null; PopulateAnalysis();
@@ -83,6 +87,7 @@ internal sealed partial class LiveView : UserControl
 
     private async Task AnalyzeAsync(string sourceUrl)
     {
+        analysisPresented = true;
         dashboardSubmitted = false;
         analysisCancellation?.Cancel(); analysisCancellation?.Dispose();
         analysisCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
@@ -90,6 +95,7 @@ internal sealed partial class LiveView : UserControl
         editingId = null; metadata = null; availability = MediaAvailabilityKind.Ready;
         start.Visible = vod.Visible = quality.Visible = container.Visible = fromNow.Visible = fromStart.Visible = false;
         analyze.Enabled = false; title.Text = text["Downloads.AnalyzingTitle"]; message.Text = string.Empty;
+        LayoutPage();
         try
         {
             await services.Tools.EnsureAnalysisReadyAsync(current.Token);
@@ -160,6 +166,7 @@ internal sealed partial class LiveView : UserControl
 
     private void Edit(LiveSession session)
     {
+        analysisPresented = true;
         dashboardSubmitted = false;
         editingId = session.Id; availability = MediaAvailabilityKind.Upcoming; metadata = null;
         url.Text = session.SourceUrl; PopulateAnalysis(); editingId = session.Id;
@@ -176,34 +183,62 @@ internal sealed partial class LiveView : UserControl
     private void QueueRefresh()
     {
         if (disposed || Interlocked.Exchange(ref refreshPending, 1) != 0) return;
-        Application.RunOnUIThread(() => { Interlocked.Exchange(ref refreshPending, 0); if (!disposed) RefreshSessions(); });
+        Application.RunOnUIThread(() => { Interlocked.Exchange(ref refreshPending, 0); if (!disposed && Visible) RefreshSessions(); });
     }
     private void RefreshSessions()
     {
-        UiCrashDiagnostics.VerifyUiThread("live.refresh");
-        var sessions = services.Live.Snapshot().OrderByDescending(item => item.CreatedAt).ToArray();
-        statistics.Text = text.Get("Live.Statistics",
-            sessions.Count(item => item.State is LiveSessionState.Starting or LiveSessionState.Recording or LiveSessionState.Finalizing),
-            sessions.Count(item => item.State is LiveSessionState.WaitingForLive or LiveSessionState.Pending),
-            sessions.Count(item => item.State == LiveSessionState.Reconnecting));
-        foreach (var missing in cards.Keys.Except(sessions.Select(item => item.Id)).ToArray())
-        { cards[missing].Dispose(); cards.Remove(missing); }
-        foreach (var session in sessions)
+        if (refreshingSessions || disposed) return;
+        refreshingSessions = true;
+        try
         {
-            if (!cards.TryGetValue(session.Id, out var card))
+            UiCrashDiagnostics.VerifyUiThread("live.refresh");
+            var snapshot = services.Live.Snapshot();
+            var sessions = snapshot.OrderByDescending(item => item.CreatedAt).ToArray();
+            statistics.Text = text.Get("Live.Statistics",
+                sessions.Count(item => item.State is LiveSessionState.Starting or LiveSessionState.Recording or LiveSessionState.Finalizing),
+                sessions.Count(item => item.State is LiveSessionState.WaitingForLive or LiveSessionState.Pending),
+                sessions.Count(item => item.State == LiveSessionState.Reconnecting));
+            if (dashboard)
             {
-                card = new LiveSessionCard(services, Edit); card.SelectionRequested += (_, value) => SelectSession(value); cards.Add(session.Id, card);
-                card.SetDashboard(dashboard);
-#if DEBUG
-                card.RegisterDetailsForAutomation = RegisterDetailsForAutomation;
-#endif
+                liveProjection = LiveDashboardPage.Create(snapshot, showRecent, liveSource, liveSearch?.Text ?? "",
+                    (LiveDashboardSort)(liveSort?.SelectedIndex ?? 0), livePage, text.Culture);
+                livePage = liveProjection.Index;
+                sessions = liveProjection.Items;
             }
-            var section = sections[session.IsActive || session.State == LiveSessionState.Pending ? 0
-                : session.State == LiveSessionState.WaitingForLive ? 1 : 2];
-            if (card.Parent != section.List) { card.Parent?.Controls.Remove(card); section.List.Controls.Add(card); }
-            card.UpdateSession(session);
+            foreach (var section in sections) section.List.SuspendLayout();
+            try
+            {
+                foreach (var missing in cards.Keys.Except(sessions.Select(item => item.Id)).ToArray())
+                {
+                    var removed = cards[missing];
+                    removed.Parent?.Controls.Remove(removed); removed.Dispose(); cards.Remove(missing);
+                }
+                foreach (var session in sessions)
+                {
+                    if (!cards.TryGetValue(session.Id, out var card))
+                    {
+                        card = new LiveSessionCard(services, Edit); card.SelectionRequested += (_, value) => SelectSession(value); cards.Add(session.Id, card);
+                        card.SetDashboard(dashboard);
+#if DEBUG
+                        card.RegisterDetailsForAutomation = RegisterDetailsForAutomation;
+#endif
+                    }
+                    var section = sections[dashboard ? showRecent ? 2 : 0 : session.IsActive || session.State == LiveSessionState.Pending ? 0
+                        : session.State == LiveSessionState.WaitingForLive ? 1 : 2];
+                    if (card.Parent != section.List) { card.Parent?.Controls.Remove(card); section.List.Controls.Add(card); }
+                    card.UpdateSession(session);
+                }
+                foreach (var section in sections)
+                {
+                    var index = 0;
+                    foreach (var session in sessions)
+                        if (cards[session.Id].Parent == section.List) section.List.Controls.SetChildIndex(cards[session.Id], index++);
+                }
+            }
+            finally { foreach (var section in sections) section.List.ResumeLayout(true); }
+            LayoutPage();
         }
-        LayoutPage();
+        finally { refreshingSessions = false; }
     }
     private void LayoutPage()
     {
@@ -314,6 +349,7 @@ internal sealed partial class LiveSessionCard : Panel
     {
         current = session; var text = services.Localization;
         AccessibleAutomationId = $"LiveSession-{session.Id:N}";
+        AccessibleName = session.Title;
         title.Text = session.Title; state.Text = text[$"Live.State.{session.State}"];
         state.AccessibleAutomationId = $"LiveState-{session.Id:N}";
         var countdown = session.State == LiveSessionState.WaitingForLive ? session.NextCheckAt : session.RetryAt;

@@ -8,7 +8,7 @@ using ModernTubeDownloader.Theming;
 namespace ModernTubeDownloader.Views;
 
 /// <summary>Selected-item presentation. All writes go through the existing queue under its lock.</summary>
-internal sealed class DashboardInspector : AppScrollPanel
+internal sealed partial class DashboardInspector : AppScrollPanel
 {
     private readonly AppServices services;
     public event EventHandler<string>? RetryRequested;
@@ -67,6 +67,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         audioValue.TabIndex = 3; folderValue.TabIndex = 4; folderOpen.TabIndex = 5;
         range.TabIndex = 6; advanced.TabIndex = 7; apply.TabIndex = 8;
         Controls.AddRange([details, options, image, title, author, playlistContext, link, sourceGlyph, copy, facts, fields, editor, openFile, openFolder, retry, emptyIcon]);
+        CreateLiveActions();
         title.AccessibleAutomationId = "InspectorTitle"; link.AccessibleAutomationId = "InspectorSource";
         AppTypography.Bind(playlistContext, 9.5f); AppUi.BindForeground(playlistContext, AppThemeTokens.TextSecondary);
         BindFullValue(playlistContext, () => playlistContext.Text);
@@ -107,6 +108,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     public void Clear()
     {
+        liveSessionId = null;
         historyMode = false; hasSelection = false; queueId = null; source = finalPath = folderPath = null; thumbnailUrl = null; ThumbnailImageBinding.For(image).Clear();
         imageDuration.Text = "";
         title.Text = services.Localization["Dashboard.SelectItem"]; author.Text = link.Text = factText = ""; copy.Enabled = openFile.Enabled = openFolder.Enabled = false;
@@ -114,6 +116,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     public void ShowQueue(DownloadQueueItem item)
     {
+        liveSessionId = null;
         historyMode = false;
         fields.SingleLineValues = true; // Full values remain in each native tooltip.
         fields.InsetValues = true;
@@ -161,6 +164,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     public void ShowHistory(DownloadHistoryEntry entry)
     {
+        liveSessionId = null;
         historyMode = true;
         fields.SingleLineValues = false;
         fields.InsetValues = false;
@@ -180,6 +184,7 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     public void ShowLive(LiveSession session)
     {
+        liveSessionId = session.Id;
         historyMode = false;
         fields.SingleLineValues = false;
         fields.InsetValues = false;
@@ -191,9 +196,14 @@ internal sealed class DashboardInspector : AppScrollPanel
             t["Quality." + session.QualityPresetId] + " · MKV\n\n" + session.RecordedDuration.ToString(@"hh\:mm\:ss") + " · " + DashboardStyle.Bytes(session.BytesWritten) +
             "\n\n" + t.Get("Live.PartCount", session.Parts.Count) + "\n\n" + t["Live.ReconnectCount"] + ": " + session.ResumeCount +
             (session.FailureMessageKey is { } error ? "\n\n" + t[error] : "");
-        fields.SetRows((t["Dashboard.Source"], SourcePresentation.Host(session.SourceUrl)), (t["Downloads.Quality"], t["Quality." + session.QualityPresetId]),
+        fields.SetRows((t["Dashboard.Format"], session.Container.ToString().ToUpperInvariant()), (t["Downloads.Quality"], t["Quality." + session.QualityPresetId]),
+            (t["Live.StartMode"], t[session.StartPolicy == LiveStartPolicy.FromStart ? "Live.FromStart" : "Live.FromNow"]),
+            (t["Live.ScheduledLabel"], session.ScheduledStartAt?.ToLocalTime().ToString("g", t.Culture)),
             (t["Dashboard.Status"], t["Live.State." + session.State]), (t["Dashboard.Duration"], session.RecordedDuration.ToString(@"hh\:mm\:ss")),
-            (t["Dashboard.Size"], DashboardStyle.Bytes(session.BytesWritten)), (t["Live.ReconnectCount"], session.ResumeCount.ToString()), (t["Dashboard.Output"], session.Parts.LastOrDefault()));
+            (t["Dashboard.Size"], DashboardStyle.Bytes(session.BytesWritten)), (t["Live.Parts"], session.Parts.Count.ToString(t.Culture)),
+            (t["Live.ReconnectCount"], session.ResumeCount.ToString(t.Culture)), (t["Dashboard.Output"], session.Parts.LastOrDefault() ?? session.WorkspacePath),
+            (t["Dashboard.Message"], session.FailureMessageKey is { } failure ? t[failure] : session.RecoveryWarningKey is { } recovery ? t[recovery] : null));
+        PresentLiveActions(session);
         RefreshText(); LayoutInspector();
     }
     private void Present(string name, string channel, string url, string? thumbnail, string? path)
@@ -297,11 +307,12 @@ internal sealed class DashboardInspector : AppScrollPanel
     }
     private void ArrangeInspector()
     {
+        HideInactiveLiveActions();
         foreach (var control in new Control[] { image, author, link, copy, facts, openFile, openFolder }) control.Visible = hasSelection;
         // DisplayRectangle is the actual viewport after the native scroll rail.
         var viewport = DisplayRectangle; var o = viewport.Location; var width = Math.Max(0, viewport.Width - 24); var line = AppTypography.TextHeight(34);
         retry.Visible = historyMode && hasSelection;
-        image.RoundedPreview = queueId is not null;
+        image.RoundedPreview = true;
         title.EnableKeyboardValues(queueId is not null); link.EnableKeyboardValues(queueId is not null);
         playlistContext.Visible = hasSelection && queueId is not null && !string.IsNullOrWhiteSpace(playlistContext.Text);
         playlistContext.EnableKeyboardValues(playlistContext.Visible);
@@ -383,6 +394,7 @@ internal sealed class DashboardInspector : AppScrollPanel
         if (!editing) editor.SetBounds(0, 0, 0, 0); else fields.SetBounds(0, 0, 0, 0);
         if (!historyMode) retry.SetBounds(0, 0, 0, 0);
         if (!options.Visible) options.SetBounds(0, 0, 0, 0);
+        LayoutLiveActions(openFolder.Bottom + 8, 12 + o.X, width, line);
     }
     private void ArrangeQueueEditor(int width, System.Drawing.Point origin, int actionHeight)
     {

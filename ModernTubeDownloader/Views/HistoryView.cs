@@ -205,8 +205,11 @@ internal sealed partial class HistoryView : UserControl
     }
 
     private void ChangePage(int delta)
+        => GoToPage(page + delta);
+
+    private void GoToPage(int requested)
     {
-        var target = HistoryPage.Clamp(page + delta, filtered.Length);
+        var target = HistoryPage.Clamp(requested, filtered.Length);
         if (target == page) return;
         page = target;
         RenderPage();
@@ -218,6 +221,11 @@ internal sealed partial class HistoryView : UserControl
         using var timing = PerformanceDiagnostics.Measure("history.page.render");
         UiCrashDiagnostics.VerifyUiThread("history.page");
         var entries = filtered.Skip(page * HistoryPage.Size).Take(HistoryPage.Size).ToArray();
+        if (dashboard)
+        {
+            var selected = entries.FirstOrDefault(entry => entry.QueueItemId == selectedId && entry.FinalPath == selectedPath) ?? entries.FirstOrDefault();
+            selectedId = selected?.QueueItemId; selectedPath = selected?.FinalPath;
+        }
         list.SuspendLayout();
         try
         {

@@ -32,12 +32,18 @@ internal sealed partial class LiveView
             sourceLive.Click += (_, _) => SupportedSourcesRequested?.Invoke(this, EventArgs.Empty);
             scroll.Controls.AddRange([dashboardList, pasteLive, sourceLive]);
             activeTab = new DashboardButton { AccessibleAutomationId = "DashboardLiveActive" }; recentTab = new DashboardButton { AccessibleAutomationId = "DashboardLiveRecent" };
-            activeTab.Click += (_, _) => { showRecent = false; LayoutPage(); }; recentTab.Click += (_, _) => { showRecent = true; LayoutPage(); };
+            activeTab.Click += (_, _) => { showRecent = false; ResetLivePage(); }; recentTab.Click += (_, _) => { showRecent = true; ResetLivePage(); };
             scroll.Controls.AddRange([inspector, widgets, activeTab, recentTab]);
+            CreateLiveNavigation();
+            scroll.Controls.Remove(sourceLive); liveSources!.Controls.Add(sourceLive);
+            sourceLive.Margin = new Padding(0, 0, 8, 6);
+            inspector.LiveEditRequested += (_, session) => Edit(session);
+            inspector.LiveAnalyzeRequested += async (_, session) => await AcceptUrlAsync(session.SourceUrl);
         }
         foreach (var control in new Control?[] { inspector, widgets, activeTab, recentTab, dashboardList, pasteLive, sourceLive, liveLink })
             if (control is not null) { control.Visible = value; if (!value) control.SetBounds(0, 0, 0, 0); }
         if (!value) title.Visible = message.Visible = true;
+        SetLiveNavigationVisible(value);
         foreach (var section in sections) { section.Panel.Visible = true; section.Heading.Visible = !value; AppTypography.Bind(section.Heading, value ? 11 : 16, FontStyle.Bold); }
         foreach (var card in cards.Values) card.SetDashboard(value);
         RefreshSessions(); LayoutPage();
@@ -56,34 +62,35 @@ internal sealed partial class LiveView
         var right = inline ? Math.Clamp(width * 25 / 100, 300, AppTypography.TextHeight(330)) : 0;
         var center = inline ? width - right - 12 : width;
         heading.Visible = statistics.Visible = false;
-        var expanded = !dashboardSubmitted && (metadata is not null || availability == MediaAvailabilityKind.Upcoming || !analyze.Enabled);
+        var expanded = !dashboardSubmitted && analysisPresented;
         if (dashboardSubmitted) foreach (var control in new Control[] { quality, container, fromNow, fromStart, start, vod }) control.Visible = false;
         analysis.SetBounds(18 + origin.X, 26 + origin.Y, width, expanded ? AppTypography.TextHeight(start.Visible ? 332 : 218) : line + 8);
         AppUi.BindBackground(analysis); DashboardVisual.Flat(analysis);
-        url.SetBounds(0, 0, Math.Max(180, center - AppTypography.TextHeight(272) - 24), line);
+        var stackedInput = center < AppTypography.TextHeight(530);
+        url.SetBounds(0, 0, stackedInput ? width : Math.Max(1, center - AppTypography.TextHeight(272) - 24), line);
         DashboardVisual.SetPadding(url, new Padding(42, 0, 12, 0));
         liveLink!.SetBounds(12, (line - 20) / 2, 20, 20); liveLink.BringToFront();
-        pasteLive!.Text = text["Dashboard.Paste"]; pasteLive.SetBounds(analysis.Left + url.Right + 12, analysis.Top, AppTypography.TextHeight(92), line);
-        analyze.SetBounds(url.Right + AppTypography.TextHeight(92) + 24, 0, AppTypography.TextHeight(180), line);
-        sourceLive!.Text = text["Sources.Link"]; sourceLive.SetBounds(analysis.Left, analysis.Bottom + 10, AppTypography.TextHeight(240), AppTypography.TextHeight(36));
-        DashboardVisual.Button(pasteLive); DashboardVisual.Button(analyze, true); DashboardVisual.Button(sourceLive);
-        DashboardVisual.Icon(pasteLive, AppIconKind.Clipboard); DashboardVisual.Icon(analyze, AppIconKind.Search); DashboardVisual.Icon(sourceLive, AppIconKind.Link);
-        sourceLive.Width = DashboardVisual.ActionWidth(sourceLive, true);
+        pasteLive!.Text = text["Dashboard.Paste"]; pasteLive.SetBounds(analysis.Left + (stackedInput ? 0 : url.Right + 12), analysis.Top + (stackedInput ? line + 8 : 0), AppTypography.TextHeight(92), line);
+        analyze.SetBounds(stackedInput ? pasteLive.Width + 12 : url.Right + AppTypography.TextHeight(92) + 24,
+            stackedInput ? line + 8 : 0, Math.Min(AppTypography.TextHeight(180), width - pasteLive.Width - 12), line);
+        DownloadsVisual.Button(pasteLive); DownloadsVisual.Button(analyze, true);
+        DashboardVisual.Icon(pasteLive, AppIconKind.Clipboard); DashboardVisual.Icon(analyze, AppIconKind.Search);
         title.Visible = message.Visible = expanded;
-        title.SetBounds(0, line + 18, width - 24, AppTypography.TextHeight(30)); message.SetBounds(0, title.Bottom + 4, width, AppTypography.TextHeight(42));
+        title.SetBounds(0, analyze.Bottom + 18, width - 24, AppTypography.TextHeight(30));
+        message.SetBounds(0, title.Bottom + 4, width, DashboardVisual.LabelHeight(message, width, 5));
         quality.SetBounds(0, message.Bottom + 8, Math.Min(260, width / 2), AppTypography.TextHeight(36)); container.SetBounds(quality.Right + 12, quality.Top, 120, quality.Height);
         fromNow.SetBounds(0, quality.Bottom + 8, width, AppTypography.TextHeight(30)); fromStart.SetBounds(0, fromNow.Bottom + 4, width, fromNow.Height);
         start.SetBounds(0, fromStart.Bottom + 8, Math.Min(width, AppTypography.TextHeight(280)), line); vod.SetBounds(0, message.Bottom + 10, Math.Min(width, AppTypography.TextHeight(300)), line);
-        analysis.Height = expanded ? (start.Visible ? start.Bottom : vod.Visible ? vod.Bottom : message.Bottom) + 10 : line + 8;
-        sourceLive!.Top = analysis.Bottom + 12;
-        var top = sourceLive.Bottom + 18;
-        activeTab!.SetBounds(30 + origin.X, top + 8, Math.Min(center / 2 - 6, AppTypography.TextHeight(300)), line);
-        recentTab!.SetBounds(activeTab.Right + 10, activeTab.Top, Math.Min(center / 2 - 6, AppTypography.TextHeight(200)), line);
-        activeTab.Text = services.Localization["Dashboard.ActiveScheduled"]; recentTab.Text = services.Localization["Dashboard.Completed"];
-        activeTab.Text += $" ({services.Live.Snapshot().Count(s => s.IsActive || s.State is LiveSessionState.Pending or LiveSessionState.WaitingForLive)})";
-        recentTab.Text += $" ({services.Live.Snapshot().Count(s => !s.IsActive && s.State is not LiveSessionState.Pending and not LiveSessionState.WaitingForLive)})";
+        analysis.Height = expanded ? (start.Visible ? start.Bottom : vod.Visible ? vod.Bottom : message.Bottom) + 10 : analyze.Bottom + 8;
+        var top = LayoutLiveSources(analysis.Left, analysis.Bottom + 12, width) + 12;
+        activeTab!.Text = services.Localization["Dashboard.ActiveScheduled"] + $" ({liveProjection.ActiveCount})";
+        recentTab!.Text = services.Localization["Live.RecentTab"] + $" ({liveProjection.RecentCount})";
         DashboardVisual.Tab(activeTab, !showRecent); DashboardVisual.Tab(recentTab, showRecent);
-        var listTop = activeTab.Bottom + 12; var next = listTop;
+        var activeWidth = DashboardVisual.ActionWidth(activeTab); var recentWidth = DashboardVisual.ActionWidth(recentTab);
+        var stackedTabs = activeWidth + recentWidth + 10 > center - 24;
+        activeTab.SetBounds(30 + origin.X, top + 8, Math.Min(center - 24, activeWidth), line);
+        recentTab.SetBounds(stackedTabs ? activeTab.Left : activeTab.Right + 10, stackedTabs ? activeTab.Bottom + 4 : activeTab.Top, Math.Min(center - 24, recentWidth), line);
+        var listTop = LayoutLiveTools(30 + origin.X, recentTab.Bottom + 10, center - 24) + 12; var next = listTop;
         for (var i = 0; i < sections.Length; i++)
         {
             var section = sections[i]; section.Panel.Visible = showRecent ? i == 2 : i < 2;
@@ -101,8 +108,10 @@ internal sealed partial class LiveView
         }
         // The list owns only its rows. A stacked inspector must not enlarge the
         // list background or reserve a full details form when nothing is selected.
-        var listBottom = inline ? Math.Max(next, ClientSize.Height - AppTypography.TextHeight(164)) : next;
+        var pagingBottom = LayoutLivePaging(30 + origin.X, next, center - 24) + 12;
+        var listBottom = inline ? Math.Max(pagingBottom, ClientSize.Height - AppTypography.TextHeight(164)) : pagingBottom;
         dashboardList!.SetBounds(18 + origin.X, top, center, inline ? Math.Max(AppTypography.TextHeight(240), listBottom - top) : listBottom - top);
+        DownloadsVisual.Card(dashboardList);
         dashboardList.SendToBack();
         next = dashboardList.Bottom + 12;
         inspector.Visible = inspectorEnabled;
@@ -110,9 +119,7 @@ internal sealed partial class LiveView
         if (inspectorEnabled)
             inspector.SetBounds(inline ? 18 + origin.X + center + 12 : 18 + origin.X, inline ? top : next, inline ? right : width, inspectorHeight);
         else inspector.SetBounds(0, 0, 0, 0);
-        var visibleSessions = services.Live.Snapshot().Where(s => showRecent
-            ? !s.IsActive && s.State is not LiveSessionState.Pending and not LiveSessionState.WaitingForLive
-            : s.IsActive || s.State is LiveSessionState.Pending or LiveSessionState.WaitingForLive).ToArray();
+        var visibleSessions = liveProjection.Items;
         var selected = visibleSessions.FirstOrDefault(s => s.Id == selectedSession) ?? visibleSessions.FirstOrDefault();
         if (selected is not null) SelectSession(selected);
         else
@@ -141,6 +148,7 @@ internal sealed partial class LiveSessionCard
     public void SetDashboard(bool value)
     {
         dashboard = value;
+        TabStop = value; SetControlBehavior(ControlBehaviors.Selectable, value);
         AppTypography.Bind(title, value ? DashboardVisual.ItemTitle : 13, FontStyle.Bold);
         AppTypography.Bind(facts, value ? 9.25f : 10.5f); AppTypography.Bind(state, value ? 9.5f : 10.5f);
         AppTypography.SetDashboardPresentation(this, value);
@@ -148,6 +156,7 @@ internal sealed partial class LiveSessionCard
         {
             DashboardVisual.RestoreTree(this); AppUi.Primary(primary); AppUi.BindForeground(state, AppThemeTokens.TextSecondary);
             title.AutoEllipsis = false; title.Multiline = false;
+            state.AutoEllipsis = false;
             if (dashboardChannel is not null) dashboardChannel.Visible = dashboardTiming!.Visible = dashboardState!.Visible = false;
             if (dashboardThumbnail is not null) dashboardThumbnail.Visible = false;
             if (current is not null) UpdateSession(current);
@@ -168,6 +177,7 @@ internal sealed partial class LiveSessionCard
         }
         dashboardChannel.Visible = dashboardTiming!.Visible = dashboardState!.Visible = true;
         var line = AppTypography.TextHeight(24); var narrow = Width < AppTypography.TextHeight(860);
+        var stackActions = Width < AppTypography.TextHeight(620);
         var imageWidth = AppearancePresentation.ImageWidth(AppearancePresentation.Current.ModernDashboardShell.Thumbnail, 144);
         thumbnail.Visible = imageWidth > 0 && thumbnail.Image is not null; thumbnail.SetBounds(12, 12, imageWidth, imageWidth * 9 / 16);
         dashboardThumbnail!.Visible = imageWidth > 0 && thumbnail.Image is null; dashboardThumbnail.Bounds = thumbnail.Bounds;
@@ -176,7 +186,7 @@ internal sealed partial class LiveSessionCard
         foreach (var button in new[] { primary, secondary, details, folder }) DashboardVisual.Button(button, button == primary && current?.CanResume == true);
         var actionWidth = Math.Max(AppTypography.TextHeight(146), new[] { primary, secondary, details, folder }.Where(b => b.Visible).Select(b => DashboardVisual.ActionWidth(b, true)).DefaultIfEmpty(0).Max());
         var statusWidth = narrow ? 0 : AppTypography.TextHeight(180);
-        var textWidth = Math.Max(140, Width - left - actionWidth - statusWidth - 36);
+        var textWidth = Math.Max(1, Width - left - (stackActions ? 12 : actionWidth + statusWidth + 36));
         DashboardVisual.Flat(this, !selected);
         AppUi.BindBackground(this, selected ? AppThemeTokens.RowSelected : AppThemeTokens.Surface);
         Style.Border.Width = selected ? 1 : 0; Style.Border.Radius = selected ? 6 : 0; Style.Border.Color = AppUi.GetColor(AppThemeTokens.Accent).WithAlpha(130);
@@ -194,8 +204,8 @@ internal sealed partial class LiveSessionCard
             var measurements = new List<string>();
             if (appearance.ShowElapsed) measurements.Add(current.RecordedDuration.ToString(@"hh\:mm\:ss"));
             if (appearance.ShowBytes) measurements.Add(DashboardStyle.Bytes(current.BytesWritten));
-            if (appearance.ShowParts) measurements.Add(t.Get("Live.PartCount", current.Parts.Count));
-            if (appearance.ShowReconnectCount) measurements.Add(t["Live.ReconnectCount"] + ": " + current.ResumeCount);
+            if (appearance.ShowParts && current.Parts.Count > 0) measurements.Add(t.Get("Live.PartCount", current.Parts.Count));
+            if (appearance.ShowReconnectCount && current.ResumeCount > 0) measurements.Add(t["Live.ReconnectCount"] + ": " + current.ResumeCount);
             dashboardTiming.Text = current.State == LiveSessionState.WaitingForLive && current.ScheduledStartAt is { } scheduled
                 ? scheduled.ToLocalTime().ToString("g", t.Culture)
                 : string.Join(" · ", measurements);
@@ -210,12 +220,15 @@ internal sealed partial class LiveSessionCard
         var availableStatus = narrow ? textWidth : statusWidth;
         dashboardState.SetBounds(statusLeft, statusTop + (line - 16) / 2, 16, 16);
         state.SetBounds(statusLeft + 22, statusTop, Math.Max(100, availableStatus - 22), line);
+        state.AutoEllipsis = true; dashboardTips.SetToolTip(state, state.Text);
         dashboardTiming.Multiline = true; AppTypography.Bind(dashboardTiming, 9.25f);
         dashboardTiming.SetBounds(statusLeft, state.Bottom + 8, availableStatus, DashboardVisual.LabelHeight(dashboardTiming, availableStatus, 6));
         var token = current?.State switch { LiveSessionState.Recording or LiveSessionState.Completed => AppThemeTokens.Success, LiveSessionState.Reconnecting or LiveSessionState.WaitingForLive => AppThemeTokens.Warning, LiveSessionState.Failed => AppThemeTokens.Error, _ => AppThemeTokens.Info };
         AppUi.BindForeground(state, token); dashboardState.SetColorToken(token);
         dashboardState.SetKind(current?.State switch { LiveSessionState.WaitingForLive => AppIconKind.History, LiveSessionState.Completed => AppIconKind.Check, LiveSessionState.Failed => AppIconKind.Close, _ => AppIconKind.Live });
-        var actionTop = 12; var actionLeft = Width - actionWidth - 12; var actionHeight = AppTypography.TextHeight(34);
+        var actionTop = stackActions ? Math.Max(thumbnail.Bottom, dashboardTiming.Bottom) + 12 : 12;
+        if (stackActions) actionWidth = Math.Max(1, Width - left - 12);
+        var actionLeft = stackActions ? left : Width - actionWidth - 12; var actionHeight = AppTypography.TextHeight(34);
         if (primary.Visible)
         {
             primary.SetBounds(actionLeft, actionTop, actionWidth, actionHeight); actionTop = primary.Bottom + 7;

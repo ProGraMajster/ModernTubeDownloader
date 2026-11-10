@@ -14,6 +14,39 @@ namespace ModernTubeDownloader.Tests;
 [Collection("ModernFormsNext TestHost")]
 public sealed class BatchDashboardPresentationTests
 {
+    [Fact]
+    public async Task ClipboardRendersCanonicalRowsAndOtherPickerDispatchesOnce()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-batch-clipboard-view-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(directory);
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize();
+                var view = new BatchImportView(services); view.SetDashboard(true); host.Show(view, 1320, 1024);
+                var import = view.ImportClipboardTextAsync("https://example.test/a\nhttps://example.test/a\ninvalid");
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                while (!import.IsCompleted && DateTime.UtcNow < deadline) { host.ProcessPendingWork(); Thread.Sleep(5); }
+                Assert.True(import.IsCompleted); await import; host.ProcessPendingWork();
+                Assert.Equal(3, Find<FlowLayoutPanel>(view, "BatchRows").Controls.Count);
+                Assert.Equal("", Find<TextBox>(view, "BatchFilePath").Text);
+                Assert.True(Find<Button>(view, "BatchAnalyze").Enabled);
+                Assert.Empty(services.Queue.Snapshot());
+                view.SetDashboard(false); Assert.False(Find<Button>(view, "BatchPaste").Visible);
+                using var other = new OtherView(services); var opened = 0;
+                other.RegisterTool("Batch", () => { }); other.SetDashboard(true); other.Size = new(1320, 1024);
+                other.PickBatchFileRequested += (_, _) => opened++;
+                var pick = Find<Button>(other, "OtherPickBatchFile"); pick.PerformClick();
+                Assert.Equal(1, opened); Assert.True(pick.Width > 0 && pick.Right <= pick.Parent!.Width);
+                other.SetDashboard(false); Assert.False(pick.Parent!.Visible);
+            }
+            var recent = await services.Batch.RecentAsync(); Assert.Single(recent); Assert.Equal(3, recent[0].ImportedCount);
+            await services.ShutdownAsync();
+        }
+        finally { AppearancePresentation.Current = new(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Theory]
     [InlineData(1320, 100)]
     [InlineData(1060, 150)]
@@ -41,6 +74,9 @@ public sealed class BatchDashboardPresentationTests
                 var previous = Find<Button>(view, "BatchPrevious"); var apply = Find<Button>(view, "BatchApply");
                 var classicBody = path.Parent; var classicToolbar = previous.Parent;
                 AppTypography.SetDashboardPresentation(view, true); view.SetDashboard(true); host.ProcessPendingWork();
+                Assert.True(Find<Button>(view, "BatchPaste").Visible);
+                Assert.True(Find<Button>(view, "BatchPaste").Enabled);
+                Assert.True(Find<Label>(view, "BatchColumnTitle").CurrentStyle.GetFontSize() >= 12 * scale / 100);
                 var list = Find<FlowLayoutPanel>(view, "BatchRows"); Assert.Equal(3, list.Controls.Count);
                 foreach (var row in list.Controls)
                     Assert.All(row.Controls.Where(c => c.Visible), c =>
