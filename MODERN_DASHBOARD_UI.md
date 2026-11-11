@@ -1,7 +1,26 @@
 # Optional Modern Dashboard interface
 
-Development version: **1.3.0-candidate.1**, unreleased. Classic remains the default
-for existing and new profiles. This branch does not publish or replace 1.2.0.
+Development version: **1.3.0-candidate.1**, unreleased. Existing profiles retain their
+interface. A new user's setup wizard recommends Modern and requires explicit completion;
+skipping does not silently switch the shell. This branch does not publish a release.
+
+## November 11 product iteration
+
+The native [setup and migration journey](ONBOARDING.md), local version-aware
+[What's New](WHATS_NEW.md), and [safe update policy](UPDATES.md) use the existing runtime.
+Setup and release notes are also reachable from Settings, Help and About.
+
+LIVE presents grouped session facts in a native, scrollable details window; its actions
+resolve the current canonical session. History's row menu supports open/folder/copy/retry,
+including Shift+F10, and refuses stale actions after row reuse. The inspector exposes
+full selectable saved-file paths. Batch uses denser rows, measured status metrics,
+source icons and a persisted thumbnail opt-in. Other shows the existing functional tools,
+real recent sessions, quick actions and import guidance. Settings uses measured form rows,
+bounded category scrolling and cleared hidden-card bounds; the journey actions remain
+available in every category. Classic presentation and shared services remain intact.
+
+These changes do not claim full pixel parity or release qualification. See the iteration
+report for actual captures, intermediate failures, targeted checks and deferred work.
 
 ## Selecting an interface
 

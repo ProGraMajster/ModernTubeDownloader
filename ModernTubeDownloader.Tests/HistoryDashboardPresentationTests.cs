@@ -13,7 +13,7 @@ using Path = System.IO.Path;
 namespace ModernTubeDownloader.Tests;
 
 [Collection("ModernFormsNext TestHost")]
-public sealed class HistoryDashboardPresentationTests
+public sealed partial class HistoryDashboardPresentationTests
 {
     [Theory]
     [InlineData(100, 1200)]

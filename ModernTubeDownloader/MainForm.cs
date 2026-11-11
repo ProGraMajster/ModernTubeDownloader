@@ -12,7 +12,7 @@ using ModernTubeDownloader.Shell;
 
 namespace ModernTubeDownloader;
 
-public sealed class MainForm : Form
+public sealed partial class MainForm : Form
 {
     private readonly AppServices services;
     private readonly LocalizationService text;
@@ -56,10 +56,11 @@ public sealed class MainForm : Form
     private readonly DevelopmentAutomationHost? automation;
 #endif
 
-    public MainForm(AppServices services, bool enableAutomation = false, ExternalMediaRequest? initialExternalRequest = null, bool classicUi = false)
+    public MainForm(AppServices services, bool enableAutomation = false, ExternalMediaRequest? initialExternalRequest = null, bool classicUi = false, bool backgroundActivation = false)
     {
         using var constructionTiming = PerformanceDiagnostics.Measure("main.constructor");
         this.services = services;
+        suppressExperience = classicUi || backgroundActivation || initialExternalRequest is not null;
         if (classicUi) services.Appearance.ForceClassicForSession();
         this.initialExternalRequest = initialExternalRequest;
         text = services.Localization;
@@ -124,6 +125,7 @@ public sealed class MainForm : Form
 #endif
         helpView = new InformationView(services, false) { Visible = false };
         aboutView = new InformationView(services, true) { Visible = false };
+        WireExperienceActions();
         content.Controls.AddRange([downloadsView, liveView, historyView, otherView, settingsView, batchView, helpView, aboutView]);
         pages[downloadsView] = AppPageId.Downloads; pages[liveView] = AppPageId.Live;
         pages[historyView] = AppPageId.History; pages[otherView] = AppPageId.Other;
@@ -454,6 +456,7 @@ public sealed class MainForm : Form
             {
                 preparationOverlay.Visible = false;
                 currentView?.BringToFront();
+                TryStartExperience();
             }
             return;
         }
@@ -501,6 +504,7 @@ public sealed class MainForm : Form
         {
             preparationOverlay.Visible = false;
             currentView?.BringToFront();
+            TryStartExperience();
         }
     }
 
@@ -544,8 +548,11 @@ public sealed class MainForm : Form
 
     public void StartRuntime(bool autostart, bool hiddenArgument)
     {
+        suppressExperience |= autostart || hiddenArgument;
         InitializeRuntime();
         tray.Start(autostart, hiddenArgument);
+        experienceRuntimeStarted = true;
+        TryStartExperience();
     }
 
     public void RestoreWindow() { if (!shutdownStarted) tray.Restore(); }
@@ -607,11 +614,12 @@ public sealed class MainForm : Form
         catch (Exception error) { return "unavailable:" + error.GetType().Name; }
     }
 
-    public void HandleNotification(NotificationNavigation request)
+    public async void HandleNotification(NotificationNavigation request)
     {
         if (shutdownStarted || !NotificationNavigation.TryParse(request.Encode(), out _)) return;
         try
         {
+            await SuspendExperienceAsync();
             RestoreWindow();
             Navigate(AppNavigation.ForNotification(request));
             // Resolve only our own persisted state. Native/IPC payload never supplies a path or URL.
@@ -647,6 +655,7 @@ public sealed class MainForm : Form
 
         try
         {
+            await SuspendExperienceAsync();
             services.Logger.Info($"Opening external request id={request.RequestId?.ToString("D") ?? "legacy"}, source={request.Source}, queue={request.AutoQueue}, open={request.OpenInApp}, quality={request.RequestedQualityPresetId ?? "default"}, container={request.RequestedContainer}.");
             RestoreWindow();
             if (OperatingSystem.IsWindows() && PlatformHandle.HandleDescriptor == "HWND")
@@ -724,8 +733,9 @@ public sealed class MainForm : Form
 #endif
         try
         {
+            await SuspendExperienceAsync();
             await services.ShutdownAsync();
-            if (services.Updates.Ready && (updateInstallRequested || services.Updates.State.InstallOnExit))
+            if (services.Updates.Ready && (updateInstallRequested || services.Updates.ShouldInstallOnExit))
             {
                 try { await services.Updates.LaunchInstallerAsync(restart: updateInstallRequested); }
                 catch (Exception error) { services.Logger.Error("The staged updater could not be started; the installation was left unchanged.", error); }

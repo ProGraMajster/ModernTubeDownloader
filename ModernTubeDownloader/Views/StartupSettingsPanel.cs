@@ -47,6 +47,9 @@ internal sealed class StartupSettingsPanel : Panel
 
     public void LayoutForWidth(int width)
     {
+        // Hidden Settings sections are allocated empty bounds. Do not recreate a
+        // scroll extent in response to the SizeChanged notification for width zero.
+        if (AppTypography.IsDashboard(this) && width <= 48) return;
         if (AppTypography.IsDashboard(this) && width < 540)
         {
             var innerWidth = width - 32; var line = AppTypography.TextHeight(36); var label = AppTypography.TextHeight(24);

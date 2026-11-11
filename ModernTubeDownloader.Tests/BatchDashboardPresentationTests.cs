@@ -12,7 +12,7 @@ using Path = System.IO.Path;
 namespace ModernTubeDownloader.Tests;
 
 [Collection("ModernFormsNext TestHost")]
-public sealed class BatchDashboardPresentationTests
+public sealed partial class BatchDashboardPresentationTests
 {
     [Fact]
     public async Task ClipboardRendersCanonicalRowsAndOtherPickerDispatchesOnce()
@@ -25,7 +25,9 @@ public sealed class BatchDashboardPresentationTests
             {
                 services.Appearance.Initialize();
                 var view = new BatchImportView(services); view.SetDashboard(true); host.Show(view, 1320, 1024);
-                var import = view.ImportClipboardTextAsync("https://example.test/a\nhttps://example.test/a\ninvalid");
+                Task import = Task.CompletedTask;
+                host.Dispatcher.Post(() => import = view.ImportClipboardTextAsync("https://example.test/a\nhttps://example.test/a\ninvalid"));
+                host.ProcessPendingWork();
                 var deadline = DateTime.UtcNow.AddSeconds(5);
                 while (!import.IsCompleted && DateTime.UtcNow < deadline) { host.ProcessPendingWork(); Thread.Sleep(5); }
                 Assert.True(import.IsCompleted); await import; host.ProcessPendingWork();
@@ -33,6 +35,10 @@ public sealed class BatchDashboardPresentationTests
                 Assert.Equal("", Find<TextBox>(view, "BatchFilePath").Text);
                 Assert.True(Find<Button>(view, "BatchAnalyze").Enabled);
                 Assert.Empty(services.Queue.Snapshot());
+                view.SetDashboard(false); host.ProcessPendingWork();
+                view.SetDashboard(true); host.ProcessPendingWork();
+                Assert.Equal(3, Find<FlowLayoutPanel>(view, "BatchRows").Controls.Count);
+                Assert.True(Find<Button>(view, "BatchAnalyze").Enabled);
                 view.SetDashboard(false); Assert.False(Find<Button>(view, "BatchPaste").Visible);
                 using var other = new OtherView(services); var opened = 0;
                 other.RegisterTool("Batch", () => { }); other.SetDashboard(true); other.Size = new(1320, 1024);
@@ -76,6 +82,16 @@ public sealed class BatchDashboardPresentationTests
                 AppTypography.SetDashboardPresentation(view, true); view.SetDashboard(true); host.ProcessPendingWork();
                 Assert.True(Find<Button>(view, "BatchPaste").Visible);
                 Assert.True(Find<Button>(view, "BatchPaste").Enabled);
+                var pageHeading = Find<Label>(view, "BatchTitle");
+                Assert.Equal(services.Localization["Dashboard.Batch"], pageHeading.Text);
+                Assert.True(pageHeading.Visible && pageHeading.Height >= DashboardVisual.LabelHeight(pageHeading, pageHeading.Width, 1));
+                foreach (var action in new[] { "Add", "Analyze", "Pause", "Cancel", "Export" })
+                {
+                    var button = Find<Button>(view, "Batch" + action); var owner = button.Parent!;
+                    Assert.True(button.Visible && button.Width > 0 && button.Height > 0);
+                    Assert.True(button.Left >= 0 && button.Top >= 0 && button.Right <= owner.Width && button.Bottom <= owner.Height,
+                        $"Batch {action} is clipped by its toolbar at {scale}%.");
+                }
                 Assert.True(Find<Label>(view, "BatchColumnTitle").CurrentStyle.GetFontSize() >= 12 * scale / 100);
                 var list = Find<FlowLayoutPanel>(view, "BatchRows"); Assert.Equal(3, list.Controls.Count);
                 foreach (var row in list.Controls)

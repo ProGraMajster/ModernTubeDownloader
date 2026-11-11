@@ -59,6 +59,7 @@ public sealed class AppServices : IDisposable
     public SourceCheckService SourceCheck { get; private set; } = null!;
     public ApplicationUpdateService Updates { get; private set; } = null!;
     public ModernTubeDownloader.Batch.BatchImportService Batch { get; private set; } = null!;
+    internal UserExperienceService Experience { get; private set; } = null!;
 
     public static AppServices Create(
         AppPaths paths,
@@ -70,8 +71,11 @@ public sealed class AppServices : IDisposable
         using var createTiming = PerformanceDiagnostics.Measure("services.create");
         paths.EnsureCreated();
         var logger = new FileAppLogger(paths.LogDirectory);
+        var experience = UserExperienceService.OpenAsync(paths, logger, AppBranding.Version).GetAwaiter().GetResult();
         var settings = new SettingsService(paths, logger);
         using (PerformanceDiagnostics.Measure("settings.load")) settings.LoadAsync().GetAwaiter().GetResult();
+        if (experience.State.ExistingProfile && !experience.SettingsExisted) settings.PreserveLegacyUpdatePolicyWithoutSettings();
+        else if (!experience.State.ExistingProfile && !experience.SettingsExisted) settings.Current.Updates.PolicyVersion = 1;
         var localization = new LocalizationService(settings.Current.Language);
         var appearance = new AppAppearanceService(settings, logger, Path.Combine(paths.RootDirectory, "appearance.json"));
         var processRunner = new AsyncProcessRunner(logger);
@@ -105,6 +109,7 @@ public sealed class AppServices : IDisposable
             new YtDlpLiveAvailabilityProbe(metadata), settings, logger);
         var thumbnails = new ThumbnailCacheService(paths, logger, () => settings.Current.DownloadThumbnail);
         var services = new AppServices(paths, logger, settings, localization, appearance, tools, metadata, queue, processor, history, thumbnails, httpClient);
+        services.Experience = experience;
         services.ThumbnailTool = new(metadata.AnalyzeAsync, thumbnails, paths, logger);
         services.Live = live;
         services.Updates = new ApplicationUpdateService(paths, settings, httpClient, logger);
@@ -153,7 +158,7 @@ public sealed class AppServices : IDisposable
         await Task.WhenAll(Processor.StopAsync(), LiveScheduler.StopAsync()).ConfigureAwait(false);
         await Tools.StopAsync().ConfigureAwait(false);
         await Queue.SaveAsync().ConfigureAwait(false);
-        await Settings.SaveAsync().ConfigureAwait(false);
+        if (!Settings.LoadFailed) await Settings.SaveAsync().ConfigureAwait(false);
         await History.SaveAsync().ConfigureAwait(false);
     }
 

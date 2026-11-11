@@ -4,7 +4,8 @@
 
 ### Added
 
-- Optional Modern Dashboard interface, retaining Classic as the default.
+- Optional Modern Dashboard interface, preserving existing Classic preferences and
+  offering an explicit choice during first-run setup or migration.
 - Runtime interface selection and session-only `--classic-ui` recovery.
 - Dashboard queue inspector and editable queued options.
 - Real download speed, storage and observed-process widgets.
@@ -14,6 +15,22 @@
   vector actions, thumbnail duration, aligned history and grouped inspectors.
 - Real History date ranges, date sorting and audio/video/playlist filters.
 - Modern native switch/progress/text presentation with Classic recipe restoration.
+- Resumable six-step native setup, a one-time upgrade interface choice and offline
+  What's New, with Polish/English text and manual reopening.
+- Automatic verified stable updates on safe exit for new profiles; explicit legacy
+  policy migration preserves disabled checks, deferrals and skipped versions.
+- Structured LIVE details, History row actions, denser Batch Import and working
+  tool/recent-operation cards with responsive Settings editors.
+
+### Fixed
+
+- Update rollback now continues past unchanged/locked destinations, retaining an
+  incomplete recovery journal if restoration cannot finish.
+- Serialized updater initialization preserves policy changes and notifies Settings
+  when a restored package is ready. Unreadable settings/update state are not replaced
+  by fresh defaults.
+- Wizard layout follows the actual scroll viewport at large text sizes; incomplete
+  journey markers cannot silently classify an existing profile as new.
 
 Development identity: **1.3.0-candidate.1**, local only; no 1.3.0 release published.
 

@@ -11,15 +11,21 @@ internal sealed class InformationView : UserControl
     private readonly bool about;
     private readonly Label title = AppUi.Heading("", 24), body = AppUi.Muted();
     private readonly PictureBox icon = new() { Image = AppBranding.Icon, SizeMode = PictureBoxSizeMode.Zoom };
-    private readonly Button repository = new(), diagnostics = new();
+    private readonly Button repository = new(), diagnostics = new(), setup = new(), whatsNew = new();
+    public event EventHandler? SetupRequested;
+    public event EventHandler? WhatsNewRequested;
     public InformationView(AppServices services, bool about)
     {
         this.services = services; this.about = about; Dock = DockStyle.Fill;
         AppUi.BindBackground(this); body.Multiline = true;
         AppUi.Secondary(repository); AppUi.Secondary(diagnostics);
+        AppUi.Secondary(setup); AppUi.Secondary(whatsNew);
+        setup.AccessibleAutomationId = "InformationSetup"; whatsNew.AccessibleAutomationId = "InformationWhatsNew";
+        setup.Click += (_, _) => SetupRequested?.Invoke(this, EventArgs.Empty);
+        whatsNew.Click += (_, _) => WhatsNewRequested?.Invoke(this, EventArgs.Empty);
         repository.Click += (_, _) => Process.Start(new ProcessStartInfo("https://github.com/ProGraMajster/ModernTubeDownloader") { UseShellExecute = true });
         diagnostics.Click += (_, _) => Utilities.ShellService.OpenFolderForFile(services.Paths.LogDirectory);
-        Controls.AddRange([icon, title, body, repository, diagnostics]);
+        Controls.AddRange([icon, title, body, repository, diagnostics, setup, whatsNew]);
         SizeChanged += (_, _) => LayoutPage(); services.Localization.LanguageChanged += Changed;
         AppTypography.RegisterLayout(this, LayoutPage); RefreshText();
     }
@@ -31,6 +37,7 @@ internal sealed class InformationView : UserControl
             typeof(MainForm).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false).OfType<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "ModernFormsNextCommit")?.Value
             : services.Localization["Dashboard.HelpBody"];
         repository.Text = services.Localization["Dashboard.Repository"]; diagnostics.Text = services.Localization["Settings.OpenLogs"];
+        setup.Text = services.Localization["Experience.Reopen"]; whatsNew.Text = services.Localization["Experience.WhatsNew"];
         LayoutPage();
     }
     private void LayoutPage()
@@ -40,6 +47,8 @@ internal sealed class InformationView : UserControl
         body.SetBounds(24, 112, width, AppTypography.TextHeight(210));
         repository.SetBounds(24, body.Bottom + 20, Math.Min(width, AppTypography.TextHeight(250)), AppTypography.TextHeight(40));
         diagnostics.SetBounds(24, repository.Bottom + 12, repository.Width, repository.Height);
+        setup.SetBounds(24, diagnostics.Bottom + 12, Math.Min(width, AppTypography.TextHeight(360)), repository.Height);
+        whatsNew.SetBounds(24, setup.Bottom + 12, setup.Width, repository.Height);
     }
     protected override void Dispose(bool disposing) { if (disposing) services.Localization.LanguageChanged -= Changed; base.Dispose(disposing); }
 }

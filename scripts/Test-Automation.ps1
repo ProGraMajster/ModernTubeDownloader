@@ -6,12 +6,16 @@ param(
     [switch]$PublishedNoUpdate,
     [switch]$TraySmoke,
     [switch]$UpdateSmoke,
+    [switch]$UpdateStatesSmoke,
     [switch]$OtherSmoke,
     [switch]$BatchSmoke,
     [switch]$HotfixSmoke,
     [switch]$RealBatchSmoke,
     [switch]$TextScaleSmoke,
     [switch]$AppearanceSmoke,
+    [ValidateSet('New', 'Upgrade', 'Resume', 'News', 'Reopen')][string]$ExperienceSmoke,
+    [ValidateSet('Classic', 'ModernDashboard')][string]$ExperienceChoice = 'ModernDashboard',
+    [switch]$ExperienceExternalActivation,
     [string]$SampleUrl = 'https://example.test/watch/sample123',
     [switch]$PlaylistSmoke,
     [switch]$PlaylistVisualSmoke,
@@ -79,6 +83,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($ExperienceExternalActivation -and $ExperienceSmoke -ne 'Resume') { throw 'ExperienceExternalActivation requires ExperienceSmoke Resume.' }
+if ($ExperienceSmoke -eq 'News') { $InterfaceMode = 'ModernDashboard' }
+if ($UpdateStatesSmoke) {
+    if ($ExperienceSmoke) { throw 'UpdateStatesSmoke uses a separate isolated profile from ExperienceSmoke.' }
+    $UpdateSmoke = $true; $CaptureVisual = $true; $InterfaceMode = 'ModernDashboard'
+}
 if ($DashboardScreenSmoke) { $DashboardPopulatedFixture = $true; $DashboardFixtureCount = 5; $CaptureVisual = $true }
 if ($PlaylistTransferSmoke -or $PlaylistGroupsSmoke -or $PlaylistShellSwitchCycles -gt 0) { $PlaylistVisualSmoke = $true }
 if ($PlaylistVisualSmoke) { $PlaylistSmoke = $true; $CaptureVisual = $true }
@@ -133,7 +143,7 @@ foreach ($required in @($app, $cli, (Join-Path $fake 'ModernTubeDownloader.FakeT
 }
 
 function Invoke-AutomationCli {
-    param([string[]]$CliArguments, [string]$InputValue)
+    param([string[]]$CliArguments, [string]$InputValue, [string[]]$AllowedSemanticErrors = @())
     $start = [System.Diagnostics.ProcessStartInfo]::new('dotnet')
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
@@ -153,6 +163,10 @@ function Invoke-AutomationCli {
         $output = $stdoutTask.GetAwaiter().GetResult()
         $errorText = $stderrTask.GetAwaiter().GetResult()
         if ($client.ExitCode -ne 0) {
+            if ($client.ExitCode -eq 3 -and $AllowedSemanticErrors.Count) {
+                $semantic = $output | ConvertFrom-Json
+                if ($semantic.error -in $AllowedSemanticErrors) { return $semantic }
+            }
             $excerpt = if ($output.Length -gt 1000) { $output.Substring(0, 1000) + '…' } else { $output }
             throw "Automation CLI exit $($client.ExitCode): $($CliArguments -join ' ') $excerpt $errorText"
         }
@@ -228,6 +242,252 @@ function Capture-OwnedBitmap($graphics, [bool]$dialog = $false) {
             $script:automationMainWindow, $dialog, $dc)) { throw 'Own application HWND capture failed.' }
     }
     finally { $graphics.ReleaseHdc($dc) }
+}
+
+function Capture-SmokeMain([string]$rootId, [string]$name) {
+    $snapshot = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $rootId, '--depth', '12')
+    $snapshot | ConvertTo-Json -Depth 60 | Set-Content -LiteralPath (Join-Path $dataRoot ($name + '-tree.json')) -Encoding utf8
+    if ($snapshot.error -ne 'None') { throw "Cannot capture the main semantic tree for $name." }
+    $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $script:automationMainWindow)
+    Add-Type -AssemblyName System.Drawing
+    $picture = [Drawing.Bitmap]::new($size[0], $size[1]); $drawing = [Drawing.Graphics]::FromImage($picture)
+    try { Capture-OwnedBitmap $drawing; $picture.Save((Join-Path $dataRoot ($name + '.png'))) }
+    finally { $drawing.Dispose(); $picture.Dispose() }
+    @{ processId = $script:automationProcess.Id; hwnd = $script:automationMainWindow.ToInt64(); width = $size[0]; height = $size[1];
+        dpi = [MtdAutomationWindowCloser]::GetDpiForWindow($script:automationMainWindow); textScale = $AppTextScale; theme = $Theme;
+        evidence = 'Native owned HWND PrintWindow; actions via DEBUG semantic bridge' } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot ($name + '-capture.json')) -Encoding utf8
+}
+
+function Read-UnarmedUpdateFixture {
+    $state = Get-Content -LiteralPath (Join-Path $dataRoot 'Updates/state.json') -Raw | ConvertFrom-Json
+    if ($state.installOnExit -or $state.lastInstallerRequest -or $state.lastInstallerProcessId) { throw 'The update UI fixture unexpectedly armed or requested installation.' }
+    if ($state.available.version -ne '9.9.9' -or $state.stagedArchive -ne $updateFixtureArchive -or $state.stagedHash -ne $updateFixtureHash) {
+        throw 'The update UI fixture lost its validated synthetic staged package.'
+    }
+    return $state
+}
+
+function Wait-UpdateFixture([scriptblock]$condition, [string]$description) {
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $state = Read-UnarmedUpdateFixture
+        $preferences = Get-Content -LiteralPath (Join-Path $dataRoot 'settings.json') -Raw | ConvertFrom-Json
+        if (& $condition $state $preferences) { return }
+        Start-Sleep -Milliseconds 50
+    } while ($watch.Elapsed.TotalSeconds -lt 15)
+    throw "Update fixture state did not reach $description."
+}
+
+function Get-ExperienceRoot([string]$id) {
+    $registered = Invoke-AutomationCli -CliArguments @('roots', '--pid', "$($script:automationProcess.Id)")
+    foreach ($root in $registered.value) {
+        # Inspect only the registered root peer. A closing dialog may unregister
+        # between inventory and inspection; only that typed stale result is expected.
+        $found = Invoke-AutomationCli -CliArguments @('inspect', '--pid', "$($script:automationProcess.Id)", '--root', $root.rootId,
+            '--session', $root.handle.sessionId, '--node', $root.handle.runtimeId) -AllowedSemanticErrors @('StaleNode')
+        if ($found.error -eq 'None' -and $found.value.automationId -eq $id) { return $root }
+    }
+    return $null
+}
+
+function Wait-ExperienceRoot([string]$id, [bool]$present = $true) {
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $script:automationProcess.Refresh()
+        if ($script:automationProcess.HasExited) { throw "Experience application exited while waiting for $id." }
+        $root = Get-ExperienceRoot $id
+        if (($null -ne $root) -eq $present) { return $root }
+    } while ($watch.Elapsed.TotalSeconds -lt 30)
+    throw "Experience root $id expected present=$present."
+}
+
+function Wait-ExperienceState([scriptblock]$condition, [string]$description) {
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $state = Get-Content -LiteralPath (Join-Path $dataRoot 'experience.json') -Raw | ConvertFrom-Json
+        if (& $condition $state) { return $state }
+        Start-Sleep -Milliseconds 50 # Poll the real atomic save completion, not UI timing.
+    } while ($watch.Elapsed.TotalSeconds -lt 15)
+    throw "Experience marker was not persisted: $description"
+}
+
+function Start-ExperienceApplication([string]$phase) {
+    $script:automationProcess = Start-Process -FilePath $app -ArgumentList @('--automation') -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $dataRoot ("experience-$phase-stderr.log"))
+    Wait-Bridge $script:automationProcess.Id $true
+    Wait-MainWindow $script:automationProcess
+    $script:experienceMainRoot = (Wait-ExperienceRoot 'MainWindow').rootId
+    $script:automationMainWindow = [MtdAutomationWindowCloser]::FindOwnMainWindow($script:automationProcess.Id)
+    if ($script:automationMainWindow -eq [IntPtr]::Zero) { throw 'The experience smoke did not find its native main HWND.' }
+}
+
+function Stop-ExperienceApplication {
+    if (-not [MtdAutomationWindowCloser]::CloseOwnedWindow($script:automationProcess.Id, $script:automationMainWindow) -or
+        -not $script:automationProcess.WaitForExit(15000) -or $script:automationProcess.ExitCode -ne 0) { throw 'Experience application did not close cleanly.' }
+    Wait-Bridge $script:automationProcess.Id $false
+    $script:automationProcess.Dispose(); $script:automationProcess = $null
+}
+
+function Capture-Experience([string]$id, [string]$name) {
+    $root = Wait-ExperienceRoot $id
+    $captionKey = switch ($id) { 'SetupWizardWindow' { 'Experience.WelcomeTitle' } 'UpgradeChoiceWindow' { 'Experience.UpgradeTitle' } 'WhatsNewWindow' { 'Experience.WhatsNew' } }
+    $caption = $script:experienceLabels.$captionKey
+    $hwnd = [MtdAutomationWindowCloser]::FindOwnCaption($script:automationProcess.Id, $caption)
+    if ($hwnd -eq [IntPtr]::Zero) { throw "No owned native HWND matches $id ($caption)." }
+    if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
+        if (-not [MtdAutomationWindowCloser]::PlaceWindow($hwnd, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)) { throw "Cannot place $id." }
+    }
+    $snapshot = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $root.rootId, '--depth', '12')
+    $snapshot | ConvertTo-Json -Depth 60 | Set-Content -LiteralPath (Join-Path $dataRoot ($name + '-tree.json')) -Encoding utf8
+    if ($snapshot.error -ne 'None') { throw "Cannot capture the $id semantic tree: $($snapshot.error)." }
+    $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $hwnd)
+    if ($WindowWidth -gt 0 -and $WindowHeight -gt 0 -and ($size[0] -ne $WindowWidth -or $size[1] -ne $WindowHeight)) { throw "Unexpected owned dialog dimensions for $name." }
+    Add-Type -AssemblyName System.Drawing
+    $picture = [Drawing.Bitmap]::new($size[0], $size[1]); $drawing = [Drawing.Graphics]::FromImage($picture); $dc = $drawing.GetHdc()
+    try {
+        if (-not [MtdAutomationWindowCloser]::CaptureOwnPopup($script:automationProcess.Id, $hwnd, $dc)) { throw "Cannot capture native dialog $name." }
+    }
+    finally { $drawing.ReleaseHdc($dc); $drawing.Dispose() }
+    try { $picture.Save((Join-Path $dataRoot ($name + '.png'))) } finally { $picture.Dispose() }
+    @{ processId = $script:automationProcess.Id; hwnd = $hwnd.ToInt64(); width = $size[0]; height = $size[1]; dpi = [MtdAutomationWindowCloser]::GetDpiForWindow($hwnd);
+        textScale = $AppTextScale; theme = $Theme; root = $id; evidence = 'Native owned HWND PrintWindow; actions via DEBUG semantic bridge' } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot ($name + '-capture.json')) -Encoding utf8
+    # Retain the real native pixels even when the geometry assertion fails.
+    foreach ($node in $snapshot.nodes) {
+        if ($node.node.scrollInfo.horizontal.isScrollable -and $node.node.controlType -eq 'Pane') { throw "Horizontal panel overflow in $name." }
+    }
+    return $root.rootId
+}
+
+function Complete-ExperienceNews([string]$name) {
+    $rootId = Capture-Experience 'WhatsNewWindow' $name
+    Invoke-NodeAction (Wait-Node 'WhatsNewDone' $rootId 'Enabled').snapshot $rootId 'Invoke' | Out-Null
+    [void](Wait-ExperienceState { param($state) $state.lastWhatsNewAcknowledgedVersion -eq $experienceVersion } 'current release acknowledged')
+    [void](Wait-ExperienceRoot 'WhatsNewWindow' $false)
+}
+
+function Invoke-ExperienceSmoke {
+    Write-Output "Owned experience profile: $dataRoot; scenario=$ExperienceSmoke; choice=$ExperienceChoice; textScale=$AppTextScale; theme=$Theme"
+    $script:experienceLabels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
+    $preserved = @{}
+    foreach ($relative in @('Auth/experience-sentinel.bin')) {
+        $file = Join-Path $dataRoot $relative
+        if (Test-Path -LiteralPath $file) { $preserved[$relative] = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash }
+    }
+    $historyBefore = @(if (Test-Path -LiteralPath (Join-Path $dataRoot 'history.json')) { Get-Content -LiteralPath (Join-Path $dataRoot 'history.json') -Raw | ConvertFrom-Json })
+    ConvertTo-Json -InputObject $historyBefore -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'experience-history-before.json') -Encoding utf8
+    try {
+        Start-ExperienceApplication 'initial'
+        if ($ExperienceSmoke -eq 'Upgrade') {
+            $rootId = Capture-Experience 'UpgradeChoiceWindow' 'experience-upgrade-before'
+            Invoke-NodeAction (Find-Node $(if ($ExperienceChoice -eq 'Classic') { 'SetupClassic' } else { 'SetupModern' }) $rootId) $rootId 'Invoke' | Out-Null
+            [void](Capture-Experience 'UpgradeChoiceWindow' ('experience-upgrade-' + $ExperienceChoice.ToLowerInvariant()))
+            Invoke-NodeAction (Wait-Node 'SetupNext' $rootId 'Enabled').snapshot $rootId 'Invoke' | Out-Null
+            [void](Wait-ExperienceState { param($state) $state.interfaceChoiceFamily -eq '1.3' -and -not $state.interfaceChoiceSkipped } 'upgrade choice completed')
+            Complete-ExperienceNews 'experience-upgrade-news'
+        }
+        elseif ($ExperienceSmoke -in @('New', 'Resume')) {
+            $rootId = (Wait-ExperienceRoot 'SetupWizardWindow').rootId
+            $draftOutput = Join-Path $dataRoot 'output-onboarding-Łódź'
+            for ($step = 0; $step -lt 6; $step++) {
+                [void](Wait-ExperienceState { param($state) $null -ne $state.draft -and $state.draft.step -eq $step } "wizard step $step")
+                Wait-Node 'SetupNext' $rootId 'Enabled' | Out-Null
+                if ($step -eq 1) { Invoke-NodeAction (Find-Node 'SetupModern' $rootId) $rootId 'Invoke' | Out-Null }
+                if ($step -eq 2) {
+                    Invoke-NodeAction (Find-Node 'SetupOutput' $rootId) $rootId 'SetValue' $draftOutput | Out-Null
+                    [void](Wait-ExperienceState { param($state) $state.draft.output -eq $draftOutput } 'changed path saved as draft')
+                    $beforeCompletion = Get-Content -LiteralPath (Join-Path $dataRoot 'settings.json') -Raw | ConvertFrom-Json
+                    if ($beforeCompletion.finalOutputDirectory -eq $draftOutput) { throw 'Wizard applied output preferences before explicit completion.' }
+                }
+                [void](Capture-Experience 'SetupWizardWindow' ("experience-step-" + ($step + 1)))
+                if ($step -eq 2 -and $ExperienceSmoke -eq 'Resume') {
+                    if ($ExperienceExternalActivation) {
+                        $activationUrl = 'https://example.test/watch/experience-resume-external'
+                        $activationUri = 'moderntubedownloader://open?v=2&action=open&url=' + [Uri]::EscapeDataString($activationUrl)
+                        $secondary = Start-Process -FilePath $app -ArgumentList @($activationUri) -PassThru -WindowStyle Hidden
+                        try {
+                            if (-not $secondary.WaitForExit(10000) -or $secondary.ExitCode -ne 0) { throw 'External activation secondary process did not forward and exit cleanly.' }
+                        } finally { $secondary.Dispose() }
+                        [void](Wait-ExperienceRoot 'SetupWizardWindow' $false)
+                        $input = (Wait-Node 'DownloadUrlInput' $script:experienceMainRoot 'Enabled').snapshot
+                        if ($input.value -ne $activationUrl) { throw 'External activation did not fill the main download URL after suspending the wizard.' }
+                        Capture-SmokeMain $script:experienceMainRoot 'experience-external-activation'
+                    }
+                    else {
+                        $wizardWindow = [MtdAutomationWindowCloser]::FindOwnCaption($script:automationProcess.Id, $script:experienceLabels.'Experience.WelcomeTitle')
+                        if (-not [MtdAutomationWindowCloser]::CloseOwnedWindow($script:automationProcess.Id, $wizardWindow)) { throw 'Cannot close the owned wizard for resume.' }
+                    }
+                    [void](Wait-ExperienceRoot 'SetupWizardWindow' $false)
+                    Stop-ExperienceApplication
+                    Start-ExperienceApplication 'resume'
+                    $rootId = (Wait-ExperienceRoot 'SetupWizardWindow').rootId
+                    $resumed = Wait-ExperienceState { param($state) $state.setup -eq 1 -and $state.draft.step -eq 2 -and $state.draft.output -eq $draftOutput } 'step and edited path restored after restart'
+                    $restoredPath = Find-Node 'SetupOutput' $rootId
+                    if ($restoredPath.value -ne $draftOutput) { throw 'The resumed wizard did not present its persisted output path.' }
+                    [void](Capture-Experience 'SetupWizardWindow' 'experience-step-3-resumed')
+                }
+                Invoke-NodeAction (Wait-Node 'SetupNext' $rootId 'Enabled').snapshot $rootId 'Invoke' | Out-Null
+            }
+            [void](Wait-ExperienceState { param($state) $state.setup -eq 2 -and $null -eq $state.draft } 'first-run setup completed')
+            Complete-ExperienceNews 'experience-first-run-news'
+            $applied = Get-Content -LiteralPath (Join-Path $dataRoot 'settings.json') -Raw | ConvertFrom-Json
+            if ($applied.finalOutputDirectory -ne $draftOutput -or -not $applied.updates.automaticChecks -or $applied.updates.mode -ne 2 -or $applied.updates.policyVersion -ne 1) {
+                throw 'Completed setup did not persist its output path and automatic install-on-exit policy.'
+            }
+        }
+        elseif ($ExperienceSmoke -eq 'News') {
+            Invoke-NodeAction (Wait-Node 'NavHelp' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
+            Invoke-NodeAction (Wait-Node 'InformationWhatsNew' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
+            Complete-ExperienceNews 'experience-news-manual'
+            # Manual access remains possible even after acknowledging this exact version.
+            Invoke-NodeAction (Find-Node 'InformationWhatsNew' $script:experienceMainRoot) $script:experienceMainRoot 'Invoke' | Out-Null
+            Complete-ExperienceNews 'experience-news-reopened'
+        }
+        else {
+            Invoke-NodeAction (Wait-Node 'NavSettings' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
+            Invoke-NodeAction (Wait-Node 'SettingsOpenSetup' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
+            $rootId = Capture-Experience 'SetupWizardWindow' 'experience-setup-reopened'
+            Invoke-NodeAction (Find-Node 'SetupSkip' $rootId) $rootId 'Invoke' | Out-Null
+            [void](Wait-ExperienceState { param($state) $state.setup -eq 3 -and $null -eq $state.draft } 'manual setup explicitly skipped')
+            [void](Wait-ExperienceRoot 'SetupWizardWindow' $false)
+        }
+        if ($ExperienceSmoke -in @('New', 'Resume', 'Upgrade')) {
+            $expectedInterface = if ($ExperienceSmoke -eq 'Upgrade' -and $ExperienceChoice -eq 'Classic') { 0 } else { 1 }
+            $appearance = Get-Content -LiteralPath (Join-Path $dataRoot 'appearance.json') -Raw | ConvertFrom-Json
+            if ($appearance.interfaceMode -ne $expectedInterface) { throw 'Chosen interface was not persisted.' }
+        }
+        Stop-ExperienceApplication
+        Start-ExperienceApplication 'completed-restart'
+        Wait-Node 'DownloadUrlInput' $script:experienceMainRoot 'Enabled' | Out-Null
+        foreach ($id in @('SetupWizardWindow', 'UpgradeChoiceWindow', 'WhatsNewWindow')) {
+            if (Get-ExperienceRoot $id) { throw "Completed/acknowledged journey unexpectedly appeared after restart: $id" }
+        }
+        Stop-ExperienceApplication
+        foreach ($relative in $preserved.Keys) {
+            if ((Get-FileHash -LiteralPath (Join-Path $dataRoot $relative) -Algorithm SHA256).Hash -ne $preserved[$relative]) { throw "Experience changed preserved user data fixture: $relative" }
+        }
+        # The shared runtime serializes history on clean shutdown. Compare every
+        # original field and identity, allowing serializer casing/default additions.
+        $historyAfter = @(Get-Content -LiteralPath (Join-Path $dataRoot 'history.json') -Raw | ConvertFrom-Json)
+        if ($historyBefore.Count -ne $historyAfter.Count) { throw 'The experience journey changed the number of history entries.' }
+        foreach ($oldEntry in $historyBefore) {
+            $newEntry = @($historyAfter | Where-Object queueItemId -eq $oldEntry.queueItemId)
+            if ($newEntry.Count -ne 1) { throw 'A history entry identity was lost or duplicated.' }
+            foreach ($field in $oldEntry.PSObject.Properties) {
+                if ($field.Value -ne $newEntry[0].($field.Name)) { throw "History field changed during the experience journey: $($field.Name)" }
+            }
+        }
+        @{ status = 'PASS'; scenario = $ExperienceSmoke; choice = $ExperienceChoice; externalActivation = [bool]$ExperienceExternalActivation; preservedHashes = $preserved;
+            historyIds = @($historyAfter | ForEach-Object queueItemId);
+            automation = 'DEBUG semantic bridge'; screenshots = 'Native owned HWND PrintWindow'; nativeWindowsUia = 'NOT EXECUTED'; fullReleaseQualification = 'DEFERRED' } |
+            ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'experience-result.json') -Encoding utf8
+        Write-Output "Experience smoke PASS (scenario=$ExperienceSmoke; profile=$dataRoot; native captures and targeted bridge assertions, not full UIA qualification)."
+    }
+    catch {
+        @{ status = 'FAIL'; scenario = $ExperienceSmoke; error = $_.ToString(); preservedHashes = $preserved } |
+            ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'experience-result.json') -Encoding utf8
+        throw
+    }
 }
 
 if (-not ('MtdAutomationWindowCloser' -as [type])) {
@@ -312,6 +572,32 @@ public static class MtdAutomationWindowCloser {
     public static bool CaptureOwnPopup(int processId, IntPtr popup, IntPtr dc) {
         GetWindowThreadProcessId(popup, out uint owner);
         return owner == processId && IsWindowVisible(popup) && PrintWindow(popup, dc, 2);
+    }
+    public static IntPtr FindOwnMainWindow(int processId) {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows((hwnd, data) => {
+            GetWindowThreadProcessId(hwnd, out uint owner);
+            if (owner != processId || !IsWindowVisible(hwnd) || GetWindowLongPtr(hwnd, -8) != IntPtr.Zero) return true;
+            var caption = new StringBuilder(512); GetWindowText(hwnd, caption, caption.Capacity);
+            if (caption.Length == 0 || (GetWindowLongPtr(hwnd, -20).ToInt64() & 0x80) != 0) return true;
+            result = hwnd; return false;
+        }, IntPtr.Zero);
+        return result;
+    }
+    public static IntPtr FindOwnCaption(int processId, string expected) {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows((hwnd, data) => {
+            GetWindowThreadProcessId(hwnd, out uint owner);
+            if (owner != processId || !IsWindowVisible(hwnd)) return true;
+            var caption = new StringBuilder(512); GetWindowText(hwnd, caption, caption.Capacity);
+            if (caption.ToString() != expected) return true;
+            result = hwnd; return false;
+        }, IntPtr.Zero);
+        return result;
+    }
+    public static bool CloseOwnedWindow(int processId, IntPtr hwnd) {
+        GetWindowThreadProcessId(hwnd, out uint owner);
+        return hwnd != IntPtr.Zero && owner == processId && PostMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero);
     }
     public static bool CaptureOwnWindow(int processId, IntPtr mainWindow, bool details, IntPtr dc) => InPhysicalCoordinates(() => {
         IntPtr target = mainWindow;
@@ -444,6 +730,44 @@ $settings = @{
     UseCustomFfmpeg = $true; CustomFfmpegPath = (Join-Path $toolRoot 'ffmpeg.exe')
     UseCustomDeno = $true; CustomDenoPath = (Join-Path $toolRoot 'deno.exe')
 }
+if ($ExperienceSmoke) {
+    $settings.Startup = @{ ShowTrayIcon = $false; CloseBehavior = 0; FirstHideNotice = $false }
+    # Only the external-activation variant accepts the owned secondary process.
+    # The existing QA_SKIP_PROTOCOL flag still prevents registry registration.
+    $settings.BrowserIntegrationEnabled = [bool]$ExperienceExternalActivation
+    $settings.EnableWebRemote = $false
+    # A fresh, successful check prevents the real updater monitor doing network work
+    # in this focused UI fixture while preserving the genuine automatic policy UI.
+    New-Item -ItemType Directory -Path (Join-Path $dataRoot 'Updates') -Force | Out-Null
+    @{ lastCheck = [DateTimeOffset]::UtcNow.ToString('O') } | ConvertTo-Json |
+        Set-Content -LiteralPath (Join-Path $dataRoot 'Updates/state.json') -Encoding utf8
+    if ($ExperienceSmoke -ne 'Upgrade') { $settings.Updates = @{ AutomaticChecks = $true; Mode = 2; PolicyVersion = 1 } }
+}
+if ($UpdateStatesSmoke) {
+    $settings.Startup = @{ ShowTrayIcon = $false; CloseBehavior = 0; FirstHideNotice = $false }
+    $settings.BrowserIntegrationEnabled = $false; $settings.EnableWebRemote = $false
+    $settings.Updates = @{ AutomaticChecks = $false; Frequency = 0; Mode = 0; PolicyVersion = 1 }
+    $updateFixtureRoot = Join-Path $dataRoot 'Updates'
+    New-Item -ItemType Directory -Path $updateFixtureRoot -Force | Out-Null
+    $updateFixtureArchive = Join-Path $updateFixtureRoot 'ModernTubeDownloader-9.9.9-win-x64.zip'
+    # A valid ZIP/checksum goes through the real staged-package validator. Its entry
+    # is inert text, and the smoke never invokes installation or arms install-on-exit.
+    Add-Type -AssemblyName System.IO.Compression
+    $archiveStream = [IO.File]::Create($updateFixtureArchive)
+    $archive = [IO.Compression.ZipArchive]::new($archiveStream, [IO.Compression.ZipArchiveMode]::Create, $false)
+    try {
+        $writer = [IO.StreamWriter]::new($archive.CreateEntry('ModernTubeDownloader.exe').Open())
+        try { $writer.Write('Isolated synthetic UI fixture. Not an executable. Never install this package.') }
+        finally { $writer.Dispose() }
+    } finally { $archive.Dispose(); $archiveStream.Dispose() }
+    $updateFixtureHash = (Get-FileHash -LiteralPath $updateFixtureArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+    $updateFixtureDownload = 'https://github.com/ProGraMajster/ModernTubeDownloader/releases/download/v9.9.9/ModernTubeDownloader-9.9.9-win-x64.zip'
+    @{ lastCheck = [DateTimeOffset]::UtcNow.ToString('O'); available = @{ version = '9.9.9'; notes = 'Isolated synthetic staged-package UI fixture; no public release downloaded or installed.';
+            page = 'https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v9.9.9'; archive = $updateFixtureDownload; checksum = $updateFixtureDownload + '.sha256' };
+        stagedArchive = $updateFixtureArchive; stagedHash = $updateFixtureHash; installOnExit = $false; lastInstallerRequest = $null } |
+        ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $updateFixtureRoot 'state.json') -Encoding utf8
+    Copy-Item -LiteralPath (Join-Path $updateFixtureRoot 'state.json') -Destination (Join-Path $dataRoot 'update-states-before.json')
+}
 if ($HotfixSmoke) {
     $settings.TemporaryDirectory = Join-Path $dataRoot 'simulate-merge-diskfull'
     $settings.MaxSimultaneousDownloads = 1
@@ -529,6 +853,25 @@ if ($PlaylistVisualSmoke) {
     $dummyQueue = @(1..6 | ForEach-Object { @{} }); $dummyHistory = @(1..6 | ForEach-Object { @{ FinalPath = 'qa.mp4' } })
     & (Join-Path $PSScriptRoot 'New-DashboardVisualFixture.ps1') -DataRoot $dataRoot -Queue $dummyQueue -History $dummyHistory
 }
+$experienceVersion = $buildProperties.SelectSingleNode('/Project/PropertyGroup/Version').InnerText.Trim().Split('+')[0]
+$experienceState = @{ schemaVersion = 1; existingProfile = $true; setup = 2; interfaceChoiceFamily = '1.3'; lastObservedVersion = $experienceVersion; lastWhatsNewAcknowledgedVersion = $experienceVersion }
+if ($ExperienceSmoke -in @('New', 'Resume')) {
+    $experienceState = @{ schemaVersion = 1; existingProfile = $false; setup = 0; lastObservedVersion = $experienceVersion }
+}
+elseif ($ExperienceSmoke -eq 'Upgrade') {
+    $experienceState = @{ schemaVersion = 1; existingProfile = $true; setup = 0; lastObservedVersion = '1.2.1'; lastWhatsNewAcknowledgedVersion = '1.2.1' }
+}
+# Every other smoke represents an already-onboarded isolated QA user. This is a
+# persisted test fixture, not a production flag which suppresses the new journeys.
+$experienceState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'experience.json') -Encoding utf8
+if ($ExperienceSmoke -in @('Upgrade', 'News', 'Reopen')) {
+    $experienceHistoryId = [guid]::NewGuid()
+    $experienceHistory = @(@{ QueueItemId = $experienceHistoryId; Title = 'Isolated migration record'; SourceUrl = 'https://example.test/experience'; VideoId = 'experience';
+        Channel = 'Synthetic QA'; Quality = '1080p'; FinalPath = (Join-Path $dataRoot 'output/kept.mp4'); CompletedAt = [DateTimeOffset]::UtcNow.ToString('O'); Status = 'Completed' })
+    ConvertTo-Json -InputObject @($experienceHistory) -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'history.json') -Encoding utf8
+    New-Item -ItemType Directory -Path (Join-Path $dataRoot 'Auth') -Force | Out-Null
+    'Synthetic opaque migration sentinel; contains no credentials.' | Set-Content -LiteralPath (Join-Path $dataRoot 'Auth/experience-sentinel.bin') -Encoding utf8
+}
 $normalProcess = $null
 $script:automationProcess = $null
 $protocolSnapshot = @()
@@ -550,6 +893,7 @@ if ($PublishStartupSmoke) {
     }
 }
 try {
+    if ($ExperienceSmoke) { Invoke-ExperienceSmoke; return }
     if ($TraySmoke) {
         $settings.Startup.CloseBehavior = 0
         $settings | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $dataRoot 'settings.json') -Encoding utf8
@@ -625,6 +969,7 @@ try {
         $normalProcess.Refresh()
         if ($normalProcess.HasExited) { throw 'Normal startup exited during the ready transition.' }
     }
+    if ($UpdateStatesSmoke) { [void](Read-UnarmedUpdateFixture) }
     if (-not $normalProcess.HasExited -and (-not $normalProcess.CloseMainWindow() -or -not $normalProcess.WaitForExit(30000))) { throw 'Normal startup did not close cleanly.' }
     Write-Output 'Normal startup: no Automation bridge; clean shutdown.'
     if ($PublishStartupSmoke) { Write-Output "Published startup smoke PASS (isolated profile=$dataRoot; custom QA tools, not real provisioning/download)."; return }
@@ -783,6 +1128,23 @@ try {
                 Invoke-NodeAction (Find-Node ('LiveSession-' + $liveFixture[1].SessionId.ToString('N')) $mainRoot) $mainRoot 'Select' | Out-Null
                 Wait-Node 'InspectorLiveAction' $mainRoot 'Enabled' | Out-Null
                 Capture-Dashboard 'live-scheduled-selected'
+                Invoke-NodeAction (Find-Node ('LiveDetailsButton-' + $liveFixture[1].SessionId.ToString('N')) $mainRoot) $mainRoot 'Invoke' | Out-Null
+                $liveDetailsRoot = Wait-ExperienceRoot 'LiveDetailsWindow'
+                Wait-Node 'LiveDetailsContent' $liveDetailsRoot.rootId | Out-Null
+                $screenLabels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
+                $liveDetailsWindow = [MtdAutomationWindowCloser]::FindOwnCaption($script:automationProcess.Id, $screenLabels.'Live.Details')
+                $liveDetailsSize = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $liveDetailsWindow)
+                $liveDetailsTree = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $liveDetailsRoot.rootId, '--depth', '12')
+                $liveDetailsTree | ConvertTo-Json -Depth 60 | Set-Content -LiteralPath (Join-Path $dataRoot 'live-details-tree.json') -Encoding utf8
+                $liveDetailsPicture = [Drawing.Bitmap]::new($liveDetailsSize[0], $liveDetailsSize[1]); $liveDetailsDrawing = [Drawing.Graphics]::FromImage($liveDetailsPicture)
+                $liveDetailsDc = $liveDetailsDrawing.GetHdc()
+                try {
+                    if (-not [MtdAutomationWindowCloser]::CaptureOwnPopup($script:automationProcess.Id, $liveDetailsWindow, $liveDetailsDc)) { throw 'LIVE details native capture failed.' }
+                }
+                finally { $liveDetailsDrawing.ReleaseHdc($liveDetailsDc); $liveDetailsDrawing.Dispose() }
+                try { $liveDetailsPicture.Save((Join-Path $dataRoot 'live-details.png')) } finally { $liveDetailsPicture.Dispose() }
+                if (-not [MtdAutomationWindowCloser]::CloseOwnedWindow($script:automationProcess.Id, $liveDetailsWindow)) { throw 'LIVE details close failed.' }
+                [void](Wait-ExperienceRoot 'LiveDetailsWindow' $false)
                 Invoke-NodeAction (Find-Node 'LiveSourceYouTube' $mainRoot) $mainRoot 'Invoke' | Out-Null
                 Wait-Node ('LiveSession-' + $liveFixture[0].SessionId.ToString('N')) $mainRoot 'NodeNotExposed' | Out-Null
                 Capture-Dashboard 'live-filter-empty'
@@ -1301,6 +1663,56 @@ try {
         Invoke-NodeAction (Find-Node 'SettingsCategoryUpdates' $mainRoot) $mainRoot 'Invoke' | Out-Null
         foreach ($id in @('ApplicationUpdatesSection','ApplicationUpdateFrequency','ApplicationUpdateMode','ApplicationUpdateStatus','ApplicationUpdateCheck')) {
             [void](Find-Node $id $mainRoot)
+        }
+        if ($UpdateStatesSmoke) {
+            try {
+                Write-Output "Owned update-state UI profile: $dataRoot (synthetic staged package, NotifyOnly, installation never invoked)."
+                Wait-UpdateFixture { param($state, $preferences) -not $preferences.updates.automaticChecks -and $preferences.updates.mode -eq 0 -and $preferences.updates.policyVersion -eq 1 } 'disabled automatic checks and NotifyOnly policy'
+                $labels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
+                # Await the updater's real initialization/Changed notification, not
+                # a delay or a manual check that could disguise stale presentation.
+                $readyWatch = [Diagnostics.Stopwatch]::StartNew()
+                do {
+                    [void](Read-UnarmedUpdateFixture)
+                    $ready = Find-Node 'ApplicationUpdateStatus' $mainRoot
+                    if ($ready.name -eq $labels.'Updates.Ready') { break }
+                    Start-Sleep -Milliseconds 50
+                } while ($readyWatch.Elapsed.TotalSeconds -lt 15)
+                if ($ready.name -ne $labels.'Updates.Ready') { throw "The real updater did not validate the staged fixture: $($ready.name)" }
+                if ((Find-Node 'ApplicationUpdateAutomatic' $mainRoot).states -match 'Checked') { throw 'Disabled automatic update policy is checked in the UI.' }
+                if ((Find-Node 'ApplicationUpdateOnExit' $mainRoot).states -match 'Checked') { throw 'Install-on-exit must remain unchecked in the UI.' }
+                Invoke-NodeAction (Find-Node 'ApplicationUpdateAutomatic' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
+                Capture-SmokeMain $mainRoot 'updates-off'
+                Invoke-NodeAction (Find-Node 'ApplicationUpdateAutomatic' $mainRoot) $mainRoot 'Toggle' | Out-Null
+                Invoke-NodeAction (Find-Node 'ApplicationUpdateSave' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-Node 'ApplicationUpdateSave' $mainRoot 'Enabled' | Out-Null
+                Wait-UpdateFixture { param($state, $preferences) $preferences.updates.automaticChecks -and $preferences.updates.mode -eq 0 -and $preferences.updates.policyVersion -eq 1 } 'enabled automatic checks with NotifyOnly retained'
+                if ((Find-Node 'ApplicationUpdateAutomatic' $mainRoot).states -notmatch 'Checked') { throw 'Saved automatic update policy is not checked in the UI.' }
+                Capture-SmokeMain $mainRoot 'updates-on'
+                Invoke-NodeAction (Find-Node 'ApplicationUpdateOnExit' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
+                if ((Find-Node 'ApplicationUpdateOnExit' $mainRoot).states -match 'Checked') { throw 'Saving NotifyOnly unexpectedly checked install-on-exit.' }
+                if ((Find-Node 'ApplicationUpdateInstall' $mainRoot).states -match 'Unavailable') { throw 'Verified staged fixture must expose an enabled install action (never invoked by this smoke).' }
+                Capture-SmokeMain $mainRoot 'updates-staged-ready'
+                Invoke-NodeAction (Find-Node 'ApplicationUpdateSkip' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-Node 'ApplicationUpdateSkip' $mainRoot 'Enabled' | Out-Null
+                Wait-UpdateFixture { param($state, $preferences) $state.skippedVersion -eq '9.9.9' -and $null -ne $state.remindAfter } 'synthetic version skipped without scheduling installation'
+                Capture-SmokeMain $mainRoot 'updates-deferred'
+                Copy-Item -LiteralPath (Join-Path $dataRoot 'Updates/state.json') -Destination (Join-Path $dataRoot 'update-states-after.json')
+                @{ status = 'PASS'; scenario = 'UpdateStatesSmoke'; version = '9.9.9'; fixture = 'Synthetic inert ZIP validated by production updater';
+                    automaticOff = $true; automaticOnNotifyOnly = $true; stagedReady = $true; deferred = $true; installOnExit = $false;
+                    installationInvoked = $false; publicReleaseDownloaded = $false; automation = 'DEBUG semantic bridge';
+                    screenshots = 'Native owned HWND PrintWindow'; nativeWindowsUia = 'NOT EXECUTED'; installationQualification = 'NOT EXECUTED' } |
+                    ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'update-states-result.json') -Encoding utf8
+                Write-Output "Update states smoke PASS: automatic off/on, validated staged package, safe defer; no installation or public release download. Profile=$dataRoot"
+            }
+            catch {
+                @{ status = 'FAIL'; scenario = 'UpdateStatesSmoke'; error = $_.ToString() } | ConvertTo-Json -Depth 5 |
+                    Set-Content -LiteralPath (Join-Path $dataRoot 'update-states-result.json') -Encoding utf8
+                Copy-Item -LiteralPath (Join-Path $dataRoot 'Updates/state.json') -Destination (Join-Path $dataRoot 'update-states-failure-state.json')
+                try { Capture-SmokeMain $mainRoot 'updates-failure' } catch { Write-Warning "The failed update fixture could not be captured: $_" }
+                throw
+            }
+            return
         }
         Invoke-NodeAction (Find-Node 'ApplicationUpdateCheck' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
         Invoke-NodeAction (Find-Node 'ApplicationUpdateCheck' $mainRoot) $mainRoot 'Invoke' | Out-Null
@@ -2638,6 +3050,15 @@ finally {
     $env:MTD_FAKE_METADATA_THUMBNAIL = $previousFakeThumbnail
     foreach ($process in @($normalProcess, $script:automationProcess)) {
         if ($null -ne $process -and -not $process.HasExited) {
+            if ($UpdateStatesSmoke) {
+                try { [void](Read-UnarmedUpdateFixture) }
+                catch {
+                    # Never close an unexpectedly armed fixture through the normal
+                    # exit handler, which could launch the updater. Preserve all data.
+                    Write-Warning "Unsafe staged fixture state retained for investigation; stopping only owned QA PID=$($process.Id) without the exit handler. $_"
+                    $process.Kill(); $process.WaitForExit(); $process.Dispose(); continue
+                }
+            }
             $process.CloseMainWindow() | Out-Null
             if (-not $process.WaitForExit(10000)) { $process.Kill(); $process.WaitForExit() }
         }

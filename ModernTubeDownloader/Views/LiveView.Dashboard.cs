@@ -142,12 +142,15 @@ internal sealed partial class LiveSessionCard
     private AppVectorIcon? dashboardState;
     private Panel? dashboardThumbnail;
     private AppVectorIcon? dashboardThumbnailIcon;
+    private Panel? dashboardStatus;
+    private SourceVectorIcon? dashboardSource;
     private readonly ToolTip dashboardTips = new();
     public event EventHandler<LiveSession>? SelectionRequested;
     public void SetSelected(bool value) { if (selected == value) return; selected = value; if (dashboard) LayoutDashboardCard(); }
     public void SetDashboard(bool value)
     {
         dashboard = value;
+        thumbnail.RoundedPreview = value;
         TabStop = value; SetControlBehavior(ControlBehaviors.Selectable, value);
         AppTypography.Bind(title, value ? DashboardVisual.ItemTitle : 13, FontStyle.Bold);
         AppTypography.Bind(facts, value ? 9.25f : 10.5f); AppTypography.Bind(state, value ? 9.5f : 10.5f);
@@ -159,6 +162,8 @@ internal sealed partial class LiveSessionCard
             state.AutoEllipsis = false;
             if (dashboardChannel is not null) dashboardChannel.Visible = dashboardTiming!.Visible = dashboardState!.Visible = false;
             if (dashboardThumbnail is not null) dashboardThumbnail.Visible = false;
+            if (dashboardStatus is not null) dashboardStatus.Visible = false;
+            if (dashboardSource is not null) dashboardSource.Visible = false;
             if (current is not null) UpdateSession(current);
         }
         LayoutCard();
@@ -169,26 +174,31 @@ internal sealed partial class LiveSessionCard
         {
             dashboardChannel = AppUi.Muted(); dashboardTiming = AppUi.Muted();
             dashboardState = new AppVectorIcon(AppIconKind.Live, 16) { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
+            dashboardStatus = new Panel { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
+            DashboardVisual.Flat(dashboardStatus); dashboardStatus.Style.Border.Radius = 6;
+            dashboardSource = new SourceVectorIcon { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
+            dashboardSource.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
+            facts.Controls.Add(dashboardSource);
             dashboardThumbnail = new Panel(); AppUi.BindBackground(dashboardThumbnail, AppThemeTokens.SurfaceSecondary); DashboardVisual.Flat(dashboardThumbnail);
             dashboardThumbnailIcon = new AppVectorIcon(AppIconKind.Live, 28) { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
             dashboardThumbnail.Controls.Add(dashboardThumbnailIcon); dashboardThumbnail.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
             dashboardThumbnailIcon.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
-            Controls.AddRange([dashboardChannel, dashboardTiming, dashboardState, dashboardThumbnail]);
+            Controls.AddRange([dashboardChannel, dashboardTiming, dashboardState, dashboardThumbnail, dashboardStatus]);
         }
         dashboardChannel.Visible = dashboardTiming!.Visible = dashboardState!.Visible = true;
-        var line = AppTypography.TextHeight(24); var narrow = Width < AppTypography.TextHeight(860);
+        var line = AppTypography.TextHeight(24); var narrow = Width < AppTypography.TextHeight(780);
         var stackActions = Width < AppTypography.TextHeight(620);
-        var imageWidth = AppearancePresentation.ImageWidth(AppearancePresentation.Current.ModernDashboardShell.Thumbnail, 144);
+        var imageWidth = AppearancePresentation.ImageWidth(AppearancePresentation.Current.ModernDashboardShell.Thumbnail, 156);
         thumbnail.Visible = imageWidth > 0 && thumbnail.Image is not null; thumbnail.SetBounds(12, 12, imageWidth, imageWidth * 9 / 16);
         dashboardThumbnail!.Visible = imageWidth > 0 && thumbnail.Image is null; dashboardThumbnail.Bounds = thumbnail.Bounds;
         dashboardThumbnailIcon!.SetBounds((imageWidth - 28) / 2, (thumbnail.Height - 28) / 2, 28, 28);
         var left = imageWidth > 0 ? thumbnail.Right + 16 : 14;
-        foreach (var button in new[] { primary, secondary, details, folder }) DashboardVisual.Button(button, button == primary && current?.CanResume == true);
+        foreach (var button in new[] { primary, secondary, details, folder }) DownloadsVisual.Button(button, button == primary && current?.CanResume == true);
         var actionWidth = Math.Max(AppTypography.TextHeight(146), new[] { primary, secondary, details, folder }.Where(b => b.Visible).Select(b => DashboardVisual.ActionWidth(b, true)).DefaultIfEmpty(0).Max());
         var statusWidth = narrow ? 0 : AppTypography.TextHeight(180);
         var textWidth = Math.Max(1, Width - left - (stackActions ? 12 : actionWidth + statusWidth + 36));
         DashboardVisual.Flat(this, !selected);
-        AppUi.BindBackground(this, selected ? AppThemeTokens.RowSelected : AppThemeTokens.Surface);
+        AppUi.BindGradient(this, selected ? DownloadsVisual.Selected : DownloadsVisual.Panel, selected ? DownloadsVisual.SelectedEnd : DownloadsVisual.PanelEnd);
         Style.Border.Width = selected ? 1 : 0; Style.Border.Radius = selected ? 6 : 0; Style.Border.Color = AppUi.GetColor(AppThemeTokens.Accent).WithAlpha(130);
         title.AutoEllipsis = true; title.Multiline = true;
         title.SetBounds(left, 12, textWidth, DashboardVisual.LabelHeight(title, textWidth, 2));
@@ -199,8 +209,12 @@ internal sealed partial class LiveSessionCard
         {
             var t = services.Localization;
             var appearance = AppearancePresentation.Current.Live;
-            var source = appearance.ShowSource ? SourcePresentation.Host(current.SourceUrl) + " · " : "";
-            facts.Text = source + t["Quality." + current.QualityPresetId] + " · " + current.Container;
+            var identity = SourceBrandLookup.Resolve(current.SourceUrl);
+            var source = appearance.ShowSource ? identity.Name + " · " : "";
+            facts.Text = source + t["Quality." + current.QualityPresetId] + " · " + current.Container.ToString().ToUpperInvariant();
+            dashboardSource!.Brand = identity.Brand; dashboardSource.Kind = identity.Kind;
+            dashboardSource.Visible = appearance.ShowSource;
+            DashboardVisual.SetPadding(facts, new Padding(appearance.ShowSource ? 22 : 0, 0, 0, 0));
             var measurements = new List<string>();
             if (appearance.ShowElapsed) measurements.Add(current.RecordedDuration.ToString(@"hh\:mm\:ss"));
             if (appearance.ShowBytes) measurements.Add(DashboardStyle.Bytes(current.BytesWritten));
@@ -215,16 +229,22 @@ internal sealed partial class LiveSessionCard
         }
         facts.Multiline = true;
         facts.SetBounds(left, dashboardChannel.Bottom + 4, textWidth, DashboardVisual.LabelHeight(facts, textWidth, 2));
+        dashboardSource!.SetBounds(0, Math.Max(0, (Math.Min(line, facts.Height) - 16) / 2), 16, 16);
         var statusLeft = narrow ? left : left + textWidth + 12;
         var statusTop = narrow ? facts.Bottom + 4 : 12;
         var availableStatus = narrow ? textWidth : statusWidth;
-        dashboardState.SetBounds(statusLeft, statusTop + (line - 16) / 2, 16, 16);
-        state.SetBounds(statusLeft + 22, statusTop, Math.Max(100, availableStatus - 22), line);
+        var pillWidth = Math.Min(availableStatus, DashboardVisual.TextWidth(state, state.Text) + 42);
+        dashboardStatus!.Visible = true; dashboardStatus.SetBounds(statusLeft, statusTop, pillWidth, line);
+        dashboardStatus.SendToBack();
+        dashboardState.SetBounds(statusLeft + 8, statusTop + (line - 16) / 2, 16, 16);
+        state.SetBounds(statusLeft + 30, statusTop, Math.Max(1, pillWidth - 38), line);
         state.AutoEllipsis = true; dashboardTips.SetToolTip(state, state.Text);
         dashboardTiming.Multiline = true; AppTypography.Bind(dashboardTiming, 9.25f);
         dashboardTiming.SetBounds(statusLeft, state.Bottom + 8, availableStatus, DashboardVisual.LabelHeight(dashboardTiming, availableStatus, 6));
         var token = current?.State switch { LiveSessionState.Recording or LiveSessionState.Completed => AppThemeTokens.Success, LiveSessionState.Reconnecting or LiveSessionState.WaitingForLive => AppThemeTokens.Warning, LiveSessionState.Failed => AppThemeTokens.Error, _ => AppThemeTokens.Info };
         AppUi.BindForeground(state, token); dashboardState.SetColorToken(token);
+        dashboardStatus.Style.BackgroundColor = AppUi.GetColor(token).WithAlpha(24);
+        dashboardStatus.Style.Border.Color = AppUi.GetColor(token).WithAlpha(55); dashboardStatus.Style.Border.Width = 1;
         dashboardState.SetKind(current?.State switch { LiveSessionState.WaitingForLive => AppIconKind.History, LiveSessionState.Completed => AppIconKind.Check, LiveSessionState.Failed => AppIconKind.Close, _ => AppIconKind.Live });
         var actionTop = stackActions ? Math.Max(thumbnail.Bottom, dashboardTiming.Bottom) + 12 : 12;
         if (stackActions) actionWidth = Math.Max(1, Width - left - 12);
@@ -241,7 +261,7 @@ internal sealed partial class LiveSessionCard
         {
             secondary.SetBounds(actionLeft, actionTop, actionWidth - 42, actionHeight);
             // Text retains its native action semantics; the adjacent square opens details.
-            DashboardVisual.RestoreTree(secondary); DashboardVisual.Button(secondary);
+            DashboardVisual.RestoreTree(secondary); DownloadsVisual.Button(secondary);
         }
         actionTop += actionHeight + 7;
         if (folder.Visible)

@@ -130,7 +130,7 @@ internal static class Program
                     logger.Error("Browser protocol integration could not be configured.", error);
                 }
             }
-            using var form = new MainForm(services, enableAutomation, initialRequest, classicUi);
+            using var form = new MainForm(services, enableAutomation, initialRequest, classicUi, autostart || notificationLaunch);
             if (services.Notifications is { } notifications)
                 notifications.Navigate += (_, request) => Application.RunOnUIThread(() => form.HandleNotification(request));
             instance.Start(request =>

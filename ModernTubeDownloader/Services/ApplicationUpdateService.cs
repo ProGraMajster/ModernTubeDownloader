@@ -20,6 +20,11 @@ public sealed class ApplicationUpdateState
     public string? StagedArchive { get; set; }
     public string? StagedHash { get; set; }
     public bool InstallOnExit { get; set; }
+    public string? LastInstallerRequest { get; set; }
+    public int? LastInstallerProcessId { get; set; }
+    public long? LastInstallerStartUtcTicks { get; set; }
+    public bool InstallationFailed { get; set; }
+    public string? AutomaticInstallSuppressedVersion { get; set; }
 }
 
 public interface IApplicationReleaseSource { Task<ApplicationRelease?> GetLatestAsync(CancellationToken token); }
@@ -90,14 +95,19 @@ public sealed class ApplicationUpdateService : IDisposable
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly CancellationTokenSource lifetime = new();
     private Task? monitor;
-    private bool disposed;
+    private bool disposed, initialized;
     public ApplicationUpdateState State { get; private set; } = new();
     public string StatusKey { get; private set; } = "Updates.Idle";
     public double Progress { get; private set; }
     public event EventHandler? Changed;
     public event EventHandler<string>? UpdatePrepared;
     public string CurrentVersion { get; }
-    public bool Ready => State.StagedArchive is not null && State.StagedHash is not null && File.Exists(State.StagedArchive);
+    public bool StateUnavailable { get; private set; }
+    private bool HasStagedArchive => State.StagedArchive is not null && State.StagedHash is not null && File.Exists(State.StagedArchive);
+    public bool Ready => initialized && !StateUnavailable && HasStagedArchive;
+    public bool InstallationPending => State.LastInstallerRequest is not null && !State.InstallationFailed;
+    public bool ShouldInstallOnExit => Ready && State.InstallOnExit && !IsDeferred && !State.InstallationFailed && !InstallationPending;
+    private bool IsDeferred => State.Available is null || State.Available.Version == State.SkippedVersion || State.RemindAfter > DateTimeOffset.UtcNow;
 
     public ApplicationUpdateService(AppPaths paths, SettingsService settings, HttpClient http, IAppLogger logger,
         IApplicationReleaseSource? releases = null, string? currentVersion = null, TimeSpan? checkTimeout = null, TimeProvider? checkClock = null)
@@ -113,13 +123,83 @@ public sealed class ApplicationUpdateService : IDisposable
 
     public async Task InitializeAsync(CancellationToken token = default)
     {
-        try { State = await AtomicJsonFile.ReadAsync<ApplicationUpdateState>(stateFile, token) ?? new(); }
-        catch (Exception error) { logger.Error("Update state could not be read; no update will be installed.", error); State = new(); }
-        if (State.StagedArchive is { } path && (!Path.GetFullPath(path).StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || !File.Exists(path)))
-        { State.StagedArchive = null; State.StagedHash = null; State.InstallOnExit = false; }
-        if (State.Available is null || !IsNewer(State.Available.Version, CurrentVersion))
-        { State.Available = null; State.StagedArchive = null; State.StagedHash = null; State.InstallOnExit = false; }
-        StatusKey = Ready ? "Updates.Ready" : "Updates.Idle";
+        await gate.WaitAsync(token);
+        try
+        {
+            if (initialized) return;
+            await InitializeCoreAsync(token);
+            initialized = true;
+        }
+        finally { gate.Release(); }
+        // Panels exist before the background monitor finishes restoring state.
+        // Publish after admission is released, including when checks are disabled.
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private async Task InitializeCoreAsync(CancellationToken token)
+    {
+        try
+        {
+            FileAttributes? attributes;
+            try { attributes = File.GetAttributes(stateFile); }
+            catch (FileNotFoundException) { attributes = null; }
+            catch (DirectoryNotFoundException) { attributes = null; }
+            if (attributes is null) State = new();
+            else
+            {
+                if ((attributes.Value & FileAttributes.Directory) != 0) throw new IOException("An update state file is occupied by a directory.");
+                State = await AtomicJsonFile.ReadAsync<ApplicationUpdateState>(stateFile, token) ?? throw new InvalidDataException("Empty stored update state.");
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error)
+        {
+            State = new(); StateUnavailable = true;
+            Fail("Update state could not be read; its original contents are retained and automatic updating is disabled until the state is repaired.", error);
+            return;
+        }
+        try
+        {
+            if (State.Available is not null) ValidateRelease(State.Available);
+            if (State.Available is null || !IsNewer(State.Available.Version, CurrentVersion))
+            { State.Available = null; ClearStaging(); State.InstallationFailed = false; }
+            else if (State.StagedArchive is not null)
+            {
+                ValidateStagedPath();
+                await UpdatePackageSecurity.VerifyAsync(State.StagedArchive, State.StagedHash ?? "", token);
+            }
+            if (State.LastInstallerRequest is { } request)
+            {
+                if (!IsOwnedPath(request) || Path.GetFileName(request) != "request.json") throw new InvalidDataException("Unexpected installer result path.");
+                UpdatePackageSecurity.EnsureNoReparsePoints(request);
+                var result = request + ".result.json";
+                UpdatePackageSecurity.EnsureNoReparsePoints(result);
+                if (File.Exists(result))
+                {
+                    if (new FileInfo(result).Length > 65536) throw new InvalidDataException("Installer result exceeds the limit.");
+                    using var json = JsonDocument.Parse(await File.ReadAllTextAsync(result, token));
+                    State.InstallationFailed = !json.RootElement.GetProperty("success").GetBoolean();
+                    State.LastInstallerRequest = null;
+                    State.LastInstallerProcessId = null; State.LastInstallerStartUtcTicks = null;
+                    State.InstallOnExit = false;
+                    await SaveAsync(token);
+                }
+                else if (!InstallerProcessIsRunning())
+                {
+                    State.LastInstallerRequest = null; State.InstallationFailed = true; State.InstallOnExit = false;
+                    State.LastInstallerProcessId = null; State.LastInstallerStartUtcTicks = null;
+                    await SaveAsync(token);
+                }
+            }
+            if (IsDeferred || State.InstallationFailed) State.InstallOnExit = false;
+            StatusKey = State.InstallationFailed ? "Updates.InstallFailed" : InstallationPending ? "Updates.InstallPending" : HasStagedArchive ? "Updates.Ready" : "Updates.Idle";
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error)
+        {
+            ClearStaging(); State.LastInstallerRequest = null; StateUnavailable = true;
+            Fail("Stored update state or staged package failed validation; no installation is armed.", error);
+        }
     }
 
     public void Start() => monitor ??= Task.Run(MonitorAsync);
@@ -132,16 +212,7 @@ public sealed class ApplicationUpdateService : IDisposable
             {
                 try
                 {
-                var options = settings.Current.Updates;
-                var interval = options.Frequency == UpdateCheckFrequency.Weekly ? TimeSpan.FromDays(7) : TimeSpan.FromDays(1);
-                if (options.AutomaticChecks && (!State.LastCheck.HasValue || DateTimeOffset.UtcNow - State.LastCheck >= interval))
-                {
-                    await CheckAsync(lifetime.Token);
-                    if (options.Mode != UpdateInstallMode.NotifyOnly && State.Available is not null &&
-                        State.Available.Version != State.SkippedVersion && (!State.RemindAfter.HasValue || State.RemindAfter <= DateTimeOffset.UtcNow) && !Ready)
-                        await DownloadAsync(lifetime.Token);
-                    if (Ready && options.Mode == UpdateInstallMode.InstallOnExit) await SetInstallOnExitAsync(true, lifetime.Token);
-                }
+                    await RunAutomaticCycleAsync(lifetime.Token);
                 }
                 catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { break; }
                 catch (Exception error) { Fail("This application update attempt failed; the monitor will retry later.", error); }
@@ -152,10 +223,66 @@ public sealed class ApplicationUpdateService : IDisposable
         catch (Exception error) { Fail("The application update monitor failed.", error); }
     }
 
+    internal async Task RunAutomaticCycleAsync(CancellationToken token = default)
+    {
+        await InitializeAsync(token);
+        if (StateUnavailable) return;
+        var options = settings.Current.Updates;
+        if (!options.AutomaticChecks || InstallationPending) return;
+        var interval = options.Frequency == UpdateCheckFrequency.Weekly ? TimeSpan.FromDays(7) : TimeSpan.FromDays(1);
+        if (!State.LastCheck.HasValue || DateTimeOffset.UtcNow - State.LastCheck >= interval) await CheckAsync(token);
+        // Settings may change while the network operation is in progress.
+        options = settings.Current.Updates;
+        if (!options.AutomaticChecks || options.Mode == UpdateInstallMode.NotifyOnly || IsDeferred || State.InstallationFailed) return;
+        if (!Ready) await DownloadAsync(token);
+        await gate.WaitAsync(token);
+        try
+        {
+            options = settings.Current.Updates;
+            if (Ready && options.AutomaticChecks && options.Mode == UpdateInstallMode.InstallOnExit && !IsDeferred && !State.InstallationFailed && !InstallationPending && State.AutomaticInstallSuppressedVersion != State.Available?.Version)
+            { State.InstallOnExit = true; await SaveAsync(token); Changed?.Invoke(this, EventArgs.Empty); }
+        }
+        finally { gate.Release(); }
+    }
+
+    public async Task ApplyPolicyAsync(bool automaticChecks, UpdateCheckFrequency frequency, UpdateInstallMode mode, CancellationToken token = default)
+    {
+        if (!Enum.IsDefined(frequency) || !Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+        await InitializeAsync(token);
+        await gate.WaitAsync(token);
+        try
+        {
+            if (StateUnavailable)
+            {
+                // A user can still disable checks or record preferences without
+                // overwriting unreadable Skip/Defer/installer evidence.
+                var unavailableOptions = settings.Current.Updates;
+                unavailableOptions.AutomaticChecks = automaticChecks; unavailableOptions.Frequency = frequency;
+                unavailableOptions.Mode = mode; unavailableOptions.PolicyVersion = 1;
+                await settings.SaveAsync(token); Changed?.Invoke(this, EventArgs.Empty); return;
+            }
+            // Disarm first, even when a later settings write fails. A staged package
+            // must not remain armed under a policy the user was trying to replace.
+            State.InstallOnExit = false;
+            State.AutomaticInstallSuppressedVersion = State.Available?.Version;
+            await SaveAsync(token);
+            var options = settings.Current.Updates;
+            options.AutomaticChecks = automaticChecks; options.Frequency = frequency; options.Mode = mode; options.PolicyVersion = 1;
+            await settings.SaveAsync(token);
+            State.AutomaticInstallSuppressedVersion = null;
+            State.InstallOnExit = automaticChecks && mode == UpdateInstallMode.InstallOnExit && Ready && !IsDeferred && !State.InstallationFailed && !InstallationPending;
+            await SaveAsync(token);
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+        finally { gate.Release(); }
+    }
+
     public async Task CheckAsync(CancellationToken token = default)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
         var callerToken = token;
+        await InitializeAsync(linked.Token);
+        if (StateUnavailable) return;
         await gate.WaitAsync(linked.Token);
         // Start after admission to the serialized check, exactly as CancelAfter did.
         // Production uses the system clock; tests can advance this same deadline
@@ -169,11 +296,11 @@ public sealed class ApplicationUpdateService : IDisposable
             var latest = await releases.GetLatestAsync(token);
             var available = latest is not null && IsNewer(latest.Version, CurrentVersion) ? latest : null;
             if (State.Available?.Version != available?.Version || available is null)
-            { State.StagedArchive = null; State.StagedHash = null; State.InstallOnExit = false; }
+            { ClearStaging(); State.InstallationFailed = false; }
             State.Available = available;
             State.LastCheck = DateTimeOffset.UtcNow;
             await SaveAsync(token);
-            Publish(Ready ? "Updates.Ready" : State.Available is null ? "Updates.Current" : "Updates.Available");
+            Publish(State.InstallationFailed ? "Updates.InstallFailed" : Ready ? "Updates.Ready" : State.Available is null ? "Updates.Current" : "Updates.Available");
         }
         catch (OperationCanceledException error) when (!callerToken.IsCancellationRequested && !lifetime.IsCancellationRequested)
         { Fail("Checking application updates exceeded its deadline; checking can be retried.", error); }
@@ -183,8 +310,8 @@ public sealed class ApplicationUpdateService : IDisposable
 
     public static bool IsNewer(string latest, string current)
     {
-        var currentParts = current.Split('-', 2);
-        return Version.TryParse(latest, out var candidate) && Version.TryParse(currentParts[0], out var installed) &&
+        var currentParts = current.Split('+', 2)[0].Split('-', 2);
+        return IsStableVersion(latest) && Version.TryParse(latest, out var candidate) && Version.TryParse(currentParts[0], out var installed) &&
             (candidate > installed || candidate == installed && currentParts.Length == 2);
     }
 
@@ -192,6 +319,8 @@ public sealed class ApplicationUpdateService : IDisposable
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
         token = linked.Token;
+        await InitializeAsync(token);
+        if (StateUnavailable) return;
         await gate.WaitAsync(token);
         string? partial = null;
         string? validationDirectory = null;
@@ -199,6 +328,13 @@ public sealed class ApplicationUpdateService : IDisposable
         {
             var release = State.Available ?? throw new InvalidOperationException("No update is available.");
             ValidateRelease(release);
+            if (Ready)
+            {
+                ValidateStagedPath();
+                await UpdatePackageSecurity.VerifyAsync(State.StagedArchive!, State.StagedHash!, token);
+                Publish(State.InstallationFailed ? "Updates.InstallFailed" : "Updates.Ready");
+                return;
+            }
             Publish("Updates.Downloading"); Progress = 0;
             using var checksumResponse = await http.GetAsync(release.Checksum, HttpCompletionOption.ResponseHeadersRead, token);
             checksumResponse.EnsureSuccessStatusCode();
@@ -232,7 +368,7 @@ public sealed class ApplicationUpdateService : IDisposable
             State.StagedArchive = staged; State.StagedHash = fields[0]; Progress = 100;
             await SaveAsync(token); Publish("Updates.Ready"); UpdatePrepared?.Invoke(this, release.Version);
         }
-        catch (Exception error) when (error is not OperationCanceledException) { Fail("Downloading/verifying the application update failed.", error); }
+        catch (Exception error) when (error is not OperationCanceledException) { ClearStaging(); Fail("Downloading/verifying the application update failed.", error); }
         finally
         {
             try
@@ -253,26 +389,65 @@ public sealed class ApplicationUpdateService : IDisposable
     private static void ValidateRelease(ApplicationRelease release)
     {
         var tag = "v" + release.Version;
-        if (!Version.TryParse(release.Version, out _) || release.Archive.AbsoluteUri != $"{GitHubApplicationReleaseSource.Repository}/releases/download/{tag}/ModernTubeDownloader-{release.Version}-win-x64.zip" ||
+        if (!IsStableVersion(release.Version) || release.Archive.AbsoluteUri != $"{GitHubApplicationReleaseSource.Repository}/releases/download/{tag}/ModernTubeDownloader-{release.Version}-win-x64.zip" ||
             release.Checksum.AbsoluteUri != release.Archive.AbsoluteUri + ".sha256" || release.Page.AbsoluteUri != $"{GitHubApplicationReleaseSource.Repository}/releases/tag/{tag}")
             throw new InvalidDataException("Unexpected release source.");
     }
 
+    private static bool IsStableVersion(string version) => Regex.IsMatch(version, @"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$");
+    private bool InstallerProcessIsRunning()
+    {
+        if (State.LastInstallerProcessId is not { } id || State.LastInstallerStartUtcTicks is not { } ticks) return false;
+        try { using var process = Process.GetProcessById(id); return !process.HasExited && process.StartTime.ToUniversalTime().Ticks == ticks; }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
+    }
+    private bool IsOwnedPath(string path) => Path.GetFullPath(path).StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    private void ValidateStagedPath()
+    {
+        var expected = Path.Combine(root, Path.GetFileName(State.Available!.Archive.AbsolutePath));
+        if (State.StagedArchive is not { } path || !Path.GetFullPath(path).Equals(Path.GetFullPath(expected), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Unexpected staged archive path.");
+        UpdatePackageSecurity.EnsureNoReparsePoints(path);
+    }
+    private void ClearStaging() { State.StagedArchive = null; State.StagedHash = null; State.InstallOnExit = false; }
+
     public async Task DeferAsync(bool skip, CancellationToken token = default)
     {
+        await InitializeAsync(token); EnsureStateWritable();
         await gate.WaitAsync(token);
         try {
         State.RemindAfter = DateTimeOffset.UtcNow.AddDays(1);
         if (skip) State.SkippedVersion = State.Available?.Version;
+        State.InstallOnExit = false;
         await SaveAsync(token); Changed?.Invoke(this, EventArgs.Empty);
         } finally { gate.Release(); }
     }
     public async Task SetInstallOnExitAsync(bool enabled, CancellationToken token = default)
-    { await gate.WaitAsync(token); try { State.InstallOnExit = enabled && Ready; await SaveAsync(token); Changed?.Invoke(this, EventArgs.Empty); } finally { gate.Release(); } }
+    {
+        await InitializeAsync(token); EnsureStateWritable();
+        await gate.WaitAsync(token);
+        try
+        {
+            State.InstallOnExit = enabled && Ready && !InstallationPending;
+            State.AutomaticInstallSuppressedVersion = enabled ? null : State.Available?.Version;
+            if (State.InstallOnExit) { State.RemindAfter = null; State.SkippedVersion = null; State.InstallationFailed = false; }
+            await SaveAsync(token); Changed?.Invoke(this, EventArgs.Empty);
+        }
+        finally { gate.Release(); }
+    }
 
     public async Task LaunchInstallerAsync(bool restart, CancellationToken token = default)
     {
+        await InitializeAsync(token); EnsureStateWritable();
+        await gate.WaitAsync(token);
+        if (InstallationPending) { gate.Release(); throw new InvalidOperationException("An updater process is already pending."); }
+        try
+        {
         if (!Ready) throw new InvalidOperationException("No verified staged update.");
+        ValidateRelease(State.Available ?? throw new InvalidDataException("No release metadata."));
+        ValidateStagedPath();
+        if (!IsNewer(State.Available.Version, CurrentVersion)) throw new InvalidDataException("The staged release cannot replace this version.");
         await UpdatePackageSecurity.VerifyAsync(State.StagedArchive!, State.StagedHash!, token);
         var runner = Path.Combine(root, "runner-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(runner);
@@ -282,13 +457,39 @@ public sealed class ApplicationUpdateService : IDisposable
         var request = new UpdaterRequest(AppContext.BaseDirectory, State.StagedArchive!, State.StagedHash!, parent.Id, parent.StartTime.ToUniversalTime().Ticks, restart);
         var requestFile = Path.Combine(runner, "request.json");
         await File.WriteAllTextAsync(requestFile, JsonSerializer.Serialize(request), token);
+        State.LastInstallerRequest = requestFile; State.InstallationFailed = false; State.InstallOnExit = false;
+        await SaveAsync(token);
         var start = new ProcessStartInfo(Path.Combine(runner, "ModernTubeDownloader.Updater.exe")) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = runner };
         start.ArgumentList.Add("--request"); start.ArgumentList.Add(requestFile);
         using var updater = Process.Start(start) ?? throw new IOException("The external updater process could not be started.");
+        State.LastInstallerProcessId = updater.Id; State.LastInstallerStartUtcTicks = updater.StartTime.ToUniversalTime().Ticks;
+        try { await SaveAsync(CancellationToken.None); }
+        catch
+        {
+            // This owned child is still waiting for this live parent. If its identity
+            // cannot be persisted, stop it before allowing the application to exit.
+            if (!updater.HasExited) { updater.Kill(); await updater.WaitForExitAsync(); }
+            throw;
+        }
         logger.Info("The verified external updater is waiting for graceful application exit.");
+        }
+        catch
+        {
+            State.InstallOnExit = false; State.InstallationFailed = true; State.LastInstallerRequest = null;
+            await SaveAsync(CancellationToken.None); Publish("Updates.InstallFailed"); throw;
+        }
+        finally { gate.Release(); }
     }
 
-    private Task SaveAsync(CancellationToken token) => AtomicJsonFile.WriteAsync(stateFile, State, token);
+    private void EnsureStateWritable()
+    {
+        if (StateUnavailable) throw new InvalidDataException("Stored update state is unavailable; the original state must be repaired before this operation.");
+    }
+    private Task SaveAsync(CancellationToken token)
+    {
+        EnsureStateWritable();
+        return AtomicJsonFile.WriteRawJsonAsync(stateFile, JsonSerializer.Serialize(State, JsonDefaults.Options), token);
+    }
     private void Publish(string key) { StatusKey = key; Changed?.Invoke(this, EventArgs.Empty); }
     private void Fail(string message, Exception error) { logger.Error(message, error); Publish("Updates.Failed"); }
     public async Task StopAsync() { lifetime.Cancel(); if (monitor is not null) await monitor; }

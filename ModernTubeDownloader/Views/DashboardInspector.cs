@@ -68,6 +68,7 @@ internal sealed partial class DashboardInspector : AppScrollPanel
         range.TabIndex = 6; advanced.TabIndex = 7; apply.TabIndex = 8;
         Controls.AddRange([details, options, image, title, author, playlistContext, link, sourceGlyph, copy, facts, fields, editor, openFile, openFolder, retry, emptyIcon]);
         CreateLiveActions();
+        CreateRecordDetails();
         title.AccessibleAutomationId = "InspectorTitle"; link.AccessibleAutomationId = "InspectorSource";
         AppTypography.Bind(playlistContext, 9.5f); AppUi.BindForeground(playlistContext, AppThemeTokens.TextSecondary);
         BindFullValue(playlistContext, () => playlistContext.Text);
@@ -178,8 +179,10 @@ internal sealed partial class DashboardInspector : AppScrollPanel
         fields.SetRows((t["Dashboard.Source"], SourcePresentation.Host(entry.SourceUrl)), (t["Dashboard.AddedAt"], entry.CompletedAt.ToLocalTime().ToString("g", t.Culture)),
             (t["Dashboard.Duration"], entry.DurationSeconds is { } durationSeconds ? DashboardStyle.Duration(durationSeconds) : "—"),
             (t["Downloads.Container"], System.IO.Path.GetExtension(entry.FinalPath).TrimStart('.').ToUpperInvariant()),
-            (t["Downloads.Quality"], entry.Quality), (t["Dashboard.Size"], entry.FileSizeBytes is { } size ? DashboardStyle.Bytes(size) : "—"),
-            (t["Dashboard.Status"], t["Status." + (entry.WasPartial ? "Partial" : entry.Status)]), (t["Dashboard.Output"], entry.FinalPath));
+            (t["Downloads.Quality"], entry.Quality), (t["Dashboard.Size"], entry.FileSizeBytes is { } size ? DashboardStyle.Bytes(size) : "—"));
+        var completed = entry.Status == "Completed" && !entry.WasPartial;
+        PresentRecordDetails("Status." + (entry.WasPartial ? "Partial" : entry.Status), completed ? AppThemeTokens.Success : entry.WasPartial ? AppThemeTokens.Warning : AppThemeTokens.Error,
+            completed ? AppIconKind.Check : AppIconKind.Info, entry.FinalPath);
         RefreshText(); LayoutInspector();
     }
     public void ShowLive(LiveSession session)
@@ -190,19 +193,25 @@ internal sealed partial class DashboardInspector : AppScrollPanel
         fields.InsetValues = false;
         queueId = null; options.Visible = false; showOptions = false;
         Present(session.Title, session.Channel, session.SourceUrl, session.ThumbnailUrl, session.Parts.LastOrDefault());
+        folderPath = session.Parts.LastOrDefault() is { } part ? System.IO.Path.GetDirectoryName(part) : session.WorkspacePath;
+        openFolder.Enabled = Directory.Exists(folderPath);
         imageDuration.Text = session.RecordedDuration > TimeSpan.Zero ? DashboardStyle.Duration(session.RecordedDuration.TotalSeconds) : "";
         var t = services.Localization;
         factText = t["Live.State." + session.State] + "\n\n" + SourcePresentation.Host(session.SourceUrl) + "\n\n" +
-            t["Quality." + session.QualityPresetId] + " · MKV\n\n" + session.RecordedDuration.ToString(@"hh\:mm\:ss") + " · " + DashboardStyle.Bytes(session.BytesWritten) +
+            t["Quality." + session.QualityPresetId] + " · " + session.Container.ToString().ToUpperInvariant() + "\n\n" + session.RecordedDuration.ToString(@"hh\:mm\:ss") + " · " + DashboardStyle.Bytes(session.BytesWritten) +
             "\n\n" + t.Get("Live.PartCount", session.Parts.Count) + "\n\n" + t["Live.ReconnectCount"] + ": " + session.ResumeCount +
             (session.FailureMessageKey is { } error ? "\n\n" + t[error] : "");
         fields.SetRows((t["Dashboard.Format"], session.Container.ToString().ToUpperInvariant()), (t["Downloads.Quality"], t["Quality." + session.QualityPresetId]),
             (t["Live.StartMode"], t[session.StartPolicy == LiveStartPolicy.FromStart ? "Live.FromStart" : "Live.FromNow"]),
-            (t["Live.ScheduledLabel"], session.ScheduledStartAt?.ToLocalTime().ToString("g", t.Culture)),
-            (t["Dashboard.Status"], t["Live.State." + session.State]), (t["Dashboard.Duration"], session.RecordedDuration.ToString(@"hh\:mm\:ss")),
-            (t["Dashboard.Size"], DashboardStyle.Bytes(session.BytesWritten)), (t["Live.Parts"], session.Parts.Count.ToString(t.Culture)),
-            (t["Live.ReconnectCount"], session.ResumeCount.ToString(t.Culture)), (t["Dashboard.Output"], session.Parts.LastOrDefault() ?? session.WorkspacePath),
+            (t[session.State == LiveSessionState.WaitingForLive ? "Live.ScheduledLabel" : "Live.StartedLabel"],
+                (session.State == LiveSessionState.WaitingForLive ? session.ScheduledStartAt : session.RecordingStartedAt)?.ToLocalTime().ToString("g", t.Culture)),
+            (t["Dashboard.Duration"], session.RecordedDuration.ToString(@"hh\:mm\:ss")),
+            (t["Dashboard.Size"], DashboardStyle.Bytes(session.BytesWritten)),
             (t["Dashboard.Message"], session.FailureMessageKey is { } failure ? t[failure] : session.RecoveryWarningKey is { } recovery ? t[recovery] : null));
+        var statusColor = session.State switch { LiveSessionState.Completed or LiveSessionState.Recording => AppThemeTokens.Success,
+            LiveSessionState.Failed => AppThemeTokens.Error, LiveSessionState.Reconnecting or LiveSessionState.Partial => AppThemeTokens.Warning, _ => AppThemeTokens.Info };
+        PresentRecordDetails("Live.State." + session.State, statusColor, session.State == LiveSessionState.Completed ? AppIconKind.Check : AppIconKind.Live,
+            session.Parts.LastOrDefault() ?? session.WorkspacePath);
         PresentLiveActions(session);
         RefreshText(); LayoutInspector();
     }
@@ -269,7 +278,7 @@ internal sealed partial class DashboardInspector : AppScrollPanel
     {
         control.KeyDown += async (_, e) =>
         {
-            if (queueId is null) return;
+            if (!hasSelection) return;
             if (e.KeyCode == Keys.F1) { tips.Show(value(), control, new System.Drawing.Point(0, control.Height), 5000); e.Handled = true; }
             if (e.Control && e.KeyCode == Keys.C && control is not TextBox)
             {
@@ -308,16 +317,17 @@ internal sealed partial class DashboardInspector : AppScrollPanel
     private void ArrangeInspector()
     {
         HideInactiveLiveActions();
+        if (!hasSelection || queueId is not null) HideRecordDetails();
         foreach (var control in new Control[] { image, author, link, copy, facts, openFile, openFolder }) control.Visible = hasSelection;
         // DisplayRectangle is the actual viewport after the native scroll rail.
         var viewport = DisplayRectangle; var o = viewport.Location; var width = Math.Max(0, viewport.Width - 24); var line = AppTypography.TextHeight(34);
         retry.Visible = historyMode && hasSelection;
         image.RoundedPreview = true;
-        title.EnableKeyboardValues(queueId is not null); link.EnableKeyboardValues(queueId is not null);
+        title.EnableKeyboardValues(hasSelection); link.EnableKeyboardValues(hasSelection);
         playlistContext.Visible = hasSelection && queueId is not null && !string.IsNullOrWhiteSpace(playlistContext.Text);
         playlistContext.EnableKeyboardValues(playlistContext.Visible);
         if (!playlistContext.Visible) playlistContext.SetBounds(0, 0, 0, 0);
-        sourceGlyph.Visible = hasSelection && queueId is not null;
+        sourceGlyph.Visible = hasSelection;
         if (!sourceGlyph.Visible) sourceGlyph.SetBounds(0, 0, 0, 0);
         details.SetBounds(12 + o.X, 10 + o.Y, width / 2, line); options.SetBounds(details.Right + 4, details.Top, width / 2 - 4, line);
         DashboardVisual.Tab(details, !showOptions); DashboardVisual.Tab(options, showOptions);
@@ -339,7 +349,7 @@ internal sealed partial class DashboardInspector : AppScrollPanel
             details.Width = Math.Min(width / 2, DashboardVisual.TextWidth(details, details.Text) + 32);
             options.Left = details.Right + 4; options.Width = width - details.Width - 4;
         }
-        else DashboardStyle.Card(this);
+        else { DownloadsVisual.Card(this); AppTypography.BindSemibold(title, 11); }
         image.Visible = !string.IsNullOrWhiteSpace(thumbnailUrl) && !thumbnailFailed;
         image.SetBounds(12 + o.X, details.Bottom + (queueId is not null ? 19 : 14), width, image.Visible ? width * 9 / 16 : 0);
         imageDuration.Visible = image.Visible && imageDuration.Text.Length > 0;
@@ -356,15 +366,16 @@ internal sealed partial class DashboardInspector : AppScrollPanel
         link.SetBounds(12 + o.X, (playlistContext.Visible ? playlistContext.Bottom : author.Bottom) + 6, width - AppTypography.TextHeight(32) - 6, AppTypography.TextHeight(30));
         copy.SetBounds(link.Right + 6, link.Top, AppTypography.TextHeight(32), link.Height);
         copyGlyph.SetBounds((copy.Width - 18) / 2, (copy.Height - 18) / 2, 18, 18);
+        sourceGlyph.SetBounds(link.Left, link.Top + (link.Height - 16) / 2, 16, 16);
+        link.SetBounds(link.Left + 22, link.Top, Math.Max(1, link.Width - 22), link.Height);
         if (queueId is not null)
         {
-            sourceGlyph.SetBounds(link.Left, link.Top + (link.Height - 16) / 2, 16, 16);
-            link.SetBounds(link.Left + 22, link.Top, Math.Max(1, link.Width - 22), link.Height);
             ArrangeQueueEditor(width, o, line); return;
         }
         var editing = showOptions && queueId is not null;
         editor.Visible = editing; facts.Visible = false; fields.Visible = !editing;
-        fields.SetBounds(12 + o.X, copy.Bottom + 10, width, fields.Height);
+        var statusBottom = LayoutRecordStatus(12 + o.X, copy.Bottom + 10, width);
+        fields.SetBounds(12 + o.X, statusBottom + 12, width, fields.Height);
         editor.SetBounds(12 + o.X, copy.Bottom + 14, width, editor.Height);
         qualityLabel.SetBounds(0, 0, width, AppTypography.TextHeight(24)); quality.SetBounds(0, qualityLabel.Bottom, width, line);
         containerLabel.SetBounds(0, quality.Bottom + 10, width, AppTypography.TextHeight(24)); container.SetBounds(0, containerLabel.Bottom, width, line);
@@ -378,12 +389,13 @@ internal sealed partial class DashboardInspector : AppScrollPanel
         advanced.SetBounds(0, range.Bottom + 8, width, line); apply.SetBounds(0, advanced.Bottom + 8, width, line);
         hint.SetBounds(0, apply.Bottom + 8, width, DashboardVisual.LabelHeight(hint, width, 5)); editor.Height = hint.Bottom + 4;
         var paired = width >= AppTypography.TextHeight(240);
-        openFile.SetBounds(12 + o.X, (editing ? editor.Bottom : fields.Bottom) + 12, paired ? (width - 8) / 2 : width, line);
+        var pathBottom = LayoutRecordPath(12 + o.X, fields.Bottom, width);
+        openFile.SetBounds(12 + o.X, (editing ? editor.Bottom : pathBottom) + 12, paired ? (width - 8) / 2 : width, line);
         openFolder.SetBounds(paired ? openFile.Right + 8 : openFile.Left, paired ? openFile.Top : openFile.Bottom + 8, openFile.Width, line);
         retry.SetBounds(openFile.Left, openFolder.Bottom + 8, width, line);
         DashboardVisual.Tab(details, !editing); DashboardVisual.Tab(options, editing);
         if (queueId is not null) { AppTypography.Bind(details, 9.5f); AppTypography.Bind(options, 9.5f); }
-        foreach (var button in new[] { copy, openFile, openFolder, retry, advanced, apply }) DashboardVisual.Button(button, button == apply);
+        foreach (var button in new[] { copy, openFile, openFolder, retry, advanced, apply }) DownloadsVisual.Button(button, button == apply || button == openFile);
         if (paired) { AppTypography.Bind(openFile, 9); AppTypography.Bind(openFolder, 9); }
         DashboardVisual.Icon(openFile, AppIconKind.Play); DashboardVisual.Icon(openFolder, AppIconKind.Folder);
         if (paired) { DashboardVisual.SetPadding(openFile, new Padding(32, 0, 6, 0)); DashboardVisual.SetPadding(openFolder, new Padding(32, 0, 6, 0)); }

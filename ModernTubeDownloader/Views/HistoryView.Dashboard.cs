@@ -236,6 +236,7 @@ internal sealed partial class HistoryEntryCard
     private AppVectorIcon? statusIcon;
     private AppVectorIcon? placeholderIcon;
     private Label? durationBadge;
+    private SourceVectorIcon? historySource;
     internal Guid ItemId => entry.QueueItemId;
     internal string ItemPath => entry.FinalPath;
     protected override AccessibleObject CreateAccessibilityInstance() => new HistoryRowAccessibleObject(this);
@@ -257,6 +258,7 @@ internal sealed partial class HistoryEntryCard
         if (presentationInitialized && dashboard == value && rowSelected == selected) return;
         presentationInitialized = true;
         dashboard = value; rowSelected = selected; TabStop = value; SetControlBehavior(ControlBehaviors.Selectable, value);
+        thumbnail.RoundedPreview = value;
         AccessibleAutomationId = $"HistoryItem-{entry.QueueItemId:N}-{entry.LivePartIndex?.ToString() ?? "vod"}"; AccessibleName = entry.Title;
         AppTypography.SetDashboardPresentation(this, value);
         if (value)
@@ -276,12 +278,15 @@ internal sealed partial class HistoryEntryCard
         if (statusIcon is not null) statusIcon.Visible = value;
         if (placeholderIcon is not null) placeholderIcon.Visible = value;
         if (durationBadge is not null) durationBadge.Visible = value && entry.DurationSeconds is > 0;
+        if (more is not null) { more.Visible = value; if (!value) more.SetBounds(0, 0, 0, 0); }
+        if (historySource is not null) historySource.Visible = value;
         placeholderText.Visible = !value;
         if (!value) openFolder.Text = text["Common.OpenFolder"];
         LayoutControls();
     }
     private void LayoutDashboardCard()
     {
+        PrepareMoreAction();
         while (cells.Count < 6)
         {
             var label = AppUi.Muted(); label.Multiline = true; label.TextAlign = ContentAlignment.MiddleLeft;
@@ -290,7 +295,7 @@ internal sealed partial class HistoryEntryCard
             AppTypography.Bind(label, 9.25f); cells.Add(label); Controls.Add(label);
         }
         var columns = HistoryTable.Columns(Width); var compact = HistoryTable.IsCompact(Width);
-        var titleWidth = Math.Max(1, (compact ? Width - 54 : columns[0].Left + columns[0].Width - 12) - HistoryTable.TitleLeft);
+        var titleWidth = Math.Max(1, (compact ? Width - 88 : columns[0].Left + columns[0].Width - 12) - HistoryTable.TitleLeft);
         title.AutoEllipsis = true; title.Multiline = true; title.TextAlign = ContentAlignment.TopLeft;
         facts.AutoEllipsis = true; facts.Multiline = compact; facts.TextAlign = ContentAlignment.TopLeft;
         facts.Text = compact
@@ -327,7 +332,16 @@ internal sealed partial class HistoryEntryCard
         durationBadge.BringToFront();
         title.SetBounds(HistoryTable.TitleLeft, (Height - textHeight) / 2, titleWidth, titleHeight);
         facts.SetBounds(title.Left, title.Bottom + 3, title.Width, factsHeight); path.Visible = false;
-        cells[0].Text = SourcePresentation.Host(entry.SourceUrl);
+        var identity = SourceBrandLookup.Resolve(entry.SourceUrl);
+        cells[0].Text = identity.Name;
+        rowTips.SetToolTip(cells[0], entry.SourceUrl);
+        if (historySource is null)
+        {
+            historySource = new SourceVectorIcon { AccessibilityView = AccessibilityView.Hidden };
+            historySource.Click += (_, _) => SelectionRequested?.Invoke(this, entry); cells[0].Controls.Add(historySource);
+        }
+        historySource.Brand = identity.Brand; historySource.Kind = identity.Kind;
+        DashboardVisual.SetPadding(cells[0], new Padding(22, 0, 0, 0));
         cells[1].Text = entry.CompletedAt.ToLocalTime().ToString("yyyy-MM-dd\nHH:mm", text.Culture);
         cells[2].Text = entry.DurationSeconds is { } seconds ? DashboardStyle.Duration(seconds) : "—";
         cells[3].Text = System.IO.Path.GetExtension(entry.FinalPath).TrimStart('.').ToUpperInvariant() + "\n" + entry.Quality;
@@ -336,9 +350,11 @@ internal sealed partial class HistoryEntryCard
         for (var i = 0; i < cells.Count; i++)
         {
             var c = columns[i + 1]; var inset = i == 5 ? 22 : 0;
+            cells[i].Multiline = i is not 0 and not 5;
             cells[i].SetBounds(c.Left + inset, 10, Math.Max(1, c.Width - 8 - inset), Height - 20);
             cells[i].Visible = !compact; cells[i].AutoEllipsis = true;
         }
+        historySource.SetBounds(0, (cells[0].Height - 16) / 2, 16, 16); historySource.Visible = !compact;
         var completed = entry.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase);
         var statusColor = entry.WasPartial ? AppThemeTokens.Warning : completed ? AppThemeTokens.Success : AppThemeTokens.Error;
         AppUi.BindForeground(cells[5], statusColor);
@@ -356,11 +372,17 @@ internal sealed partial class HistoryEntryCard
         statusIcon.SetBounds(cells[5].Left - 22, cells[5].Top + (cells[5].Height - 16) / 2, 16, 16);
         if (folderIcon is null) { folderIcon = new AppVectorIcon(AppIconKind.Folder, 20); folderIcon.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden; folderIcon.Click += (_,_) => openFolder.PerformClick(); openFolder.Controls.Add(folderIcon); }
         folderIcon.SetBounds(6,7,20,20);
-        openFile.Visible = false; openFolder.SetBounds(Width - 42, (Height - 34) / 2, 32, 34); openFolder.Text = ""; openFolder.AccessibleName = text["Common.OpenFolder"];
+        openFile.Visible = false; openFolder.SetBounds(Width - 78, (Height - 34) / 2, 32, 34); openFolder.Text = ""; openFolder.AccessibleName = text["Common.OpenFolder"];
+        more!.Visible = true; more.SetBounds(Width - 40, openFolder.Top, 30, 34);
+        more.AccessibleAutomationId = "HistoryMore-" + entry.QueueItemId.ToString("N"); more.AccessibleName = text["Dashboard.MoreActions"];
+        DownloadsVisual.Button(more);
         DashboardVisual.Button(openFolder); DashboardVisual.Flat(this, !rowSelected);
+        AppUi.BindGradient(this, rowSelected ? DownloadsVisual.Selected : DownloadsVisual.Panel, rowSelected ? DownloadsVisual.SelectedEnd : DownloadsVisual.PanelEnd);
         if (rowSelected)
             foreach (var style in new[] { Style, StyleHover, StylePressed, StyleFocused, StyleDisabled })
             { style.Border.Width = 1; style.Border.Color = AppUi.GetColor(AppThemeTokens.Accent); style.Border.Radius = 7; }
+        else
+            foreach (var style in new[] { Style, StyleHover, StylePressed, StyleFocused, StyleDisabled }) style.Border.Radius = 0;
     }
 }
 
@@ -389,7 +411,7 @@ internal static class HistoryTable
     }
     internal static (int Left, int Width)[] Columns(int width)
     {
-        var content = Math.Max(1, width - 60);
+        var content = Math.Max(1, width - 96);
         int[] percentages = [36, 10, 12, 8, 10, 9, 15];
         var columns = new (int Left, int Width)[percentages.Length]; var left = 12;
         for (var i = 0; i < columns.Length; i++)

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace ModernTubeDownloader.Updates;
@@ -41,6 +42,8 @@ public static class UpdateTransaction
                 UpdatePackageSecurity.EnsureNoReparsePoints(destination);
                 var existed = File.Exists(destination);
                 if (Directory.Exists(destination)) throw new IOException("A directory occupies an application file path.");
+                if (existed && (File.GetAttributes(destination) & FileAttributes.ReadOnly) != 0)
+                    throw new UnauthorizedAccessException("An application file is read-only; its attributes will not be changed.");
                 if (existed)
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(saved)!);
@@ -64,14 +67,36 @@ public static class UpdateTransaction
 
     private static void Recover(string backup, UpdateJournal journal)
     {
+        var failures = new List<Exception>();
         foreach (var file in journal.Files.AsEnumerable().Reverse())
         {
-            var relative = UpdatePackageSecurity.ValidateRelativePath(file.RelativePath);
-            var destination = Path.Combine(journal.Installation, relative.Replace('/', Path.DirectorySeparatorChar));
-            UpdatePackageSecurity.EnsureNoReparsePoints(destination);
-            if (file.Existed) File.Copy(Path.Combine(backup, "files", relative.Replace('/', Path.DirectorySeparatorChar)), destination, true);
-            else if (File.Exists(destination)) File.Delete(destination);
+            try
+            {
+                var relative = UpdatePackageSecurity.ValidateRelativePath(file.RelativePath);
+                var destination = Path.Combine(journal.Installation, relative.Replace('/', Path.DirectorySeparatorChar));
+                UpdatePackageSecurity.EnsureNoReparsePoints(destination);
+                if (file.Existed)
+                {
+                    var saved = Path.Combine(backup, "files", relative.Replace('/', Path.DirectorySeparatorChar));
+                    UpdatePackageSecurity.EnsureNoReparsePoints(saved);
+                    // A denied copy may leave the destination intact. Do not write
+                    // it again: its lock could otherwise prevent all earlier restores.
+                    if (!SameContents(saved, destination)) File.Copy(saved, destination, true);
+                }
+                else if (File.Exists(destination)) File.Delete(destination);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { failures.Add(error); }
         }
+        if (failures.Count != 0) throw new AggregateException("Some application files could not be restored; the recovery journal remains incomplete.", failures);
+    }
+
+    private static bool SameContents(string saved, string destination)
+    {
+        if (!File.Exists(destination) || new FileInfo(saved).Length != new FileInfo(destination).Length) return false;
+        using var original = new FileStream(saved, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var current = new FileStream(destination, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        return CryptographicOperations.FixedTimeEquals(SHA256.HashData(original), SHA256.HashData(current));
     }
     private static UpdateJournal ReadJournal(string backup) => JsonSerializer.Deserialize<UpdateJournal>(File.ReadAllText(Path.Combine(backup, "journal.json")))
         ?? throw new InvalidDataException("Invalid update journal.");

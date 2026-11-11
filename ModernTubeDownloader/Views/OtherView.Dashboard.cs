@@ -11,7 +11,8 @@ internal sealed partial class OtherView
     private readonly Dictionary<Control, Panel> moduleWorkflows = [];
     private readonly List<Button> linkActions = [];
     public event EventHandler<ModernTubeDownloader.Shell.AppPageId>? NavigateRequested;
-    private Label? quickTitle;
+    private Label? quickTitle, toolsTitle, tipTitle, tipText, quickStatus;
+    private Panel? tip;
     private readonly List<Button> quickButtons = [];
     private DashboardDropZone? importDropZone;
     private Label? importDropTitle, importDropHint;
@@ -23,16 +24,24 @@ internal sealed partial class OtherView
         dashboard = value;
         if (!value)
         {
-            AutoScroll = false;
+            DashboardVisual.RestoreTree(this);
+            AutoScroll = false; tools.AutoScroll = true;
             foreach (var module in modules.Values)
             {
                 AppUi.Secondary(module.Open); AppTypography.Bind(module.Title, 16, FontStyle.Bold);
                 module.Description.Multiline = false;
+                if (module.Title.Parent is { } card) { AppUi.Card(card); card.Margin = new Padding(0, 0, 0, 14); }
             }
             foreach (var icon in moduleIcons.Values) icon.Visible = false;
             foreach (var workflow in moduleWorkflows.Values) workflow.Visible = false;
             if (importDropZone is not null) importDropZone.Visible = false;
+            foreach (var module in modules.Values)
+            {
+                if (module.Title.Parent is not { } card || card.Parent == tools) continue;
+                card.Parent?.Controls.Remove(card); tools.Controls.Add(card);
+            }
             ApplyLocalization();
+            AppUi.Card(recent);
         }
         if (value && quick is null)
         {
@@ -51,12 +60,13 @@ internal sealed partial class OtherView
                 }
                 button.Controls.AddRange([icon, title, description]); linkActions.Add(button); links.Controls.Add(button);
             }
+            toolsTitle = AppUi.Heading("", 13); links.Controls.Add(toolsTitle);
             Controls.Add(links);
             quick = new Panel(); DashboardStyle.Card(quick); quickTitle = AppUi.Heading("", 13); quick.Controls.Add(quickTitle);
-            foreach (var key in new[] { "Common.OpenFolder", "Settings.OpenLogs", "Appearance.Export" })
+            foreach (var key in new[] { "Common.OpenFolder", "Settings.OpenLogs", "Appearance.Export", "Updates.Check" })
             {
                 var button = new DashboardButton { Tag = key, AccessibleAutomationId = "OtherQuick" + key.Replace(".", "") };
-                var icon = new AppVectorIcon(key == "Appearance.Export" ? AppIconKind.Download : AppIconKind.Folder, 24);
+                var icon = new AppVectorIcon(key == "Appearance.Export" ? AppIconKind.Download : key == "Updates.Check" ? AppIconKind.Retry : AppIconKind.Folder, 24);
                 var caption = AppUi.Muted(); caption.Multiline = true; caption.TextAlign = ModernFormsNext.ContentAlignment.MiddleCenter;
                 AppUi.BindForeground(caption);
                 foreach (var child in new Control[] { icon, caption })
@@ -67,28 +77,58 @@ internal sealed partial class OtherView
                 button.Controls.AddRange([icon, caption]);
                 button.Click += async (_, _) =>
                 {
-                    if (key == "Common.OpenFolder") Utilities.ShellService.OpenFolderForFile(services.Settings.Current.FinalOutputDirectory);
-                    else if (key == "Settings.OpenLogs") Utilities.ShellService.OpenFolderForFile(services.Paths.LogDirectory);
-                    else if (FindForm() is { } form)
+                    button.Enabled = false;
+                    try
                     {
-                        var dialog = new SaveFileDialog { FileName = "appearance.json", DefaultExtension = "json" }; dialog.AddFilter("JSON", "*.json");
-                        if (await dialog.ShowDialog(form) == DialogResult.OK) await File.WriteAllTextAsync(dialog.FileName, System.Text.Json.JsonSerializer.Serialize(services.Appearance.Profile, AppearanceProfileStore.Options));
+                        if (key == "Common.OpenFolder") Utilities.ShellService.OpenFolderForFile(services.Settings.Current.FinalOutputDirectory);
+                        else if (key == "Settings.OpenLogs") Utilities.ShellService.OpenFolderForFile(services.Paths.LogDirectory);
+                        else if (key == "Updates.Check") { await services.Updates.CheckAsync(); if (!disposed) quickStatus!.Text = services.Localization[services.Updates.StatusKey]; }
+                        else if (FindForm() is { } form)
+                        {
+                            var dialog = new SaveFileDialog { FileName = "appearance.json", DefaultExtension = "json" }; dialog.AddFilter("JSON", "*.json");
+                            if (await dialog.ShowDialog(form) == DialogResult.OK)
+                                await File.WriteAllTextAsync(dialog.FileName, System.Text.Json.JsonSerializer.Serialize(services.Appearance.Profile, AppearanceProfileStore.Options));
+                        }
                     }
+                    catch (Exception error)
+                    {
+                        services.Logger.Error("Other dashboard action failed.", error);
+                        if (!disposed) quickStatus!.Text = services.Localization["Appearance.Error.Profile"];
+                    }
+                    finally { if (!disposed) { button.Enabled = true; LayoutPage(); } }
                 };
                 quickButtons.Add(button); quick.Controls.Add(button);
             }
-            Controls.Add(quick);
+            quickStatus = AppUi.Muted(); quickStatus.Multiline = true; quickStatus.AccessibleAutomationId = "OtherQuickStatus";
+            quick.Controls.Add(quickStatus); Controls.Add(quick);
+            tip = new Panel(); DownloadsVisual.Card(tip); tipTitle = AppUi.Heading("", 12); tipText = AppUi.Muted(); tipText.Multiline = true;
+            tip.Controls.AddRange([tipTitle, tipText]); Controls.Add(tip);
         }
         if (quick is not null) quick.Visible = value;
         if (links is not null) links.Visible = value;
+        if (tip is not null) tip.Visible = value;
         recent.Parent?.Controls.Remove(recent);
         if (value) Controls.Add(recent); else tools.Controls.Add(recent);
         LayoutPage();
+        _ = RefreshRecentAsync();
+    }
+
+    private sealed record RecentToolRow(Label Title, Label Subtitle, AppVectorIcon Icon);
+    private static Button RecentToolButton(string title, string subtitle, AppIconKind kind)
+    {
+        var button = new DashboardButton { AccessibleName = title + " · " + subtitle };
+        var heading = AppUi.Heading(title, 10); heading.AutoEllipsis = true;
+        var detail = AppUi.Muted(subtitle); detail.AutoEllipsis = true; AppTypography.Bind(detail, 9);
+        var icon = new AppVectorIcon(kind, 24, AppThemeTokens.Info);
+        foreach (var child in new Control[] { heading, detail, icon })
+        { child.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden; child.Click += (_, _) => button.PerformClick(); }
+        button.Controls.AddRange([heading, detail, icon]); button.Tag = new RecentToolRow(heading, detail, icon);
+        return button;
     }
 
     private void LayoutDashboard()
     {
-        AutoScroll = true; var origin = DisplayRectangle.Location; var width = Math.Max(1, DisplayRectangle.Width - 36);
+        AutoScroll = true; tools.AutoScroll = false; var origin = DisplayRectangle.Location; var width = Math.Max(1, DisplayRectangle.Width - 36);
         heading.SetBounds(18 + origin.X, 20 + origin.Y, width, AppTypography.TextHeight(48));
         subtitle.SetBounds(heading.Left, heading.Bottom + 4, width, AppTypography.TextHeight(28));
         var inline = width >= AppTypography.TextHeight(960); var left = inline ? width * 2 / 3 - 12 : width;
@@ -97,29 +137,21 @@ internal sealed partial class OtherView
         foreach (var (id, module) in modules)
         {
             if (module.Title.Parent is not { } card) continue;
-            DashboardStyle.Card(card); card.Width = left - 2;
+            if (id != "Batch") { if (card.Parent != links) { card.Parent?.Controls.Remove(card); links!.Controls.Add(card); } continue; }
+            DownloadsVisual.Card(card); card.Width = left - 2;
             if (!moduleIcons.TryGetValue(card, out var icon))
             {
                 icon = new AppVectorIcon(AppIconKind.Clipboard, 36, AppThemeTokens.Info) { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
                 moduleIcons.Add(card, icon); card.Controls.Add(icon);
             }
-            icon.Visible = true; icon.SetBounds(24, 24, 36, 36);
+            icon.Visible = true; icon.SetBounds(16, 20, 36, 36);
             icon.SetKind(id == "Batch" ? AppIconKind.Clipboard : AppIconKind.Media);
-            AppTypography.Bind(module.Title, 14, FontStyle.Bold);
-            module.Title.SetBounds(80, 20, card.Width - 104, AppTypography.TextHeight(36));
+            AppTypography.Bind(module.Title, 12, FontStyle.Bold);
+            module.Title.SetBounds(66, 16, card.Width - 86, AppTypography.TextHeight(28));
             module.Description.Multiline = true;
             var descriptionStyle = module.Description.CurrentStyle;
-            var descriptionSize = TextMeasurer.MeasureText(module.Description.Text, descriptionStyle.GetFont(), descriptionStyle.GetFontSize(), new System.Drawing.Size(card.Width - 104, int.MaxValue), descriptionStyle.GetFontStyle());
-            module.Description.SetBounds(80, module.Title.Bottom + 6, card.Width - 104, Math.Max(AppTypography.TextHeight(24), (int)Math.Ceiling(descriptionSize.Height) + 4));
-            if (id != "Batch")
-            {
-                module.Open.Text = services.Localization["Other.Open"];
-                DashboardVisual.Button(module.Open); DashboardVisual.Icon(module.Open, AppIconKind.Media);
-                var openWidth = Math.Min(card.Width - 104, DashboardVisual.ActionWidth(module.Open, true));
-                module.Open.SetBounds(card.Width - 24 - openWidth, module.Description.Bottom + 12, openWidth, AppTypography.TextHeight(36));
-                card.Height = module.Open.Bottom + 18; toolHeight += card.Height + card.Margin.Bottom;
-                continue;
-            }
+            var descriptionSize = TextMeasurer.MeasureText(module.Description.Text, descriptionStyle.GetFont(), descriptionStyle.GetFontSize(), new System.Drawing.Size(card.Width - 86, int.MaxValue), descriptionStyle.GetFontStyle());
+            module.Description.SetBounds(66, module.Title.Bottom + 4, card.Width - 86, Math.Max(AppTypography.TextHeight(24), (int)Math.Ceiling(descriptionSize.Height) + 4));
             if (importDropZone is null)
             {
                 importDropZone = new(); importDropTitle = AppUi.Heading("", 12); importDropHint = AppUi.Muted();
@@ -132,10 +164,10 @@ internal sealed partial class OtherView
                 importDropZone.Controls.AddRange([importDropTitle, importDropHint, importPickFile]); card.Controls.Add(importDropZone);
             }
             importDropZone.Visible = true;
-            importDropZone.SetBounds(24, module.Description.Bottom + 16, card.Width - 48, AppTypography.TextHeight(110));
+            importDropZone.SetBounds(16, module.Description.Bottom + 12, card.Width - 32, AppTypography.TextHeight(110));
             importDropTitle!.Text = services.Localization["Dashboard.DropFile"];
             importDropHint!.Text = services.Localization["Dashboard.DropFormats"];
-            importDropTitle.SetBounds(12, 20, importDropZone.Width - 24, AppTypography.TextHeight(28));
+            importDropTitle.SetBounds(12, 14, importDropZone.Width - 24, AppTypography.TextHeight(28));
             importDropHint.SetBounds(12, importDropTitle.Bottom + 6, importDropZone.Width - 24, DashboardVisual.LabelHeight(importDropHint, importDropZone.Width - 24, 2));
             importPickFile!.Text = services.Localization["Batch.Browse"]; DownloadsVisual.Button(importPickFile, true);
             var pickWidth = Math.Min(importDropZone.Width - 24, DashboardVisual.ActionWidth(importPickFile, true));
@@ -151,7 +183,7 @@ internal sealed partial class OtherView
                 }
                 moduleWorkflows.Add(card, workflow); card.Controls.Add(workflow);
             }
-            workflow.Visible = true; workflow.SetBounds(24, importDropZone.Bottom + 12, card.Width - 48, 1);
+            workflow.Visible = true; workflow.SetBounds(16, importDropZone.Bottom + 10, card.Width - 32, 1);
             var stepColumns = workflow.Width >= AppTypography.TextHeight(570) ? 3 : 1;
             var stepWidth = (workflow.Width - 24 - (stepColumns - 1) * 12) / stepColumns;
             var stepHeight = 0;
@@ -169,49 +201,84 @@ internal sealed partial class OtherView
             module.Open.Text = services.Localization["Dashboard.OpenBatch"];
             DashboardVisual.Button(module.Open, true); DashboardVisual.Icon(module.Open, AppIconKind.Clipboard);
             var actionWidth = Math.Min(card.Width - 48, DashboardVisual.ActionWidth(module.Open, true));
-            module.Open.SetBounds(card.Width - 24 - actionWidth, workflow.Bottom + 20, actionWidth, AppTypography.TextHeight(44));
+            module.Open.SetBounds(card.Width - 16 - actionWidth, workflow.Bottom + 12, actionWidth, AppTypography.TextHeight(36));
             DashboardVisual.Icon(module.Open, AppIconKind.Clipboard);
-            card.Height = module.Open.Bottom + 28; toolHeight += card.Height + card.Margin.Bottom;
+            card.Height = module.Open.Bottom + 16; toolHeight += card.Height + card.Margin.Bottom;
         }
         tools.Height = Math.Max(AppTypography.TextHeight(220), toolHeight);
-        links!.SetBounds(tools.Left, tools.Bottom + 12, left, 1);
-        var linkColumns = Math.Clamp(left / AppTypography.TextHeight(330), 1, 2);
+        links!.SetBounds(tools.Left, tools.Bottom + 10, left, 1);
+        toolsTitle!.Text = services.Localization["Other.ToolsTitle"]; toolsTitle.SetBounds(0, 0, left, AppTypography.TextHeight(30));
+        var linkColumns = Math.Clamp(left / AppTypography.TextHeight(310), 1, 2);
         var itemWidth = (left - (linkColumns - 1) * 12) / linkColumns;
-        var tileHeight = AppTypography.TextHeight(112);
-        for (var i = 0; i < linkActions.Count; i++)
+        var tileHeight = AppTypography.TextHeight(116);
+        var tiles = modules.Where(pair => pair.Key != "Batch").Select(pair => pair.Value.Title.Parent!).Concat(linkActions).ToArray();
+        for (var i = 0; i < tiles.Length; i++)
         {
-            var button = linkActions[i]; button.AccessibleName = services.Localization["Nav." + button.Tag]; button.Text = "";
-            button.SetBounds((i % linkColumns) * (itemWidth + 12), (i / linkColumns) * (tileHeight + 12), itemWidth, tileHeight); DashboardVisual.Button(button);
-            button.Controls[0].SetBounds(18, 18, 28, 28);
-            button.Controls[1].Text = button.AccessibleName; button.Controls[1].SetBounds(62, 14, itemWidth - 80, AppTypography.TextHeight(28));
-            button.Controls[2].Text = services.Localization["Dashboard.Route" + button.Tag];
-            button.Controls[2].SetBounds(62, button.Controls[1].Bottom + 4, itemWidth - 80,
-                DashboardVisual.LabelHeight((Label)button.Controls[2], itemWidth - 80, 3));
+            var tile = tiles[i]; tile.Margin = Padding.Empty;
+            tile.SetBounds((i % linkColumns) * (itemWidth + 12), toolsTitle.Bottom + 10 + (i / linkColumns) * (tileHeight + 12), itemWidth, tileHeight);
+            if (tile is Button button)
+            {
+                button.AccessibleName = services.Localization["Nav." + button.Tag]; button.Text = ""; DownloadsVisual.Button(button);
+                button.Controls[0].SetBounds(16, 18, 28, 28);
+                button.Controls[1].Text = button.AccessibleName; button.Controls[1].SetBounds(58, 12, itemWidth - 76, AppTypography.TextHeight(28));
+                button.Controls[2].Text = services.Localization["Dashboard.Route" + button.Tag];
+                button.Controls[2].SetBounds(58, button.Controls[1].Bottom + 4, itemWidth - 76, DashboardVisual.LabelHeight((Label)button.Controls[2], itemWidth - 76, 3));
+            }
+            else
+            {
+                var pair = modules.First(pair => pair.Value.Title.Parent == tile); var module = pair.Value;
+                DownloadsVisual.Card(tile);
+                if (!moduleIcons.TryGetValue(tile, out var icon)) { icon = new AppVectorIcon(AppIconKind.Media, 28, AppThemeTokens.Info); moduleIcons.Add(tile, icon); tile.Controls.Add(icon); }
+                icon.Visible = true; icon.SetBounds(16, 18, 28, 28);
+                AppTypography.Bind(module.Title, 11, FontStyle.Bold); module.Title.SetBounds(58, 12, itemWidth - 104, AppTypography.TextHeight(28));
+                module.Description.Multiline = true; module.Description.SetBounds(58, module.Title.Bottom + 4, itemWidth - 76, DashboardVisual.LabelHeight(module.Description, itemWidth - 76, 3));
+                module.Open.Text = ""; module.Open.AccessibleName = services.Localization["Other.Open"] + " — " + module.Title.Text;
+                module.Open.SetBounds(itemWidth - 38, 12, 28, AppTypography.TextHeight(30)); DownloadsVisual.Button(module.Open); DashboardVisual.Icon(module.Open, AppIconKind.ChevronRight, true);
+            }
         }
-        links.Height = linkActions.Max(button => button.Bottom);
+        links.Height = tiles.Select(tile => tile.Bottom).DefaultIfEmpty(toolsTitle.Bottom).Max();
         var rightX = inline ? tools.Right + 12 : heading.Left; var rightWidth = inline ? width - left - 12 : width;
-        recent.SetBounds(rightX, inline ? tools.Top : links.Bottom + 16, rightWidth, recent.Height); DashboardStyle.Card(recent);
+        recent.SetBounds(rightX, inline ? tools.Top : links.Bottom + 16, rightWidth, recent.Height); DownloadsVisual.Card(recent);
         var recentTop = 16;
         foreach (var child in recent.Controls)
         {
             var childWidth = Math.Max(1, rightWidth - 48);
-            if (child is Button button) { DashboardVisual.Button(button); button.AutoEllipsis = true; button.AccessibleName = button.Text; }
-            var childHeight = child is Label label ? DashboardVisual.LabelHeight(label, childWidth, 4) : AppTypography.TextHeight(38);
+            if (child is Button button)
+            {
+                DownloadsVisual.Button(button); button.AutoEllipsis = true;
+                if (button.Tag is RecentToolRow row)
+                {
+                    row.Icon.SetBounds(10, 16, 24, 24);
+                    row.Title.SetBounds(44, 8, childWidth - 56, AppTypography.TextHeight(22));
+                    row.Subtitle.SetBounds(44, row.Title.Bottom + 3, childWidth - 56, AppTypography.TextHeight(20));
+                    AppTypography.CaptureRecipes(button).Invoke();
+                }
+                else button.AccessibleName = button.Text;
+            }
+            var childHeight = child is Label label ? DashboardVisual.LabelHeight(label, childWidth, 4) : AppTypography.TextHeight(62);
             child.SetBounds(24, recentTop, childWidth, childHeight); recentTop = child.Bottom + 10;
         }
         recent.Height = recentTop + 10;
         if (quick is null) return;
         quick.SetBounds(rightX, recent.Bottom + 16, rightWidth, 1);
         quickTitle!.Text = services.Localization["Dashboard.QuickActions"]; quickTitle.SetBounds(16, 14, rightWidth - 32, AppTypography.TextHeight(30));
-        var quickWidth = (rightWidth - 44) / 2; var quickHeight = AppTypography.TextHeight(104);
+        DownloadsVisual.Card(quick);
+        var quickWidth = (rightWidth - 44) / 2; var quickHeight = AppTypography.TextHeight(88);
         for (var i = 0; i < quickButtons.Count; i++)
         {
             var button = quickButtons[i]; button.Text = ""; button.AccessibleName = services.Localization[(string)button.Tag!];
-            button.SetBounds(16 + (i % 2) * (quickWidth + 12), quickTitle.Bottom + 12 + (i / 2) * (quickHeight + 12), i == 2 ? rightWidth - 32 : quickWidth, quickHeight);
+            button.SetBounds(16 + (i % 2) * (quickWidth + 12), quickTitle.Bottom + 12 + (i / 2) * (quickHeight + 12), quickWidth, quickHeight);
             DashboardVisual.Button(button);
-            button.Controls[0].SetBounds((button.Width - 24) / 2, 16, 24, 24);
-            button.Controls[1].Text = button.AccessibleName; button.Controls[1].SetBounds(12, 48, button.Width - 24, quickHeight - 56);
+            button.Controls[0].SetBounds((button.Width - 24) / 2, 12, 24, 24);
+            button.Controls[1].Text = button.AccessibleName; button.Controls[1].SetBounds(10, 42, button.Width - 20, quickHeight - 48);
         }
-        quick.Height = quickButtons.Max(button => button.Bottom) + 16;
+        quickStatus!.Visible = !string.IsNullOrEmpty(quickStatus.Text);
+        quickStatus.SetBounds(16, quickButtons.Max(button => button.Bottom) + 10, rightWidth - 32,
+            quickStatus.Visible ? DashboardVisual.LabelHeight(quickStatus, rightWidth - 32, 3) : 0);
+        quick.Height = quickStatus.Bottom + 12;
+        tip!.SetBounds(rightX, quick.Bottom + 16, rightWidth, 1);
+        tipTitle!.Text = services.Localization["Other.TipTitle"]; tipTitle.SetBounds(16, 14, rightWidth - 32, AppTypography.TextHeight(26));
+        tipText!.Text = services.Localization["Other.TipText"]; tipText.SetBounds(16, tipTitle.Bottom + 10, rightWidth - 32, DashboardVisual.LabelHeight(tipText, rightWidth - 32, 5));
+        tip.Height = tipText.Bottom + 16;
     }
 }

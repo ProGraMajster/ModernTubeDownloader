@@ -321,7 +321,7 @@ internal sealed partial class LiveSessionCard : Panel
     private readonly Button details = new DashboardButton();
     private readonly Button folder = new DashboardButton();
     private LiveSession? current;
-    private readonly PictureBox thumbnail = new() { SizeMode = PictureBoxSizeMode.Zoom };
+    private readonly DownloadsPictureBox thumbnail = new() { SizeMode = PictureBoxSizeMode.Zoom };
     private string? imageUrl;
     private readonly CancellationTokenSource imageLifetime = new();
     private bool imageDisposed;
@@ -401,23 +401,7 @@ internal sealed partial class LiveSessionCard : Panel
     {
         if (current is null || FindForm() is not { } owner) return;
         var session = services.Live.Find(current.Id) ?? current; var text = services.Localization;
-        using var form = new Form { Text = text["Live.Details"], Size = new System.Drawing.Size(650, 530), MinimumSize = new System.Drawing.Size(500, 400) };
-        form.AccessibilityObject.AutomationId = "LiveDetailsWindow";
-        AppBranding.Apply(form);
-        var body = new TextBox { Dock = DockStyle.Fill, MultiLine = true, ScrollBars = ScrollBars.Vertical, ReadOnly = true,
-            TextAlign = ContentAlignment.TopLeft, Font = AppTypography.Font(11f), Padding = new Padding(16),
-            AccessibleAutomationId = "LiveDetailsContent", Text =
-            $"{session.Title}\n{text[$"Live.State.{session.State}"]}\n" +
-            $"{text["Live.SourceState"]}: {session.SourceLiveStatus ?? "—"}\n" +
-            $"{text["Live.ScheduledLabel"]}: {session.ScheduledStartAt?.ToLocalTime().ToString("g", text.Culture) ?? "—"}\n" +
-            $"{text["Live.StartedLabel"]}: {session.RecordingStartedAt?.ToLocalTime().ToString("g", text.Culture) ?? "—"}\n" +
-            $"{session.RecordedDuration} • {session.BytesWritten / 1048576d:F1} MiB\n" +
-            $"{text[$"Quality.{session.QualityPresetId}"]} • MKV • {text[session.StartPolicy == LiveStartPolicy.FromStart ? "Live.FromStart" : "Live.FromNow"]}\n" +
-            $"{text.Get("Live.PartCount", session.Parts.Count)} • {text["Live.CurrentPart"]}: {session.PartIndex}\n" +
-            $"{text["Live.ReconnectCount"]}: {session.ResumeCount}\n" +
-            (session.FailureMessageKey is { } error ? text[error] : "—") + "\n" +
-            (session.RecoveryWarningKey is { } warning ? text[warning] : string.Empty) };
-        AppUi.Input(body); form.Controls.Add(body);
+        using var form = new LiveSessionDetailsForm(services, session);
         try
         {
 #if DEBUG

@@ -265,7 +265,14 @@ internal sealed partial class BatchImportView : UserControl
     }
     private async Task LoadThumbnailAsync(BatchImportSession value, Guid id, PictureBox image)
     {
-        try { if (await services.Batch.MetadataAsync(value, id, lifetime.Token) is { } metadata) { if (!disposed && image.Parent is not null) await ThumbnailImageBinding.For(image).LoadAsync(services.Thumbnails, metadata.ThumbnailUrl, lifetime.Token); } }
+        try
+        {
+            if (await services.Batch.MetadataAsync(value, id, lifetime.Token) is { } metadata && !disposed && image.Parent is not null)
+            {
+                await ThumbnailImageBinding.For(image).LoadAsync(services.Thumbnails, metadata.ThumbnailUrl, lifetime.Token);
+                if (!disposed && image.Parent?.Tag is DashboardBatchRow row) row.Placeholder.Visible = image.Image is null;
+            }
+        }
         catch (OperationCanceledException) { }
         catch (Exception ex) { services.Logger.Error("Batch thumbnail unavailable.", ex); }
     }

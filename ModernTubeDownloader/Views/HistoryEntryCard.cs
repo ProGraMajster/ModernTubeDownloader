@@ -16,7 +16,7 @@ internal sealed partial class HistoryEntryCard : UserControl
     private readonly ThumbnailCacheService thumbnails;
     private readonly Panel placeholder;
     private readonly PictureBox placeholderText;
-    private readonly PictureBox thumbnail;
+    private readonly DownloadsPictureBox thumbnail;
     private readonly Label title;
     private readonly Label facts;
     private readonly Label path;
@@ -41,7 +41,7 @@ internal sealed partial class HistoryEntryCard : UserControl
         placeholderText = new PictureBox { Image = AppBranding.Icon, SizeMode = PictureBoxSizeMode.Zoom, Padding = new Padding(20) };
         placeholderText.Dock = DockStyle.Fill;
         placeholder.Controls.Add(placeholderText);
-        thumbnail = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom, Visible = false };
+        thumbnail = new DownloadsPictureBox { SizeMode = PictureBoxSizeMode.Zoom, Visible = false };
         thumbnail.Style.Border.Radius = 10;
         thumbnail.Style.Border.Width = 0;
         AppUi.BindBackground(thumbnail, AppThemeTokens.SurfaceSecondary);
@@ -56,7 +56,7 @@ internal sealed partial class HistoryEntryCard : UserControl
         openFile.Enabled = File.Exists(entry.FinalPath);
         openFolder.Enabled = Directory.Exists(System.IO.Path.GetDirectoryName(entry.FinalPath));
         openFile.Click += (_, _) => ShellService.OpenFile(this.entry.FinalPath);
-        openFolder.Click += (_, _) => ShellService.OpenFolderForFile(this.entry.FinalPath);
+        openFolder.Click += (_, _) => ShellService.OpenFolderForFile(System.IO.Path.GetDirectoryName(this.entry.FinalPath));
         Controls.AddRange([placeholder, thumbnail, title, facts, path, openFile, openFolder]);
         Click += (_, _) => SelectionRequested?.Invoke(this, this.entry);
         title.Click += (_, _) => SelectionRequested?.Invoke(this, this.entry);
@@ -179,6 +179,7 @@ internal sealed partial class HistoryEntryCard : UserControl
             ThumbnailImageBinding.For(thumbnail).Dispose();
             disposed = true;
             rowTips.Dispose();
+            historyMenu.Dispose();
             lifetimeCancellation.Cancel();
             SizeChanged -= CardSizeChanged;
             text.LanguageChanged -= LanguageChanged;

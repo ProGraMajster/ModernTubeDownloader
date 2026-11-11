@@ -46,14 +46,18 @@ internal sealed partial class OtherView : UserControl
             var y = 56;
             foreach (var export in exports.Take(3))
             {
-                var button = new DashboardButton { Text = services.Localization["Other.ThumbnailExport"] + " • " + System.IO.Path.GetFileName(export.OutputPath),
-                    Enabled = File.Exists(export.OutputPath), AccessibleAutomationId = "OtherThumbnailExport" + y };
+                var caption = services.Localization["Other.ThumbnailExport"] + " • " + System.IO.Path.GetFileName(export.OutputPath);
+                var button = dashboard ? RecentToolButton(caption, $"{export.Width} × {export.Height} · {export.CompletedAt.ToLocalTime().ToString("g", services.Localization.Culture)}", AppIconKind.Media)
+                    : new DashboardButton { Text = caption };
+                button.Enabled = File.Exists(export.OutputPath); button.AccessibleAutomationId = "OtherThumbnailExport" + y;
                 AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
                 button.Click += (_, _) => Utilities.ShellService.OpenFile(export.OutputPath); recent.Controls.Add(button);
             }
             foreach (var session in sessions.Take(5))
             {
-                var button = new DashboardButton { Text = $"{session.FileName} • {session.ImportedCount}", AccessibleAutomationId = "BatchRecent" + session.Id.ToString("N") };
+                var button = dashboard ? RecentToolButton(session.FileName, $"{session.ImportedCount} URL · {session.CreatedAt.ToLocalTime().ToString("g", services.Localization.Culture)}", AppIconKind.Clipboard)
+                    : new DashboardButton { Text = $"{session.FileName} • {session.ImportedCount}" };
+                button.AccessibleAutomationId = "BatchRecent" + session.Id.ToString("N");
                 AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
                 button.Click += async (_, _) => { try { ResumeBatch?.Invoke(this, await services.Batch.OpenAsync(session.Id)); } catch (Exception ex) { services.Logger.Error("Batch session could not be reopened.", ex); } };
                 recent.Controls.Add(button);

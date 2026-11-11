@@ -2,6 +2,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const git = (...args) => execFileSync('git', args, { cwd: root, maxBuffer: 16 * 1024 * 1024 });
@@ -19,6 +20,12 @@ const rules = [
 const allowedBinary = new Set([
   'ModernTubeDownloader/Assets/AppIcon.png', 'ModernTubeDownloader/Assets/AppIcon.ico',
   ...[16, 32, 48, 128].map(n => `browser-extension/assets/icon${n}.png`)
+]);
+// Reviewed native captures of isolated synthetic profiles, documented in ONBOARDING.md.
+// Bind these two onboarding assets to the reviewed bytes, not a general PNG exemption.
+const reviewedPreviewHashes = new Map([
+  ['ModernTubeDownloader/Assets/PreviewClassic.png', '32cd4eed3719c33e89734e6486e6388d893409ffd429afcb97b467bae5f0896c'],
+  ['ModernTubeDownloader/Assets/PreviewModern.png', 'ad6810ad6f31d3360c30bb1a231d145512ee423e78264de263ed65195dedc5df']
 ]);
 const findings = [];
 // Reviewed synthetic security-test inputs only; never exempt an entire test file.
@@ -40,7 +47,10 @@ function inspect(scope, name, buffer) {
   }
   if (buffer.includes(0)) {
     binaryCount++;
-    if (!allowedBinary.has(name)) findings.push({ scope, path: name, rule: 'unexpected-binary' });
+    if (reviewedPreviewHashes.has(name)) {
+      if (createHash('sha256').update(buffer).digest('hex') !== reviewedPreviewHashes.get(name))
+        findings.push({ scope, path: name, rule: 'unreviewed-preview-bytes' });
+    } else if (!allowedBinary.has(name)) findings.push({ scope, path: name, rule: 'unexpected-binary' });
     return;
   }
   if (buffer.length > 2 * 1024 * 1024) { findings.push({ scope, path: name, rule: 'oversize-text' }); return; }

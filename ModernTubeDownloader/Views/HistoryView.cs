@@ -236,6 +236,12 @@ internal sealed partial class HistoryView : UserControl
                     var card = new HistoryEntryCard(entries[index], text, services.Thumbnails);
                     card.SetDashboard(dashboard, selectedId == entries[index].QueueItemId && selectedPath == entries[index].FinalPath);
                     card.SelectionRequested += SelectHistory;
+                    card.RetryRequested += (_, source) => RetryRequested?.Invoke(this, source);
+                    card.CopySourceRequested += async (_, source) =>
+                    {
+                        try { await Clipboard.SetTextAsync(source); }
+                        catch (Exception error) { services.Logger.Error("History source URL could not be copied.", error); }
+                    };
                     card.Width = Math.Max(dashboard ? 320 : 520, list.DisplayRectangle.Width - 4);
                     cards.Add(card); list.Controls.Add(card);
                 }

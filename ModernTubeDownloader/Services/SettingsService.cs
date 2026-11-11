@@ -1,6 +1,7 @@
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Settings;
 using ModernTubeDownloader.Authentication;
+using System.Text.Json;
 
 namespace ModernTubeDownloader.Services;
 
@@ -10,24 +11,50 @@ public sealed class SettingsService(AppPaths paths, IAppLogger logger)
 
     public AppSettings Current { get; private set; } = new();
     public event EventHandler? Changed;
+    public bool UpdatePolicyNeedsConsent { get; private set; }
+    public bool LoadFailed { get; private set; }
 
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            Current = await AtomicJsonFile.ReadAsync<AppSettings>(paths.SettingsFile, cancellationToken).ConfigureAwait(false) ?? new AppSettings();
+            // File.Exists also returns false for access errors. Only an actual missing
+            // path permits fresh defaults; unreadable user settings remain protected.
+            string? json;
+            try { json = await File.ReadAllTextAsync(paths.SettingsFile, cancellationToken).ConfigureAwait(false); }
+            catch (FileNotFoundException) { json = null; }
+            catch (DirectoryNotFoundException) { json = null; }
+            Current = json is null ? new AppSettings() : JsonSerializer.Deserialize<AppSettings>(json, JsonDefaults.Options) ?? throw new InvalidDataException("Empty settings object.");
+            LoadFailed = false;
+            UpdatePolicyNeedsConsent = false;
+            Current.Updates ??= new();
+            if (json is not null)
+            {
+                using var document = JsonDocument.Parse(json);
+                var updates = document.RootElement.EnumerateObject().FirstOrDefault(p => p.Name.Equals("updates", StringComparison.OrdinalIgnoreCase)).Value;
+                var fields = updates.ValueKind == JsonValueKind.Object ? updates.EnumerateObject().ToDictionary(p => p.Name, p => p.Value, StringComparer.OrdinalIgnoreCase) : new Dictionary<string, JsonElement>();
+                if (!fields.ContainsKey("mode")) Current.Updates.Mode = UpdateInstallMode.NotifyOnly;
+                UpdatePolicyNeedsConsent = Current.Updates.PolicyVersion < 1 && Current.Updates.AutomaticChecks && Current.Updates.Mode == UpdateInstallMode.NotifyOnly;
+            }
             Normalize(Current);
+            if (json is not null) UpdatePolicyNeedsConsent = Current.Updates.PolicyVersion < 1 && Current.Updates.AutomaticChecks && Current.Updates.Mode == UpdateInstallMode.NotifyOnly;
             LogSanitizer.RegisterCookieFilePath(Current.CookieFilePath);
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             logger.Error("Could not read settings; defaults will be used.", ex);
             Current = new AppSettings();
+            Current.Updates.AutomaticChecks = false;
+            Current.Updates.Mode = UpdateInstallMode.NotifyOnly;
+            LoadFailed = true;
         }
     }
 
     public async Task SaveAsync(CancellationToken cancellationToken = default)
     {
+        // Never replace unreadable user data with defaults during routine shutdown.
+        if (LoadFailed) throw new InvalidDataException("Existing settings could not be read; the original file is preserved.");
         Normalize(Current);
         LogSanitizer.RegisterCookieFilePath(Current.CookieFilePath);
         if (Current.UseCookieFile)
@@ -42,6 +69,13 @@ public sealed class SettingsService(AppPaths paths, IAppLogger logger)
             gate.Release();
         }
         Changed?.Invoke(this, EventArgs.Empty);
+        if (Current.Updates.PolicyVersion >= 1) UpdatePolicyNeedsConsent = false;
+    }
+
+    internal void PreserveLegacyUpdatePolicyWithoutSettings()
+    {
+        Current.Updates.Mode = UpdateInstallMode.NotifyOnly;
+        UpdatePolicyNeedsConsent = true;
     }
 
     private static void Normalize(AppSettings settings)
