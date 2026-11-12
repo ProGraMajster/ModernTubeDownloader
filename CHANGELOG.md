@@ -24,6 +24,13 @@
 
 ### Fixed
 
+- Font presentation refresh tolerates controls replaced or reparented by callbacks;
+  recent tool records publish on the UI dispatcher.
+- Setup dialog surfaces resolve correctly before Modern is chosen, save errors appear
+  immediately, and What's New has an explicit read-later action.
+- Settings path/cookie editors follow the actual scroll viewport at large text sizes;
+  LIVE toolbars and History/Batch rows use denser measured layouts.
+
 - Update rollback now continues past unchanged/locked destinations, retaining an
   incomplete recovery journal if restoration cannot finish.
 - Serialized updater initialization preserves policy changes and notifies Settings

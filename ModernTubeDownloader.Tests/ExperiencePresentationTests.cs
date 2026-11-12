@@ -43,6 +43,7 @@ public sealed class ExperiencePresentationTests
                 AssertNoSetupError(root, fixture.Root);
                 Assert.Equal(step, draft.Step);
                 Assert.Contains(text["Experience.Step" + step], Find<Label>(root, "SetupProgress").Text);
+                Assert.Equal(step + 1, Find<ProgressBar>(root, "SetupStepProgress").Value);
                 foreach (var size in new[] { (1040, 820), (720, 560) })
                 {
                     window.Resize(size.Item1, size.Item2); host.ProcessPendingWork();
@@ -57,6 +58,8 @@ public sealed class ExperiencePresentationTests
                     Assert.NotSame(classic.Image, modern.Image);
                     Click(host, root, "SetupClassic"); Assert.Equal(AppInterfaceMode.Classic, draft.Interface);
                     Click(host, root, "SetupModern"); Assert.Equal(AppInterfaceMode.ModernDashboard, draft.Interface);
+                    Assert.Contains(text["Experience.Selected"], Find<Button>(root, "SetupModern").AccessibleName);
+                    Assert.DoesNotContain(text["Experience.Selected"], Find<Button>(root, "SetupClassic").AccessibleName);
                 }
                 if (step == 3)
                     Assert.Equal(Enum.GetNames<PreferredVideoContainer>().Select(name => text["Container." + name]),
@@ -90,6 +93,56 @@ public sealed class ExperiencePresentationTests
             Click(host, newsRoot, "WhatsNewDone"); Pump(host, () => newsWindow.IsClosed);
             Assert.Equal(services.Experience.Version, services.Experience.State.LastWhatsNewAcknowledgedVersion);
         }
+        await services.ShutdownAsync();
+    }
+
+    [Fact]
+    public async Task FailedDraftAutosaveImmediatelyRevealsFeedbackWithoutResizing()
+    {
+        using var fixture = new Fixture(); using var services = await fixture.Services(AppThemeMode.Dark);
+        var draft = SetupDraft.From(services, true); draft.Step = 2;
+        await services.Experience.BeginAsync(draft);
+        using (var host = ModernFormsTestHost.Create())
+        {
+            services.Appearance.Initialize();
+            using var wizard = new SetupWizardForm(services, false, draft); var window = host.Show(wizard, 1040, 820); host.ProcessPendingWork();
+            var root = Root(wizard); var feedback = Find<Label>(root, "SetupError"); Assert.Equal(0, feedback.Height);
+            // Deny replacement of the existing atomic marker, as a real sharing violation would.
+            using (var lockedMarker = new FileStream(Path.Combine(fixture.Root, "experience.json"), FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Ui(host, () => Find<TextBox>(root, "SetupFilename").Text = "%(title)s - revised.%(ext)s");
+                Pump(host, () => feedback.Text.Length > 0);
+                Assert.Equal(services.Localization["Experience.SaveError"], feedback.Text);
+                Assert.True(feedback.Height > 0);
+                AssertGeometry(root, "Failed draft autosave");
+            }
+            Ui(host, wizard.Close); Pump(host, () => window.IsClosed);
+            Assert.False(wizard.Accepted);
+        }
+        await services.ShutdownAsync();
+    }
+
+    [Fact]
+    public async Task ReadLaterLeavesNotesUnacknowledgedAndThemedWindowCanBeReopened()
+    {
+        using var fixture = new Fixture(); using var services = await fixture.Services(AppThemeMode.Light);
+        using (var host = ModernFormsTestHost.Create())
+        {
+            services.Appearance.Initialize();
+            using var news = new WhatsNewForm(services); var window = host.Show(news, 1040, 820); host.ProcessPendingWork();
+            Assert.Equal(services.Localization["Experience.WhatsNew"], news.Text);
+            Assert.Empty(news.TitleBar.Text); // The mouse-transparent themed caption replaces only MFN's decorative painter.
+            Assert.Equal(AppUi.GetColor(DownloadsVisual.Border), news.Style.Border.Color);
+            AssertGeometry(Root(news), "Read later");
+            Click(host, Root(news), "WhatsNewLater"); Pump(host, () => window.IsClosed);
+            Assert.Null(services.Experience.State.LastWhatsNewAcknowledgedVersion);
+            Assert.Null(news.Destination);
+            using var reopened = new WhatsNewForm(services); var second = host.Show(reopened, 1040, 820); host.ProcessPendingWork();
+            Click(host, Root(reopened), "WhatsNewDone"); Pump(host, () => second.IsClosed);
+            Assert.Equal(services.Experience.Version, services.Experience.State.LastWhatsNewAcknowledgedVersion);
+        }
+        var saved = await UserExperienceService.OpenAsync(services.Paths, new NullAppLogger(), services.Experience.Version);
+        Assert.Equal(services.Experience.Version, saved.State.LastWhatsNewAcknowledgedVersion);
         await services.ShutdownAsync();
     }
 

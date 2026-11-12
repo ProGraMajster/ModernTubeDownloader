@@ -25,6 +25,16 @@ public sealed partial class BatchDashboardPresentationTests
             {
                 services.Appearance.Initialize();
                 var view = new BatchImportView(services); view.SetDashboard(true); host.Show(view, 1320, 1024);
+                Assert.Equal(services.Localization["Batch.NoFile"], Find<Label>(view, "BatchSourceFileName").Text);
+                Assert.Equal(services.Localization["Batch.Empty"], Find<Label>(view, "BatchStatus").Text);
+                Assert.Equal(services.Localization.Get("Dashboard.ImportSummaryFacts", 0, 0, 0, 0),
+                    Find<Label>(view, "BatchImportSummaryFacts").Text);
+                Assert.DoesNotContain(services.Localization["Batch.Empty"], Find<Label>(view, "BatchParserDetails").Text);
+                Assert.Equal(services.Localization.Get("Batch.Overall", 0, 0, 0, 0,
+                    0d.ToString("N2", services.Localization.Culture), 0, "—"), Find<Label>(view, "BatchOverallSummary").Text);
+                view.SetDashboard(false);
+                Assert.Equal(services.Localization["Batch.Empty"], Find<Label>(view, "BatchOverallSummary").Text);
+                view.SetDashboard(true);
                 Task import = Task.CompletedTask;
                 host.Dispatcher.Post(() => import = view.ImportClipboardTextAsync("https://example.test/a\nhttps://example.test/a\ninvalid"));
                 host.ProcessPendingWork();
@@ -111,7 +121,22 @@ public sealed partial class BatchDashboardPresentationTests
                     var header = Find<Panel>(view, "BatchTableHeader"); Assert.True(header.Top < 470);
                     foreach (var column in new[] { "Url", "Title", "Status", "Quality" })
                         Assert.Equal(Find<Label>(view, "BatchColumn" + column).Left, Find<Label>(view, "BatchEntry" + column + "1").Left);
-                    Assert.All(list.Controls, row => Assert.InRange(row.Height, 40, 60));
+                    Assert.All(list.Controls, row =>
+                    {
+                        Assert.Equal(32, row.Height);
+                        var selectionControl = Assert.Single(row.Controls.OfType<CheckBox>());
+                        Assert.True(selectionControl.Visible && selectionControl.Width > 0 && selectionControl.Height > 0);
+                        var rowActions = row.Controls.OfType<Button>().ToArray();
+                        Assert.Equal(4, rowActions.Length);
+                        foreach (var action in rowActions)
+                        {
+                            Assert.True(action.Visible);
+                            Assert.False(string.IsNullOrWhiteSpace(action.AccessibleName));
+                            Assert.False(string.IsNullOrWhiteSpace(action.AccessibleAutomationId));
+                            Assert.Equal(26, action.Width); Assert.Equal(26, action.Height);
+                            Assert.True(action.Left >= selectionControl.Right && action.Bottom <= row.Height && action.Right <= row.Width);
+                        }
+                    });
                 }
                 Assert.False(quality.Parent!.Visible);
                 var collapsedContentHeight = classicBody!.DisplayRectangle.Height;

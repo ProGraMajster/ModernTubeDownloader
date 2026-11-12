@@ -33,37 +33,43 @@ internal sealed partial class OtherView : UserControl
     internal Task RefreshToolsAsync() => RefreshRecentAsync();
     private async Task RefreshRecentAsync()
     {
-        var refreshVersion = ++recentRefreshVersion;
+        var refreshVersion = Interlocked.Increment(ref recentRefreshVersion);
         try
         {
             var sessions = await services.Batch.RecentAsync();
             IReadOnlyList<ThumbnailExportRecord> exports = [];
             try { exports = await services.ThumbnailTool.ReadRecentAsync(); }
             catch (Exception error) { services.Logger.Error("Thumbnail export history could not be read.", error); }
-            if (disposed || refreshVersion != recentRefreshVersion) return;
-            foreach (var child in recent.Controls.ToArray()) { recent.Controls.Remove(child); child.Dispose(); }
-            var label = AppUi.Heading(services.Localization["Other.RecentTools"], dashboard ? 12 : 16); label.SetBounds(24, 16, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(36)); recent.Controls.Add(label);
-            var y = 56;
-            foreach (var export in exports.Take(3))
+            // I/O completion is not necessarily running with a UI SynchronizationContext
+            // (including during a shell switch). Publish one generation on the canonical
+            // dispatcher so it cannot race typography/layout enumerating recent.Controls.
+            await ModernFormsNext.WindowKit.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
-                var caption = services.Localization["Other.ThumbnailExport"] + " • " + System.IO.Path.GetFileName(export.OutputPath);
-                var button = dashboard ? RecentToolButton(caption, $"{export.Width} × {export.Height} · {export.CompletedAt.ToLocalTime().ToString("g", services.Localization.Culture)}", AppIconKind.Media)
-                    : new DashboardButton { Text = caption };
-                button.Enabled = File.Exists(export.OutputPath); button.AccessibleAutomationId = "OtherThumbnailExport" + y;
-                AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
-                button.Click += (_, _) => Utilities.ShellService.OpenFile(export.OutputPath); recent.Controls.Add(button);
-            }
-            foreach (var session in sessions.Take(5))
-            {
-                var button = dashboard ? RecentToolButton(session.FileName, $"{session.ImportedCount} URL · {session.CreatedAt.ToLocalTime().ToString("g", services.Localization.Culture)}", AppIconKind.Clipboard)
-                    : new DashboardButton { Text = $"{session.FileName} • {session.ImportedCount}" };
-                button.AccessibleAutomationId = "BatchRecent" + session.Id.ToString("N");
-                AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
-                button.Click += async (_, _) => { try { ResumeBatch?.Invoke(this, await services.Batch.OpenAsync(session.Id)); } catch (Exception ex) { services.Logger.Error("Batch session could not be reopened.", ex); } };
-                recent.Controls.Add(button);
-            }
-            if (dashboard && sessions.Count == 0 && exports.Count == 0) { var hint = AppUi.Muted(services.Localization["Dashboard.NoRecent"]); hint.Multiline = true; hint.SetBounds(24, y, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(64)); recent.Controls.Add(hint); y = hint.Bottom; }
-            recent.Height = Math.Max(100, y + 16); LayoutPage();
+                if (disposed || refreshVersion != Volatile.Read(ref recentRefreshVersion)) return;
+                foreach (var child in recent.Controls.ToArray()) { recent.Controls.Remove(child); child.Dispose(); }
+                var label = AppUi.Heading(services.Localization["Other.RecentTools"], dashboard ? 12 : 16); label.SetBounds(24, 16, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(36)); recent.Controls.Add(label);
+                var y = 56;
+                foreach (var export in exports.Take(3))
+                {
+                    var caption = services.Localization["Other.ThumbnailExport"] + " • " + System.IO.Path.GetFileName(export.OutputPath);
+                    var button = dashboard ? RecentToolButton(caption, $"{export.Width} × {export.Height} · {export.CompletedAt.ToLocalTime().ToString("g", services.Localization.Culture)}", AppIconKind.Media)
+                        : new DashboardButton { Text = caption };
+                    button.Enabled = File.Exists(export.OutputPath); button.AccessibleAutomationId = "OtherThumbnailExport" + y;
+                    AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
+                    button.Click += (_, _) => Utilities.ShellService.OpenFile(export.OutputPath); recent.Controls.Add(button);
+                }
+                foreach (var session in sessions.Take(5))
+                {
+                    var button = dashboard ? RecentToolButton(session.FileName, $"{session.ImportedCount} URL · {session.CreatedAt.ToLocalTime().ToString("g", services.Localization.Culture)}", AppIconKind.Clipboard)
+                        : new DashboardButton { Text = $"{session.FileName} • {session.ImportedCount}" };
+                    button.AccessibleAutomationId = "BatchRecent" + session.Id.ToString("N");
+                    AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
+                    button.Click += async (_, _) => { try { ResumeBatch?.Invoke(this, await services.Batch.OpenAsync(session.Id)); } catch (Exception ex) { services.Logger.Error("Batch session could not be reopened.", ex); } };
+                    recent.Controls.Add(button);
+                }
+                if (dashboard && sessions.Count == 0 && exports.Count == 0) { var hint = AppUi.Muted(services.Localization["Dashboard.NoRecent"]); hint.Multiline = true; hint.SetBounds(24, y, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(64)); recent.Controls.Add(hint); y = hint.Bottom; }
+                recent.Height = Math.Max(100, y + 16); LayoutPage();
+                });
         }
         catch (Exception ex) { services.Logger.Error("Recent batch sessions could not be loaded.", ex); }
     }

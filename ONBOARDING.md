@@ -205,3 +205,10 @@ wizard steps, chooser, resume/skip, shell switching and external/background supp
 in the actual running application. Full Debug/Release/JS/UIA/DPI/5K/performance/package
 qualification remains the release gate; the previously deferred intermittent UIA
 cases remain **DEFERRED / NOT QUALIFIED** unless separately evidenced otherwise.
+
+The [2026-11-12 refinement report](FINAL_UI_REFINEMENT_REPORT.md) records the newer
+native six-step/summary captures, both upgrade choices, resume/restart, and targeted
+error-layout/palette tests. Dialogs now share measured cards and the existing Downloads
+palette even before Modern is chosen. Existing Classic colors and the persisted journey
+contract remain unchanged. Original functional PASS captures with the missing palette
+are retained as visual failures; they are not current visual acceptance evidence.

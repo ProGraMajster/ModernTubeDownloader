@@ -71,6 +71,13 @@ acknowledges an uninstalled version.
 
 ## Evidence and maintenance
 
+The native dialog offers **Later** as an explicit equivalent of closing without
+acknowledgement. It does not mark the installed version as read. The 2026-11-12
+native scenario verifies the unchanged experience marker (including SHA-256),
+manual reopening, and subsequent explicit acknowledgement. The measured header,
+feature cards and wrapping shortcuts share the setup dialog's native caption and
+Downloads surfaces. See [current refinement evidence](FINAL_UI_REFINEMENT_REPORT.md).
+
 Local note text must be updated only for implemented changes, and the supported version
 family must be reviewed when the actual product version advances. The current window
 uses native icons and text cards; it does not present the historical setup preview

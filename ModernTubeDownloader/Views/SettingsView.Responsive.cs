@@ -13,7 +13,7 @@ internal sealed partial class SettingsView
         void Section(Panel card, Action<SettingsFormRows> compose)
         {
             if (!card.Visible) return;
-            var rows = new SettingsFormRows(card); compose(rows); rows.Complete();
+            var rows = new SettingsFormRows(card, compactTips); compose(rows); rows.Complete();
         }
         Section(generalCard, rows =>
         {
@@ -59,7 +59,7 @@ internal sealed partial class SettingsView
         Section(cookiesCard, rows =>
         {
             rows.Check(cookiesEnabled); rows.Field(Caption("Settings.CookiesFile"), cookiesFileName, cookiesBrowse);
-            rows.Text(cookiesHelp); rows.Text(cookiesWarning); rows.Embed(cookieSync, AppTypography.TextHeight(540));
+            rows.Text(cookiesHelp); rows.Text(cookiesWarning); rows.CookieSync(cookieSync);
         });
         if (currentCategory != "General") Section(appearanceCard, rows =>
         {
@@ -90,11 +90,12 @@ internal sealed partial class SettingsView
     private sealed class SettingsFormRows
     {
         private readonly Panel owner;
+        private readonly ToolTip tips;
         private readonly int inner, line;
         private int top = 16;
-        public SettingsFormRows(Panel owner)
+        public SettingsFormRows(Panel owner, ToolTip tips)
         {
-            this.owner = owner; inner = Math.Max(1, owner.Width - 32); line = AppTypography.TextHeight(36);
+            this.owner = owner; this.tips = tips; inner = Math.Max(1, owner.Width - 32); line = AppTypography.TextHeight(36);
             foreach (var label in owner.Controls.Take(2).OfType<Label>()) Text(label);
             top += 4;
         }
@@ -133,10 +134,23 @@ internal sealed partial class SettingsView
             }
             if (browse is not null)
             {
-                var buttonWidth = Math.Min(available / 2, DashboardVisual.ActionWidth(browse));
+                var buttonWidth = Math.Min(available, DashboardVisual.TextWidth(browse, browse.Text) + browse.Padding.Horizontal + 8);
+                // Keep the full command label at large text scales. The field moves
+                // above the command when their useful widths no longer fit together.
+                if (available - buttonWidth - 8 < AppTypography.TextHeight(150))
+                {
+                    control.SetBounds(left, top, Math.Max(1, available), fieldHeight);
+                    top = control.Bottom + 8;
+                    browse.SetBounds(left + available - buttonWidth, top, buttonWidth, line);
+                    top = browse.Bottom + 12;
+                    tips.SetToolTip(control, control.Text); tips.SetToolTip(browse, browse.Text);
+                    return;
+                }
                 browse.SetBounds(left + available - buttonWidth, top, buttonWidth, fieldHeight); available -= buttonWidth + 8;
+                tips.SetToolTip(browse, browse.Text);
             }
             control.SetBounds(left, top, Math.Max(1, available), fieldHeight); top = control.Bottom + 12;
+            if (control is TextBox) tips.SetToolTip(control, control.Text);
         }
         public void Commands(params Button[] buttons)
         {
@@ -155,6 +169,25 @@ internal sealed partial class SettingsView
             if (!control.Visible) { control.Bounds = System.Drawing.Rectangle.Empty; return; }
             control.SetBounds(16, top, Math.Min(inner, width ?? inner), height); top = control.Bottom + 12;
         }
+        public void CookieSync(CookieSyncSettingsPanel control)
+        {
+            control.LayoutForWidth(inner);
+            control.SetBounds(16, top, inner, control.Height); top = control.Bottom + 12;
+        }
         public void Complete() => owner.Height = top + 6;
+    }
+
+    private sealed class SettingsScrollPanel : AppScrollPanel
+    {
+        private int viewportWidth = -1;
+        internal event EventHandler? ViewportWidthChanged;
+        protected override void OnScrollViewportChanged(EventArgs e)
+        {
+            base.OnScrollViewportChanged(e);
+            var width = DisplayRectangle.Width;
+            if (width == viewportWidth) return;
+            viewportWidth = width;
+            ViewportWidthChanged?.Invoke(this, e);
+        }
     }
 }

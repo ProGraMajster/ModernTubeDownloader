@@ -13,10 +13,11 @@ internal sealed class LiveSessionDetailsForm : Form
     private readonly Guid sessionId;
     private LiveSession snapshot;
     private readonly Panel surface = new() { Dock = DockStyle.Fill };
-    private readonly AppScrollPanel content = new() { AutoScroll = true, AccessibleAutomationId = "LiveDetailsContent" };
+    private readonly ExperienceScrollPanel content = new() { AutoScroll = true, AccessibleAutomationId = "LiveDetailsContent" };
     private readonly Panel header = new(), recording = new(), diagnostics = new(), files = new(), footer = new();
     private readonly Label title = AppUi.Heading("", 18), channel = AppUi.Muted(), state = AppUi.Muted();
     private readonly Label recordingHeading = AppUi.Heading("", 12), diagnosticsHeading = AppUi.Heading("", 12), filesHeading = AppUi.Heading("", 12);
+    private readonly AppVectorIcon recordingIcon = new(AppIconKind.Live, 22, AppThemeTokens.Info), diagnosticsIcon = new(AppIconKind.Link, 22, AppThemeTokens.Info), filesIcon = new(AppIconKind.Folder, 22, AppThemeTokens.Info);
     private readonly DashboardFields recordingFields = new(), diagnosticsFields = new();
     private readonly TextBox source = new() { ReadOnly = true, AccessibleAutomationId = "LiveDetailsSource" };
     private readonly TextBox output = new() { ReadOnly = true, MultiLine = true, ScrollBars = ScrollBars.Vertical, AccessibleAutomationId = "LiveDetailsParts" };
@@ -40,19 +41,24 @@ internal sealed class LiveSessionDetailsForm : Form
         Text = services.Localization["Live.Details"];
         Size = new System.Drawing.Size(900, 720); MinimumSize = new System.Drawing.Size(540, 420);
         AccessibilityObject.AutomationId = "LiveDetailsWindow";
-        AppBranding.Apply(this); AppUi.BindBackground(surface); AppUi.BindBackground(content);
+        AppBranding.Apply(this); ExperienceVisual.ApplyWindow(this);
+        AppUi.BindGradient(surface, DownloadsVisual.Background, DownloadsVisual.BackgroundEnd);
+        AppUi.BindGradient(content, DownloadsVisual.Background, DownloadsVisual.BackgroundEnd);
         AppTypography.SetDashboardPresentation(surface, true); Controls.Add(surface);
         foreach (var card in new[] { header, recording, diagnostics, files }) DownloadsVisual.Card(card);
         title.Multiline = true; title.AutoEllipsis = true; channel.AutoEllipsis = true;
         state.AutoEllipsis = true; warning.Multiline = true;
+        recordingHeading.Multiline = diagnosticsHeading.Multiline = filesHeading.Multiline = true;
         AppUi.BindForeground(warning, AppThemeTokens.Warning);
         foreach (var input in new[] { source, output }) AppUi.Input(input);
         header.Controls.AddRange([image, placeholder, title, channel, state, source]);
         recording.Controls.AddRange([recordingHeading, recordingFields]); diagnostics.Controls.AddRange([diagnosticsHeading, diagnosticsFields]);
         files.Controls.AddRange([filesHeading, output, warning]);
+        recording.Controls.Add(recordingIcon); diagnostics.Controls.Add(diagnosticsIcon); files.Controls.Add(filesIcon);
+        foreach (var icon in new[] { recordingIcon, diagnosticsIcon, filesIcon }) icon.AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden;
         content.Controls.AddRange([header, recording, diagnostics, files]);
         footer.Controls.AddRange([action, openFile, openFolder, copy, close]); surface.Controls.AddRange([content, footer]);
-        AppUi.BindBackground(footer, AppThemeTokens.Surface);
+        AppUi.BindGradient(footer, DownloadsVisual.Panel, DownloadsVisual.PanelEnd);
         AppTypography.CaptureRecipes(surface).Invoke();
         close.Click += (_, _) => Close();
         action.Click += (_, _) =>
@@ -76,6 +82,7 @@ internal sealed class LiveSessionDetailsForm : Form
         services.Live.Changed += SessionChanged; services.Localization.LanguageChanged += SessionChanged;
         clock = new System.Threading.Timer(_ => QueueRefresh(), null, 1000, 1000);
         SizeChanged += (_, _) => LayoutContent(); content.SizeChanged += (_, _) => LayoutContent();
+        content.ViewportChanged += (_, _) => LayoutContent();
         AppTypography.RegisterLayout(surface, () => { RefreshSession(); LayoutContent(); });
         RefreshSession();
     }
@@ -147,9 +154,10 @@ internal sealed class LiveSessionDetailsForm : Form
             {
                 if (!button.Visible) { button.SetBounds(0, 0, 0, 0); continue; }
                 DownloadsVisual.Button(button, button == close || button == action && snapshot.CanResume);
-                var w = Math.Min(available, DashboardVisual.ActionWidth(button));
+                var w = Math.Min(available, DashboardVisual.ActionWidth(button, withIcon: button != close));
                 if (x > 16 && x + w > ClientSize.Width - 16) { x = 16; y += line + 8; }
                 button.SetBounds(x, y, w, line); x += w + 8;
+                if (button != close) DashboardVisual.Icon(button, button == openFile ? AppIconKind.Play : button == openFolder ? AppIconKind.Folder : button == copy ? AppIconKind.Clipboard : snapshot.IsActive ? AppIconKind.Stop : AppIconKind.Play);
             }
             footer.SetBounds(0, Math.Max(0, ClientSize.Height - y - line - 12), ClientSize.Width, y + line + 12);
             content.SetBounds(0, 0, ClientSize.Width, Math.Max(1, footer.Top));
@@ -165,13 +173,17 @@ internal sealed class LiveSessionDetailsForm : Form
             source.SetBounds(14, Math.Max(image.Bottom, state.Bottom) + 12, inset, line); header.Height = source.Bottom + 14;
             var paired = width >= AppTypography.TextHeight(680); var cardWidth = paired ? (width - 12) / 2 : width;
             recording.SetBounds(header.Left, header.Bottom + 12, cardWidth, 1);
-            recordingHeading.SetBounds(14, 12, cardWidth - 28, AppTypography.TextHeight(28));
+            recordingIcon.SetBounds(14, 12, 22, 22);
+            recordingHeading.SetBounds(46, 10, cardWidth - 60, DashboardVisual.LabelHeight(recordingHeading, cardWidth - 60, 3));
             recordingFields.SetBounds(14, recordingHeading.Bottom + 8, cardWidth - 28, recordingFields.Height); recording.Height = recordingFields.Bottom + 14;
             diagnostics.SetBounds(paired ? recording.Right + 12 : header.Left, paired ? recording.Top : recording.Bottom + 12, paired ? width - cardWidth - 12 : width, 1);
-            diagnosticsHeading.SetBounds(14, 12, diagnostics.Width - 28, AppTypography.TextHeight(28));
+            diagnosticsIcon.SetBounds(14, 12, 22, 22);
+            diagnosticsHeading.SetBounds(46, 10, diagnostics.Width - 60, DashboardVisual.LabelHeight(diagnosticsHeading, diagnostics.Width - 60, 3));
             diagnosticsFields.SetBounds(14, diagnosticsHeading.Bottom + 8, diagnostics.Width - 28, diagnosticsFields.Height); diagnostics.Height = diagnosticsFields.Bottom + 14;
+            if (paired) recording.Height = diagnostics.Height = Math.Max(recording.Height, diagnostics.Height);
             files.SetBounds(header.Left, Math.Max(recording.Bottom, diagnostics.Bottom) + 12, width, 1);
-            filesHeading.SetBounds(14, 12, inset, AppTypography.TextHeight(28));
+            filesIcon.SetBounds(14, 12, 22, 22);
+            filesHeading.SetBounds(46, 10, width - 60, DashboardVisual.LabelHeight(filesHeading, width - 60, 3));
             output.SetBounds(14, filesHeading.Bottom + 8, inset, AppTypography.TextHeight(snapshot.Parts.Count > 2 ? 120 : 68));
             warning.Visible = warning.Text.Length > 0;
             warning.SetBounds(14, output.Bottom + 8, inset, warning.Visible ? DashboardVisual.LabelHeight(warning, inset, 6) : 0);

@@ -267,6 +267,15 @@ public sealed class AppAppearanceService : IDisposable
         Set(theme, "Legacy.ForegroundColorOnAccent", dark ? "#F2F6FA" : "#172637");
         Set(theme, "Legacy.AccentColor2", "#076DE2");
         Set(theme, AppThemeTokens.RowSelected, dark ? "#1A2B3A" : "#DDEBFA");
+        return theme;
+    }
+
+    private static void AddDownloadsPalette(ThemeDefinition theme, ThemeVariant variant)
+    {
+        // Setup and other explicitly styled native dialogs may open while Classic
+        // is still selected. Publish the existing additive Downloads tokens in
+        // both shells; Classic controls keep their own App/Legacy bindings.
+        var dark = variant == ThemeVariant.Dark;
         Set(theme, DownloadsVisual.Background, dark ? "#10171D" : "#F2F5F8");
         Set(theme, DownloadsVisual.BackgroundEnd, dark ? "#0F171E" : "#EDF2F7");
         Set(theme, DownloadsVisual.Panel, dark ? "#151E26" : "#FAFBFD");
@@ -276,7 +285,6 @@ public sealed class AppAppearanceService : IDisposable
         Set(theme, DownloadsVisual.Border, dark ? "#263440" : "#CBD7E3");
         Set(theme, DownloadsVisual.ButtonTop, dark ? "#202934" : "#F0F4F8");
         Set(theme, DownloadsVisual.ButtonEnd, dark ? "#212B36" : "#E8EEF5");
-        return theme;
     }
 
     private static ThemeDefinition CreateTheme(
@@ -367,6 +375,7 @@ public sealed class AppAppearanceService : IDisposable
         theme.Corners["Input"] = 10;
         theme.Spacing["Page"] = 24;
         theme.Spacing["Section"] = 16;
+        AddDownloadsPalette(theme, variant);
         return theme;
     }
 

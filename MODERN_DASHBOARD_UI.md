@@ -6,6 +6,11 @@ skipping does not silently switch the shell. This branch does not publish a rele
 
 ## November 11 product iteration
 
+The subsequent [November 12 UI refinement](FINAL_UI_REFINEMENT_REPORT.md) fixes
+font-refresh reentrancy and dispatcher publication, refines native setup/release-note
+dialogs and all five secondary screens, and records actual reference comparisons,
+targeted test failures/corrections and remaining qualification boundaries.
+
 The native [setup and migration journey](ONBOARDING.md), local version-aware
 [What's New](WHATS_NEW.md), and [safe update policy](UPDATES.md) use the existing runtime.
 Setup and release notes are also reachable from Settings, Help and About.

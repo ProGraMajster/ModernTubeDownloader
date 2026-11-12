@@ -28,6 +28,8 @@ param(
     [switch]$CaptureVisual,
     [switch]$DashboardSmoke,
     [ValidateSet('Live', 'History', 'Batch', 'Other', 'Settings')][string]$DashboardScreenSmoke,
+    [switch]$BatchAnalysisVisualSmoke,
+    [switch]$DashboardScreenRoundTrip,
     [switch]$DashboardLayoutSmoke,
     [switch]$DashboardTransferSmoke,
     [switch]$DownloadsReviewSmoke,
@@ -90,6 +92,8 @@ if ($UpdateStatesSmoke) {
     $UpdateSmoke = $true; $CaptureVisual = $true; $InterfaceMode = 'ModernDashboard'
 }
 if ($DashboardScreenSmoke) { $DashboardPopulatedFixture = $true; $DashboardFixtureCount = 5; $CaptureVisual = $true }
+if ($BatchAnalysisVisualSmoke -and $DashboardScreenSmoke -ne 'Batch') { throw 'BatchAnalysisVisualSmoke requires DashboardScreenSmoke Batch.' }
+if ($DashboardScreenRoundTrip -and -not $DashboardScreenSmoke) { throw 'DashboardScreenRoundTrip requires DashboardScreenSmoke.' }
 if ($PlaylistTransferSmoke -or $PlaylistGroupsSmoke -or $PlaylistShellSwitchCycles -gt 0) { $PlaylistVisualSmoke = $true }
 if ($PlaylistVisualSmoke) { $PlaylistSmoke = $true; $CaptureVisual = $true }
 if ($DownloadsTooltipSmoke) { $DownloadsInputSmoke = $true }
@@ -104,6 +108,12 @@ if ($DashboardEmptyFixture) { $DashboardSmoke = $true }
 if ($DashboardLayoutSmoke) { $DashboardSmoke = $true }
 $previousFakeDownloadDelay = $env:MTD_FAKE_DOWNLOAD_DELAY_MS
 $previousFakeThumbnail = $env:MTD_FAKE_METADATA_THUMBNAIL
+$previousFakeMetadataDelay = $env:MTD_FAKE_METADATA_DELAY_MS
+# Controlled fake-provider latency makes the real asynchronous analysis state observable.
+# It is not an application delay, timeout relaxation, or performance measurement.
+# Every Batch screen lane asserts the active-analysis state. Keep that state observable
+# with bounded latency in the fake provider; an immediate fixture can finish before UIA observes it.
+if ($DashboardScreenSmoke -eq 'Batch') { $env:MTD_FAKE_METADATA_DELAY_MS = '1500' }
 if ($DashboardPopulatedFixture) { $env:MTD_FAKE_METADATA_THUMBNAIL = 'https://example.test/dashboard/fixture-0.png' }
 if ($DashboardTransferSmoke) { $DashboardSmoke = $true; $env:MTD_FAKE_DOWNLOAD_DELAY_MS = '10000' }
 if ($DashboardSmoke) { $InterfaceMode = 'ModernDashboard' }
@@ -400,6 +410,13 @@ function Invoke-ExperienceSmoke {
                     if ($beforeCompletion.finalOutputDirectory -eq $draftOutput) { throw 'Wizard applied output preferences before explicit completion.' }
                 }
                 [void](Capture-Experience 'SetupWizardWindow' ("experience-step-" + ($step + 1)))
+                if ($step -eq 5) {
+                    $summaryTree = Get-Content -LiteralPath (Join-Path $dataRoot 'experience-step-6-tree.json') -Raw | ConvertFrom-Json
+                    $lastSummary = @($summaryTree.nodes | Where-Object { $_.node.name -eq $script:experienceLabels.'Tray.ShowIcon' })
+                    if ($lastSummary.Count -ne 1) { throw 'The full setup summary must contain exactly one tray preference.' }
+                    Invoke-NodeAction $lastSummary[0].node $rootId 'ScrollIntoView' | Out-Null
+                    [void](Capture-Experience 'SetupWizardWindow' 'experience-summary-bottom')
+                }
                 if ($step -eq 2 -and $ExperienceSmoke -eq 'Resume') {
                     if ($ExperienceExternalActivation) {
                         $activationUrl = 'https://example.test/watch/experience-resume-external'
@@ -437,6 +454,26 @@ function Invoke-ExperienceSmoke {
         }
         elseif ($ExperienceSmoke -eq 'News') {
             Invoke-NodeAction (Wait-Node 'NavHelp' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
+            Invoke-NodeAction (Wait-Node 'InformationWhatsNew' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
+            $markerPath = Join-Path $dataRoot 'experience.json'
+            $beforeLater = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
+            if ($beforeLater.lastWhatsNewAcknowledgedVersion -eq $experienceVersion) { throw 'Read-later fixture must not already acknowledge the current version.' }
+            $beforeLaterHash = (Get-FileHash -LiteralPath $markerPath -Algorithm SHA256).Hash
+            $newsRootId = Capture-Experience 'WhatsNewWindow' 'experience-news-later'
+            Invoke-NodeAction (Wait-Node 'WhatsNewLater' $newsRootId 'Enabled').snapshot $newsRootId 'Invoke' | Out-Null
+            [void](Wait-ExperienceRoot 'WhatsNewWindow' $false)
+            if ([MtdAutomationWindowCloser]::FindOwnCaption($script:automationProcess.Id, $script:experienceLabels.'Experience.WhatsNew') -ne [IntPtr]::Zero) {
+                throw 'Read later left the owned native notes window visible.'
+            }
+            $afterLater = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
+            $afterLaterHash = (Get-FileHash -LiteralPath $markerPath -Algorithm SHA256).Hash
+            if ($afterLater.lastWhatsNewAcknowledgedVersion -ne $beforeLater.lastWhatsNewAcknowledgedVersion -or $afterLaterHash -ne $beforeLaterHash) {
+                throw 'Read later changed the durable experience marker or acknowledged the current version.'
+            }
+            @{ beforeAcknowledgedVersion = $beforeLater.lastWhatsNewAcknowledgedVersion; afterAcknowledgedVersion = $afterLater.lastWhatsNewAcknowledgedVersion;
+                beforeSha256 = $beforeLaterHash; afterSha256 = $afterLaterHash; dialogClosed = $true } |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'experience-news-later-state.json') -Encoding utf8
+            # Later leaves manual access available without writing an acknowledgement.
             Invoke-NodeAction (Wait-Node 'InformationWhatsNew' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
             Complete-ExperienceNews 'experience-news-manual'
             # Manual access remains possible even after acknowledging this exact version.
@@ -861,6 +898,13 @@ if ($ExperienceSmoke -in @('New', 'Resume')) {
 elseif ($ExperienceSmoke -eq 'Upgrade') {
     $experienceState = @{ schemaVersion = 1; existingProfile = $true; setup = 0; lastObservedVersion = '1.2.1'; lastWhatsNewAcknowledgedVersion = '1.2.1' }
 }
+elseif ($ExperienceSmoke -eq 'News') {
+    # Suppress automatic notes for this isolated profile while retaining an older
+    # acknowledgement, so the manual Later action cannot pass by rewriting an
+    # already-acknowledged current version.
+    $experienceState = @{ schemaVersion = 1; existingProfile = $true; setup = 2; interfaceChoiceFamily = '1.3'; lastObservedVersion = $experienceVersion;
+        lastWhatsNewAcknowledgedVersion = '1.2.1'; deferredWhatsNewVersion = $experienceVersion }
+}
 # Every other smoke represents an already-onboarded isolated QA user. This is a
 # persisted test fixture, not a production flag which suppresses the new journeys.
 $experienceState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'experience.json') -Encoding utf8
@@ -1122,6 +1166,21 @@ try {
         }
         if ($DashboardScreenSmoke) {
             Invoke-NodeAction (Find-Node ('Nav' + $DashboardScreenSmoke) $mainRoot) $mainRoot 'Invoke' | Out-Null
+            if ($DashboardScreenRoundTrip) {
+                Capture-Dashboard ('before-shell-roundtrip-' + $DashboardScreenSmoke.ToLowerInvariant())
+                $beforeShellQueue = (Get-FileHash -LiteralPath (Join-Path $dataRoot 'queue.json') -Algorithm SHA256).Hash
+                Invoke-NodeAction (Find-Node 'NavSettings' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Invoke-NodeAction (Find-Node 'SettingsCategoryPersonalization' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                $classic = Find-Node 'InterfaceClassic' $mainRoot
+                $modern = Find-Node 'InterfaceModernDashboard' $mainRoot
+                Invoke-NodeAction $classic $mainRoot 'ScrollIntoView' | Out-Null
+                Invoke-NodeAction $classic $mainRoot 'Invoke' | Out-Null
+                Invoke-NodeAction $modern $mainRoot 'Invoke' | Out-Null
+                Wait-Node 'NavBatch' $mainRoot 'Enabled' | Out-Null
+                Invoke-NodeAction (Find-Node ('Nav' + $DashboardScreenSmoke) $mainRoot) $mainRoot 'Invoke' | Out-Null
+                if ((Get-FileHash -LiteralPath (Join-Path $dataRoot 'queue.json') -Algorithm SHA256).Hash -ne $beforeShellQueue) { throw 'The screen roundtrip modified the persisted queue.' }
+                Capture-Dashboard ('after-shell-roundtrip-' + $DashboardScreenSmoke.ToLowerInvariant())
+            }
             if ($DashboardScreenSmoke -eq 'Live') {
                 Wait-Node ('LiveSession-' + $liveFixture[0].SessionId.ToString('N')) $mainRoot | Out-Null
                 Capture-Dashboard 'live-current'
@@ -1161,9 +1220,17 @@ try {
             elseif ($DashboardScreenSmoke -eq 'History') {
                 Invoke-NodeAction (Find-Node ('HistoryItem-' + $seededQueue[0].Id.ToString('N') + '-vod') $mainRoot) $mainRoot 'Select' | Out-Null
                 Capture-Dashboard 'history-selected'
+                Invoke-NodeAction (Find-Node 'HistoryFilterErrors' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-Node ('HistoryItem-' + $seededQueue[0].Id.ToString('N') + '-vod') $mainRoot 'NodeNotExposed' | Out-Null
+                Wait-Node ('HistoryItem-' + $seededQueue[2].Id.ToString('N') + '-vod') $mainRoot | Out-Null
+                Capture-Dashboard 'history-errors'
+                Invoke-NodeAction (Find-Node 'HistorySearch' $mainRoot) $mainRoot 'SetValue' 'synthetic-no-match-final-ui' | Out-Null
+                Wait-Node 'HistoryList' $mainRoot 'NodeNotExposed' | Out-Null
+                Capture-Dashboard 'history-empty-search'
             }
             elseif ($DashboardScreenSmoke -eq 'Batch') {
                 Wait-Node 'BatchPaste' $mainRoot 'Enabled' | Out-Null
+                Capture-Dashboard 'batch-import-empty'
                 $batchFixture = Join-Path $dataRoot 'screen-batch.csv'
                 $batchRows = @('url,quality') + @(1..10 | ForEach-Object { "https://example.test/watch/visual$_,1080" }) + @('https://example.test/watch/visual2,1080', 'not-a-url,1080')
                 $batchRows | Set-Content -LiteralPath $batchFixture -Encoding utf8
@@ -1172,11 +1239,36 @@ try {
                 Wait-Node 'BatchEntryTitle12' $mainRoot | Out-Null
                 Capture-Dashboard 'batch-import-parsed'
                 Invoke-NodeAction (Find-Node 'BatchAnalyze' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-Node 'BatchPause' $mainRoot 'Enabled' | Out-Null
+                $analysisCapture = if ($BatchAnalysisVisualSmoke) { 'batch-import-analyzing' } else { 'batch-import-analysis-transition' }
+                Capture-Dashboard $analysisCapture
+                if ($BatchAnalysisVisualSmoke) {
+                    $analysisTree = Get-Content -LiteralPath (Join-Path $dataRoot ($analysisCapture + '-tree.json')) -Raw | ConvertFrom-Json
+                    $pauseAtCapture = @($analysisTree.nodes | Where-Object { $_.node.automationId -eq 'BatchPause' })
+                    if ($pauseAtCapture.Count -ne 1 -or $pauseAtCapture[0].node.states -match 'Unavailable') { throw 'Analysis finished before the requested in-progress capture; no in-progress evidence was obtained.' }
+                    if ((Find-Node 'BatchPause' $mainRoot).states -match 'Unavailable') { throw 'Analysis was no longer active immediately after the HWND capture.' }
+                }
                 Wait-Node 'BatchAnalyze' $mainRoot 'Enabled' | Out-Null
                 Capture-Dashboard 'batch-import-analyzed'
+                # Exercise the saved import through the same recent-operation UI used
+                # by users, without seeding decorative activity or adding downloads.
+                $savedBatch = @(Get-ChildItem -LiteralPath (Join-Path $dataRoot 'Batch') -Filter 'session.json' -Recurse -File)
+                if ($savedBatch.Count -ne 1) { throw 'Expected one real saved Batch import for the recent-operation capture.' }
+                $savedSession = Get-Content -LiteralPath $savedBatch[0].FullName -Raw | ConvertFrom-Json
+                Invoke-NodeAction (Find-Node 'NavOther' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Wait-Node ('BatchRecent' + ([Guid]$savedSession.id).ToString('N')) $mainRoot | Out-Null
+                Capture-Dashboard 'other-recent-import'
             }
             elseif ($DashboardScreenSmoke -eq 'Settings') {
                 Capture-Dashboard 'settings-general'
+                Invoke-NodeAction (Find-Node 'SettingsCategoryDownloads' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Capture-Dashboard 'settings-downloads'
+                Invoke-NodeAction (Find-Node 'SettingsCategoryAuthentication' $mainRoot) $mainRoot 'Invoke' | Out-Null
+                Capture-Dashboard 'settings-authentication'
+                Invoke-NodeAction (Find-Node 'CookieBridgeConsent' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
+                Capture-Dashboard 'settings-cookie-consent'
+                Invoke-NodeAction (Find-Node 'CookieSyncRepair' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
+                Capture-Dashboard 'settings-cookie-actions'
                 $settingsQuery = if ($Language -eq 'pl') { 'Pliki tymczasowe' } else { 'Temporary files' }
                 Invoke-NodeAction (Find-Node 'SettingsCategorySearch' $mainRoot) $mainRoot 'SetValue' $settingsQuery | Out-Null
                 Invoke-NodeAction (Find-Node 'SettingsCategoryDownloads' $mainRoot) $mainRoot 'Invoke' | Out-Null
@@ -3048,6 +3140,7 @@ finally {
     $env:MTD_FAKE_PLAYLIST_COUNT = $previousPlaylistCount
     $env:MTD_FAKE_PLAYLIST_VISUAL = $previousPlaylistVisual
     $env:MTD_FAKE_METADATA_THUMBNAIL = $previousFakeThumbnail
+    $env:MTD_FAKE_METADATA_DELAY_MS = $previousFakeMetadataDelay
     foreach ($process in @($normalProcess, $script:automationProcess)) {
         if ($null -ne $process -and -not $process.HasExited) {
             if ($UpdateStatesSmoke) {

@@ -56,6 +56,10 @@ public static class AppTypography
         var font = new Font("Segoe UI", Math.Max(1, (int)Math.Round(binding.Size * factor * Scale)), binding.Style);
         var changed = !control.Font.Equals(font);
         control.Font = font;
+        // A FontChanged callback can dispose/rebind this target or switch its owner.
+        // Keep any newer presentation applied by that callback instead of finishing stale styles.
+        if (control.Disposing || !bindings.TryGetValue(control, out var liveBinding) ||
+            !ReferenceEquals(liveBinding, binding) || IsDashboard(control) != dashboard) return;
         classicStateSizes.TryGetValue(control, out var savedSizes);
         for (var index = 0; index < styles.Length; index++)
         {
@@ -91,8 +95,30 @@ public static class AppTypography
     }
     private static void RefreshPresentation(Control root)
     {
-        if (bindings.TryGetValue(root, out var binding)) Apply(root, binding);
-        foreach (var child in root.Controls) RefreshPresentation(child);
+        // FontChanged/layout callbacks may replace siblings or reparent whole subtrees.
+        // Capture recipes before invoking any callback: ControlCollection exposes a live
+        // List enumerator, not a stable traversal. This snapshot lives only for this call.
+        var pending = new List<(Control Target, Control? Parent, Binding Recipe)>();
+        var rootParent = root.Parent;
+        void Capture(Control control)
+        {
+            if (control.Disposing) return;
+            if (bindings.TryGetValue(control, out var recipe)) pending.Add((control, control.Parent, recipe));
+            foreach (var child in control.Controls.ToArray())
+                if (ReferenceEquals(child.Parent, control)) Capture(child);
+        }
+        Capture(root);
+        foreach (var (target, parent, recipe) in pending)
+        {
+            if (root.Disposing || !ReferenceEquals(root.Parent, rootParent)) break;
+            // Disposed controls lose their binding in Remove. A callback may also have
+            // replaced the recipe or moved a captured ancestor to a different tree.
+            if (!ReferenceEquals(target.Parent, parent) || !bindings.TryGetValue(target, out var current) ||
+                !ReferenceEquals(current, recipe)) continue;
+            var ancestor = target;
+            while (!ancestor.Disposing && !ReferenceEquals(ancestor, root) && ancestor.Parent is { } next) ancestor = next;
+            if (!ancestor.Disposing && ReferenceEquals(ancestor, root)) Apply(target, recipe);
+        }
     }
     public static void SetScale(int percent)
     {

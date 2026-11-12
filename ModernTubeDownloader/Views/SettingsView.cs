@@ -21,7 +21,7 @@ internal sealed partial class SettingsView : UserControl
     private readonly Label pageTitle;
     private readonly Label pageSubtitle;
     private readonly AppVectorIcon dashboardHeadingIcon = new(AppIconKind.Settings, 40, AppThemeTokens.Info) { Visible = false, AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
-    private readonly Panel scroll;
+    private readonly SettingsScrollPanel scroll;
     private readonly Dictionary<Control, string> localizedText = [];
     private readonly Panel generalCard;
     private readonly Panel toolsCard;
@@ -44,6 +44,7 @@ internal sealed partial class SettingsView : UserControl
     {
         if (value && !dashboard) { restoreClassicTypography = AppTypography.CaptureRecipes(this); restoreClassicLabels = DashboardVisual.CaptureLabels(this); }
         var previous = dashboard; dashboard = value;
+        cookieSync.ResponsiveLayout = value;
         if (!value && previous)
         {
             DashboardVisual.RestoreTree(this);
@@ -198,17 +199,21 @@ internal sealed partial class SettingsView : UserControl
         pageTitle = AppUi.Heading(string.Empty, 22f);
         pageSubtitle = AppUi.Muted();
         header.Controls.AddRange([pageTitle, pageSubtitle, dashboardHeadingIcon]);
-        scroll = new AppScrollPanel { AutoScroll = true, AccessibleAutomationId = "SettingsScroll" };
+        scroll = new SettingsScrollPanel { AutoScroll = true, AccessibleAutomationId = "SettingsScroll" };
         AppUi.BindBackground(scroll);
 
         generalCard = CreateSection(432, "Settings.General", "Settings.GeneralDescription");
         AddRowLabel(generalCard, "Settings.TemporaryDirectory", 94);
         temporaryDirectory = CreateTextBox(generalCard);
+        temporaryDirectory.AccessibleAutomationId = "SettingsTemporaryDirectory";
         browseTemporary = CreateButton(generalCard, "Settings.Browse", primary: false);
+        browseTemporary.AccessibleAutomationId = "SettingsBrowseTemporary";
         browseTemporary.Click += BrowseTemporary;
         AddRowLabel(generalCard, "Settings.OutputDirectory", 146);
         outputDirectory = CreateTextBox(generalCard);
+        outputDirectory.AccessibleAutomationId = "SettingsOutputDirectory";
         browseOutput = CreateButton(generalCard, "Settings.Browse", primary: false);
+        browseOutput.AccessibleAutomationId = "SettingsBrowseOutput";
         browseOutput.Click += BrowseOutput;
         AddRowLabel(generalCard, "Settings.DefaultQuality", 198);
         defaultQuality = CreateCombo(generalCard);
@@ -319,6 +324,7 @@ internal sealed partial class SettingsView : UserControl
         cookiesCard.Controls.AddRange([cookiesFileName, cookiesHelp, cookiesWarning]);
         cookieSync = new CookieSyncSettingsPanel(services);
         cookiesCard.Controls.Add(cookieSync);
+        cookieSync.PreferredHeightChanged += (_, _) => { if (dashboard && !applyingValues) UpdateLayout(); };
         cookieSync.SourceChanged += (_, _) => { if (!applyingValues) cookiesEnabled.Checked = cookieSync.Source == AuthenticationSource.ManualFile; };
         cookiesEnabled.CheckedChanged += (_, _) => {
             if (!applyingValues && cookiesEnabled.Checked) cookieSync.Source = AuthenticationSource.ManualFile;
@@ -478,6 +484,7 @@ internal sealed partial class SettingsView : UserControl
         AppUi.BindBackground(categories); Controls.AddRange([header, categories, scroll, categorySearch, categoryEmpty]);
         SizeChanged += ViewSizeChanged;
         scroll.SizeChanged += ScrollSizeChanged;
+        scroll.ViewportWidthChanged += ScrollSizeChanged;
         services.Tools.Changed += ToolsChanged;
         services.WebRemote.Changed += RemoteChanged;
         text.LanguageChanged += LanguageChanged;
@@ -532,6 +539,7 @@ internal sealed partial class SettingsView : UserControl
     {
         var control = new TextBox { Height = 36 };
         AppUi.Input(control);
+        control.TextChanged += (_, _) => compactTips.SetToolTip(control, control.Text);
         panel.Controls.Add(control);
         return control;
     }
@@ -608,7 +616,19 @@ internal sealed partial class SettingsView : UserControl
     {
         if (layoutInProgress) return;
         layoutInProgress = true;
-        try { LayoutSettings(); } finally { layoutInProgress = false; }
+        try
+        {
+            // A vertical scrollbar changes the layout viewport without changing the
+            // control's Size. Reflow against the published width, including the first
+            // visible frame, rather than leaving the previous wide card allocation.
+            for (var pass = 0; pass < 3; pass++)
+            {
+                var viewportWidth = scroll.DisplayRectangle.Width;
+                LayoutSettings();
+                if (!dashboard || viewportWidth == scroll.DisplayRectangle.Width) break;
+            }
+        }
+        finally { layoutInProgress = false; }
     }
     private void LayoutSettings()
     {
@@ -1069,8 +1089,12 @@ internal sealed partial class SettingsView : UserControl
         SelectCombo(sponsorMode, item => item is LocalizedOption<SponsorBlockMode> option && option.Value == selected);
     }
 
-    private void UpdateCookieFileName() => cookiesFileName.Text = string.IsNullOrWhiteSpace(selectedCookieFilePath)
-        ? text["Settings.CookiesNoFile"] : System.IO.Path.GetFileName(selectedCookieFilePath);
+    private void UpdateCookieFileName()
+    {
+        cookiesFileName.Text = string.IsNullOrWhiteSpace(selectedCookieFilePath)
+            ? text["Settings.CookiesNoFile"] : System.IO.Path.GetFileName(selectedCookieFilePath);
+        compactTips.SetToolTip(cookiesFileName, selectedCookieFilePath);
+    }
 
     private void PopulateConflict(FileConflictBehavior selected)
     {
@@ -1647,6 +1671,7 @@ internal sealed partial class SettingsView : UserControl
             text.LanguageChanged -= LanguageChanged;
             SizeChanged -= ViewSizeChanged;
             scroll.SizeChanged -= ScrollSizeChanged;
+            scroll.ViewportWidthChanged -= ScrollSizeChanged;
         }
         base.Dispose(disposing);
     }

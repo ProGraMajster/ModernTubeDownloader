@@ -7,7 +7,7 @@ internal sealed partial class OtherView
 {
     private bool dashboard;
     private Panel? quick, links;
-    private readonly Dictionary<Control, AppVectorIcon> moduleIcons = [];
+    private readonly Dictionary<Control, OtherToolIcon> moduleIcons = [];
     private readonly Dictionary<Control, Panel> moduleWorkflows = [];
     private readonly List<Button> linkActions = [];
     public event EventHandler<ModernTubeDownloader.Shell.AppPageId>? NavigateRequested;
@@ -51,7 +51,8 @@ internal sealed partial class OtherView
                 var button = new DashboardButton { Tag = page, AccessibleAutomationId = "OtherNavigate" + page };
                 button.Click += (_, _) => NavigateRequested?.Invoke(this, page);
                 var kind = page == ModernTubeDownloader.Shell.AppPageId.History ? AppIconKind.History : page == ModernTubeDownloader.Shell.AppPageId.Settings ? AppIconKind.Settings : AppIconKind.Help;
-                var icon = new AppVectorIcon(kind, 28, AppThemeTokens.Info);
+                var icon = new OtherToolIcon(kind, page == ModernTubeDownloader.Shell.AppPageId.History ? AppThemeTokens.Success :
+                    page == ModernTubeDownloader.Shell.AppPageId.Help ? AppThemeTokens.Warning : AppThemeTokens.Accent);
                 var title = AppUi.Heading("", 11); var description = AppUi.Muted(); description.Multiline = true;
                 foreach (var child in new Control[] { icon, title, description })
                 {
@@ -104,6 +105,12 @@ internal sealed partial class OtherView
             tip = new Panel(); DownloadsVisual.Card(tip); tipTitle = AppUi.Heading("", 12); tipText = AppUi.Muted(); tipText.Multiline = true;
             tip.Controls.AddRange([tipTitle, tipText]); Controls.Add(tip);
         }
+        if (value)
+        {
+            foreach (var icon in moduleIcons.Values) icon.RestoreSurface();
+            foreach (var icon in linkActions.SelectMany(button => button.Controls.OfType<OtherToolIcon>())) icon.RestoreSurface();
+            foreach (var workflow in moduleWorkflows.Values) DownloadsVisual.Card(workflow);
+        }
         if (quick is not null) quick.Visible = value;
         if (links is not null) links.Visible = value;
         if (tip is not null) tip.Visible = value;
@@ -111,6 +118,27 @@ internal sealed partial class OtherView
         if (value) Controls.Add(recent); else tools.Controls.Add(recent);
         LayoutPage();
         _ = RefreshRecentAsync();
+    }
+
+    // A decorative native icon tile; the real module/button retains its accessible action.
+    private sealed class OtherToolIcon : Panel
+    {
+        private readonly AppVectorIcon icon;
+        private readonly string token;
+        internal OtherToolIcon(AppIconKind kind, string token)
+        {
+            this.token = token;
+            AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden;
+            RestoreSurface();
+            Style.Border.Radius = 9; Style.Border.Width = 0;
+            icon = new AppVectorIcon(kind, 28, AppThemeTokens.AccentText)
+                { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
+            icon.Click += (_, e) => OnClick(e);
+            Controls.Add(icon);
+            SizeChanged += (_, _) => icon.SetBounds((Width - 28) / 2, (Height - 28) / 2, 28, 28);
+        }
+        internal void RestoreSurface() => AppUi.BindGradient(this, token, token == AppThemeTokens.Accent ? AppThemeTokens.AccentPressed : token);
+        internal void SetKind(AppIconKind kind) => icon.SetKind(kind);
     }
 
     private sealed record RecentToolRow(Label Title, Label Subtitle, AppVectorIcon Icon);
@@ -129,7 +157,7 @@ internal sealed partial class OtherView
     private void LayoutDashboard()
     {
         AutoScroll = true; tools.AutoScroll = false; var origin = DisplayRectangle.Location; var width = Math.Max(1, DisplayRectangle.Width - 36);
-        heading.SetBounds(18 + origin.X, 20 + origin.Y, width, AppTypography.TextHeight(48));
+        heading.SetBounds(18 + origin.X, 20 + origin.Y, width, Math.Max(AppTypography.TextHeight(38), DashboardVisual.LabelHeight(heading, width, 1)));
         subtitle.SetBounds(heading.Left, heading.Bottom + 4, width, AppTypography.TextHeight(28));
         var inline = width >= AppTypography.TextHeight(960); var left = inline ? width * 2 / 3 - 12 : width;
         tools.SetBounds(heading.Left, subtitle.Bottom + 18, left, 1); AppUi.BindBackground(tools);
@@ -141,17 +169,17 @@ internal sealed partial class OtherView
             DownloadsVisual.Card(card); card.Width = left - 2;
             if (!moduleIcons.TryGetValue(card, out var icon))
             {
-                icon = new AppVectorIcon(AppIconKind.Clipboard, 36, AppThemeTokens.Info) { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
+                icon = new OtherToolIcon(AppIconKind.Clipboard, AppThemeTokens.Accent);
                 moduleIcons.Add(card, icon); card.Controls.Add(icon);
             }
-            icon.Visible = true; icon.SetBounds(16, 20, 36, 36);
+            icon.Visible = true; icon.SetBounds(16, 16, 52, 52);
             icon.SetKind(id == "Batch" ? AppIconKind.Clipboard : AppIconKind.Media);
             AppTypography.Bind(module.Title, 12, FontStyle.Bold);
-            module.Title.SetBounds(66, 16, card.Width - 86, AppTypography.TextHeight(28));
+            module.Title.SetBounds(84, 16, card.Width - 104, AppTypography.TextHeight(28));
             module.Description.Multiline = true;
             var descriptionStyle = module.Description.CurrentStyle;
-            var descriptionSize = TextMeasurer.MeasureText(module.Description.Text, descriptionStyle.GetFont(), descriptionStyle.GetFontSize(), new System.Drawing.Size(card.Width - 86, int.MaxValue), descriptionStyle.GetFontStyle());
-            module.Description.SetBounds(66, module.Title.Bottom + 4, card.Width - 86, Math.Max(AppTypography.TextHeight(24), (int)Math.Ceiling(descriptionSize.Height) + 4));
+            var descriptionSize = TextMeasurer.MeasureText(module.Description.Text, descriptionStyle.GetFont(), descriptionStyle.GetFontSize(), new System.Drawing.Size(card.Width - 104, int.MaxValue), descriptionStyle.GetFontStyle());
+            module.Description.SetBounds(84, module.Title.Bottom + 4, card.Width - 104, Math.Max(AppTypography.TextHeight(24), (int)Math.Ceiling(descriptionSize.Height) + 4));
             if (importDropZone is null)
             {
                 importDropZone = new(); importDropTitle = AppUi.Heading("", 12); importDropHint = AppUi.Muted();
@@ -164,6 +192,7 @@ internal sealed partial class OtherView
                 importDropZone.Controls.AddRange([importDropTitle, importDropHint, importPickFile]); card.Controls.Add(importDropZone);
             }
             importDropZone.Visible = true;
+            AppUi.BindGradient(importDropZone, DownloadsVisual.ButtonTop, DownloadsVisual.PanelEnd);
             importDropZone.SetBounds(16, module.Description.Bottom + 12, card.Width - 32, AppTypography.TextHeight(110));
             importDropTitle!.Text = services.Localization["Dashboard.DropFile"];
             importDropHint!.Text = services.Localization["Dashboard.DropFormats"];
@@ -176,7 +205,7 @@ internal sealed partial class OtherView
             importDropZone.Height = importPickFile.Bottom + 16;
             if (!moduleWorkflows.TryGetValue(card, out var workflow))
             {
-                workflow = new Panel(); DashboardVisual.Flat(workflow); AppUi.BindBackground(workflow, AppThemeTokens.SurfaceSecondary);
+                workflow = new Panel(); DownloadsVisual.Card(workflow);
                 foreach (var key in new[] { "Batch.Browse", "Batch.Analyze", "Batch.Add" })
                 {
                     var step = AppUi.Muted(); step.Multiline = true; step.Tag = key; workflow.Controls.Add(step);
@@ -199,7 +228,7 @@ internal sealed partial class OtherView
             }
             workflow.Height = workflow.Controls.Max(step => step.Bottom) + 12;
             module.Open.Text = services.Localization["Dashboard.OpenBatch"];
-            DashboardVisual.Button(module.Open, true); DashboardVisual.Icon(module.Open, AppIconKind.Clipboard);
+            DownloadsVisual.Button(module.Open, true); DashboardVisual.Icon(module.Open, AppIconKind.Clipboard);
             var actionWidth = Math.Min(card.Width - 48, DashboardVisual.ActionWidth(module.Open, true));
             module.Open.SetBounds(card.Width - 16 - actionWidth, workflow.Bottom + 12, actionWidth, AppTypography.TextHeight(36));
             DashboardVisual.Icon(module.Open, AppIconKind.Clipboard);
@@ -219,19 +248,19 @@ internal sealed partial class OtherView
             if (tile is Button button)
             {
                 button.AccessibleName = services.Localization["Nav." + button.Tag]; button.Text = ""; DownloadsVisual.Button(button);
-                button.Controls[0].SetBounds(16, 18, 28, 28);
-                button.Controls[1].Text = button.AccessibleName; button.Controls[1].SetBounds(58, 12, itemWidth - 76, AppTypography.TextHeight(28));
+                button.Controls[0].SetBounds(14, 14, 52, 52);
+                button.Controls[1].Text = button.AccessibleName; button.Controls[1].SetBounds(82, 12, itemWidth - 98, AppTypography.TextHeight(28));
                 button.Controls[2].Text = services.Localization["Dashboard.Route" + button.Tag];
-                button.Controls[2].SetBounds(58, button.Controls[1].Bottom + 4, itemWidth - 76, DashboardVisual.LabelHeight((Label)button.Controls[2], itemWidth - 76, 3));
+                button.Controls[2].SetBounds(82, button.Controls[1].Bottom + 4, itemWidth - 98, DashboardVisual.LabelHeight((Label)button.Controls[2], itemWidth - 98, 3));
             }
             else
             {
                 var pair = modules.First(pair => pair.Value.Title.Parent == tile); var module = pair.Value;
                 DownloadsVisual.Card(tile);
-                if (!moduleIcons.TryGetValue(tile, out var icon)) { icon = new AppVectorIcon(AppIconKind.Media, 28, AppThemeTokens.Info); moduleIcons.Add(tile, icon); tile.Controls.Add(icon); }
-                icon.Visible = true; icon.SetBounds(16, 18, 28, 28);
-                AppTypography.Bind(module.Title, 11, FontStyle.Bold); module.Title.SetBounds(58, 12, itemWidth - 104, AppTypography.TextHeight(28));
-                module.Description.Multiline = true; module.Description.SetBounds(58, module.Title.Bottom + 4, itemWidth - 76, DashboardVisual.LabelHeight(module.Description, itemWidth - 76, 3));
+                if (!moduleIcons.TryGetValue(tile, out var icon)) { icon = new OtherToolIcon(AppIconKind.Media, AppThemeTokens.Info); moduleIcons.Add(tile, icon); tile.Controls.Add(icon); }
+                icon.Visible = true; icon.SetBounds(14, 14, 52, 52);
+                AppTypography.Bind(module.Title, 11, FontStyle.Bold); module.Title.SetBounds(82, 12, itemWidth - 128, AppTypography.TextHeight(28));
+                module.Description.Multiline = true; module.Description.SetBounds(82, module.Title.Bottom + 4, itemWidth - 98, DashboardVisual.LabelHeight(module.Description, itemWidth - 98, 3));
                 module.Open.Text = ""; module.Open.AccessibleName = services.Localization["Other.Open"] + " — " + module.Title.Text;
                 module.Open.SetBounds(itemWidth - 38, 12, 28, AppTypography.TextHeight(30)); DownloadsVisual.Button(module.Open); DashboardVisual.Icon(module.Open, AppIconKind.ChevronRight, true);
             }
@@ -268,7 +297,7 @@ internal sealed partial class OtherView
         {
             var button = quickButtons[i]; button.Text = ""; button.AccessibleName = services.Localization[(string)button.Tag!];
             button.SetBounds(16 + (i % 2) * (quickWidth + 12), quickTitle.Bottom + 12 + (i / 2) * (quickHeight + 12), quickWidth, quickHeight);
-            DashboardVisual.Button(button);
+            DownloadsVisual.Button(button);
             button.Controls[0].SetBounds((button.Width - 24) / 2, 12, 24, 24);
             button.Controls[1].Text = button.AccessibleName; button.Controls[1].SetBounds(10, 42, button.Width - 20, quickHeight - 48);
         }

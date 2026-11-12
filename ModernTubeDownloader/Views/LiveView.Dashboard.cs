@@ -97,7 +97,8 @@ internal sealed partial class LiveView
             var hasRows = section.List.Controls.Count > 0;
             if (!showRecent && !hasRows && (i == 1 || sections[1].List.Controls.Count > 0)) section.Panel.Visible = false;
             if (!section.Panel.Visible) { section.Panel.SetBounds(0, 0, 0, 0); continue; }
-            AppUi.BindBackground(section.Panel, AppThemeTokens.Surface); DashboardVisual.Flat(section.Panel); AppUi.BindBackground(section.List, AppThemeTokens.Surface);
+            AppUi.BindGradient(section.Panel, DownloadsVisual.Panel, DownloadsVisual.PanelEnd); DashboardVisual.Flat(section.Panel);
+            AppUi.BindGradient(section.List, DownloadsVisual.Panel, DownloadsVisual.PanelEnd);
             foreach (var card in section.List.Controls.OfType<LiveSessionCard>()) card.Width = center - 20;
             var listHeight = section.List.Controls.Sum(c => c.Height + c.Margin.Bottom);
             section.Panel.SetBounds(18 + origin.X, next, center, Math.Max(AppTypography.TextHeight(64), listHeight + 8));
@@ -152,7 +153,8 @@ internal sealed partial class LiveSessionCard
         dashboard = value;
         thumbnail.RoundedPreview = value;
         TabStop = value; SetControlBehavior(ControlBehaviors.Selectable, value);
-        AppTypography.Bind(title, value ? DashboardVisual.ItemTitle : 13, FontStyle.Bold);
+        if (value) AppTypography.BindSemibold(title, 11);
+        else AppTypography.Bind(title, 13, FontStyle.Bold);
         AppTypography.Bind(facts, value ? 9.25f : 10.5f); AppTypography.Bind(state, value ? 9.5f : 10.5f);
         AppTypography.SetDashboardPresentation(this, value);
         if (!value)
@@ -208,6 +210,8 @@ internal sealed partial class LiveSessionCard
         if (current is not null)
         {
             var t = services.Localization;
+            state.Text = t[current.State == LiveSessionState.WaitingForLive && current.ScheduledStartAt > DateTimeOffset.UtcNow
+                ? "Live.State.Scheduled" : "Live.State." + current.State];
             var appearance = AppearancePresentation.Current.Live;
             var identity = SourceBrandLookup.Resolve(current.SourceUrl);
             var source = appearance.ShowSource ? identity.Name + " · " : "";
@@ -256,7 +260,7 @@ internal sealed partial class LiveSessionCard
         }
         details.AccessibleName = services.Localization["Common.Details"]; details.Text = "";
         dashboardTips.SetToolTip(details, details.AccessibleName);
-        details.SetBounds(actionLeft + actionWidth - 36, actionTop, 36, actionHeight); DashboardVisual.Icon(details, AppIconKind.Info);
+        details.SetBounds(actionLeft + actionWidth - 36, actionTop, 36, actionHeight); DashboardVisual.Icon(details, AppIconKind.Info, iconOnly: true);
         if (secondary.Visible)
         {
             secondary.SetBounds(actionLeft, actionTop, actionWidth - 42, actionHeight);

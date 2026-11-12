@@ -17,6 +17,7 @@ internal sealed partial class LiveView
     private int livePage;
     private LiveDashboardPage liveProjection = new([], 0, 0, 0, 0);
     private bool refreshingSessions;
+    private bool searchBesideSources;
 
     private void CreateLiveNavigation()
     {
@@ -67,13 +68,19 @@ internal sealed partial class LiveView
         // The existing supported-site dialog remains the authority for provider capabilities.
         sourceLive!.Text = text["Sources.Link"]; DownloadsVisual.Button(sourceLive); DashboardVisual.Icon(sourceLive, AppIconKind.Link);
         sourceLive.Width = Math.Min(width, DashboardVisual.ActionWidth(sourceLive, true)); sourceLive.Height = line;
+        var searchWidth = AppTypography.TextHeight(270);
+        var sourceWidth = liveSources!.Controls.Sum(c => c.Width + c.Margin.Right);
+        searchBesideSources = sourceWidth + searchWidth + 12 <= width;
+        var available = searchBesideSources ? width - searchWidth - 12 : width;
+        if (searchBesideSources)
+            liveSearch!.SetBounds(left + width - searchWidth, top, searchWidth, line);
         var used = 0; var rows = 1;
         foreach (var control in liveSources!.Controls)
         {
-            if (used > 0 && used + control.Width + control.Margin.Right > width) { rows++; used = 0; }
+            if (used > 0 && used + control.Width + control.Margin.Right > available) { rows++; used = 0; }
             used += control.Width + control.Margin.Right;
         }
-        liveSources.SetBounds(left, top, width, rows * (line + 6));
+        liveSources.SetBounds(left, top, available, rows * (line + 6));
         return liveSources.Bottom;
     }
 
@@ -84,6 +91,12 @@ internal sealed partial class LiveView
         liveSearch!.Placeholder = text["Live.Search"];
         liveSort!.AccessibleName = text["Live.Sort"];
         for (var index = 0; index < 3; index++) liveSort.Items[index] = text[new[] { "Live.SortNewest", "Live.SortOldest", "Dashboard.Title" }[index]];
+        if (searchBesideSources)
+        {
+            var besideTabs = activeTab!.Top == recentTab!.Top && left + width - recentTab.Right >= sortWidth + 12;
+            liveSort.SetBounds(left + width - sortWidth, besideTabs ? recentTab.Top + 4 : top, sortWidth, line);
+            return Math.Max(recentTab.Bottom, liveSort.Bottom);
+        }
         var inline = width >= AppTypography.TextHeight(460);
         liveSearch.SetBounds(left, top, inline ? width - sortWidth - 10 : width, line);
         liveSort.SetBounds(inline ? liveSearch.Right + 10 : left, inline ? top : liveSearch.Bottom + 8, sortWidth, line);

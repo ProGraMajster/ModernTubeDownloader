@@ -285,7 +285,7 @@ internal sealed partial class HistoryView : UserControl
 
     private void ApplyLocalization()
     {
-        pageTitle.Text = text["History.Title"];
+        pageTitle.Text = text[dashboard ? "Nav.History" : "History.Title"];
         pageSubtitle.Text = text["History.Subtitle"];
         search.Placeholder = text["History.SearchPlaceholder"];
         classicPrevious.Text = text["Playlist.PreviousPage"];

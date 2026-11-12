@@ -38,6 +38,7 @@ internal sealed partial class HistoryView
     private bool updatingPageNumber;
     private Label? paging;
     private Panel? tableHeader;
+    private Panel? tableSurface;
     private ComboBox? dateRange;
     private Button? dateSort;
     private bool oldestFirst;
@@ -50,9 +51,11 @@ internal sealed partial class HistoryView
     public void SetDashboard(bool value)
     {
         dashboard = value;
+        pageTitle.Text = text[value ? "Nav.History" : "History.Title"];
         if (!value)
         {
             AutoScroll = false; AppUi.Card(searchPanel);
+            AppUi.ClearGradient(list); AppUi.BindBackground(list);
             DashboardVisual.RestoreTree(search);
             AppTypography.Bind(pageTitle, 24, FontStyle.Bold);
             pageSubtitle.TextAlign = ContentAlignment.TopLeft;
@@ -80,6 +83,8 @@ internal sealed partial class HistoryView
             dateRange.SelectedIndexChanged += (_,_) => { days = dateRange.SelectedIndex switch { 1 => 7, 2 => 30, _ => 0 }; page = 0; InvalidateProjection(); }; Controls.Add(dateRange);
             dateSort = new DashboardButton { AccessibleAutomationId = "HistoryDateSort" }; dateSort.Click += (_,_) => { oldestFirst = !oldestFirst; page = 0; InvalidateProjection(); };
             tableHeader = new Panel { AccessibleAutomationId = "HistoryTableHeader" }; tableHeader.Controls.Add(dateSort); AppUi.BindBackground(tableHeader, AppThemeTokens.Surface);
+            tableSurface = new Panel { AccessibilityView = AccessibilityView.Hidden };
+            DownloadsVisual.Card(tableSurface); Controls.Add(tableSurface); tableSurface.SendToBack();
             foreach (var key in new[] { "Dashboard.Title", "Dashboard.Source", "Dashboard.Date", "Dashboard.Time", "Dashboard.Format", "Dashboard.Size", "Dashboard.Status" })
             { var label = AppUi.Muted(); label.Tag = key; label.TextAlign = ContentAlignment.MiddleLeft; label.AutoEllipsis = true; AppTypography.Bind(label, 9.5f); tableHeadings.Add(label); tableHeader.Controls.Add(label); }
             Controls.Add(tableHeader);
@@ -87,8 +92,9 @@ internal sealed partial class HistoryView
             searchIcon = new AppVectorIcon(AppIconKind.Search, 18) { AccessibilityView = AccessibilityView.Hidden };
             searchIcon.Click += (_, _) => search.Select(); searchPanel.Controls.Add(searchIcon);
         }
+        if (value && tableSurface is not null) DownloadsVisual.Card(tableSurface);
         if (searchIcon is not null) searchIcon.Visible = value;
-        foreach (var control in new Control?[] { inspector, filters, export, previous, next, paging, tableHeader, dateRange, firstPage, lastPage, jumpPage })
+        foreach (var control in new Control?[] { inspector, filters, export, previous, next, paging, tableHeader, tableSurface, dateRange, firstPage, lastPage, jumpPage })
             if (control is not null) { control.Visible = value; if (!value) control.SetBounds(0, 0, 0, 0); }
         AppTypography.SetDashboardPresentation(this, value);
         pageSummary.AccessibleAutomationId = value ? "HistoryClassicPageSummary" : "HistoryPageSummary";
@@ -143,7 +149,7 @@ internal sealed partial class HistoryView
         pageSubtitle.Visible = width - titleWidth > AppTypography.TextHeight(300);
         pageSubtitle.SetBounds(titleWidth + 16, 6, Math.Max(0, width - titleWidth - 16), line - 6);
         pageSubtitle.TextAlign = ContentAlignment.MiddleLeft;
-        export!.Text = text["Dashboard.ExportHistory"]; DashboardVisual.Button(export, true);
+        export!.Text = text["Dashboard.ExportHistory"]; DownloadsVisual.Button(export, true);
         var exportWidth = Math.Max(AppTypography.TextHeight(160), DashboardVisual.ActionWidth(export, true));
         var dateWidth = AppTypography.TextHeight(174);
         var inlineTools = width >= AppTypography.TextHeight(220) + exportWidth + dateWidth + 24;
@@ -161,7 +167,7 @@ internal sealed partial class HistoryView
         {
             var count = filterCounts.GetValueOrDefault(filter);
             button.Text = text[filter == "Live" ? "Nav.Live" : "Dashboard." + filter] + $" ({count})";
-            DashboardVisual.Button(button, dashboardFilter == filter);
+            DownloadsVisual.Button(button, dashboardFilter == filter);
             button.Width = Math.Min(width, Math.Max(AppTypography.TextHeight(94), DashboardVisual.ActionWidth(button, true)));
             button.Height = filterHeight;
             if (filterX > 0 && filterX + button.Width + 10 > width) { filterRows++; filterX = 0; }
@@ -171,6 +177,8 @@ internal sealed partial class HistoryView
         filters!.SetBounds(18 + origin.X, toolsTop + line + 12, width, filterRows * (filterHeight + 6));
         var tableTop = filters.Bottom + 12;
         tableHeader!.SetBounds(18 + origin.X, tableTop, center, AppTypography.TextHeight(38));
+        AppUi.BindGradient(tableHeader, DownloadsVisual.ButtonTop, DownloadsVisual.ButtonEnd);
+        AppUi.BindGradient(list, DownloadsVisual.Panel, DownloadsVisual.PanelEnd);
         var top = tableHeader.Bottom; var height = Math.Max(AppTypography.TextHeight(250), ClientSize.Height - (top - origin.Y) - line - 30);
         list.SetBounds(18 + origin.X, top, center, height); empty.SetBounds(list.Left, top, center, height);
         if (inspector.Visible)
@@ -183,6 +191,7 @@ internal sealed partial class HistoryView
         next!.SetBounds(jumpPage.Right + 8, previous.Top, pagerButtonWidth, line);
         lastPage!.SetBounds(next.Right + 8, previous.Top, pagerButtonWidth, line);
         paging!.SetBounds(list.Left + 12, previous.Top + 4, Math.Max(1, firstPage.Left - list.Left - 24), line);
+        tableSurface!.SetBounds(tableHeader.Left, tableHeader.Top, center, lastPage.Bottom - tableHeader.Top + 12);
         var countFiltered = filtered.Length; var pages = HistoryPage.Count(countFiltered);
         var first = countFiltered == 0 ? 0 : page * 40 + 1; var last = Math.Min(countFiltered, (page + 1) * 40);
         paging.Text = $"{first}–{last} / {countFiltered}     ·     {page + 1} / {pages}"; previous.Enabled = page > 0; next.Enabled = page < pages - 1;
@@ -196,8 +205,8 @@ internal sealed partial class HistoryView
         previous.AccessibleName = text["Batch.Previous"]; next.AccessibleName = text["Batch.Next"]; dashboardTips.SetToolTip(previous, previous.AccessibleName); dashboardTips.SetToolTip(next, next.AccessibleName);
         emptyIcon.SetBounds((center - 44) / 2, Math.Max(20, height / 2 - 80), 44, 44);
         emptyTitle.SetBounds(20, emptyIcon.Bottom + 8, center - 40, AppTypography.TextHeight(40)); emptyBody.SetBounds(20, emptyTitle.Bottom + 8, center - 40, AppTypography.TextHeight(60));
-        DashboardVisual.Button(previous); DashboardVisual.Button(next!);
-        DashboardVisual.Button(firstPage); DashboardVisual.Button(lastPage);
+        DownloadsVisual.Button(previous); DownloadsVisual.Button(next!);
+        DownloadsVisual.Button(firstPage); DownloadsVisual.Button(lastPage);
         ResizeCards();
         var entry = entries.FirstOrDefault(e => e.QueueItemId == selectedId && e.FinalPath == selectedPath);
         if (entry != inspectedEntry)
@@ -220,6 +229,7 @@ internal sealed partial class HistoryView
         tableHeadings[2].Visible = false;
         dateSort.Text = text["Dashboard.Date"] + (oldestFirst ? " ↑" : " ↓"); DashboardVisual.Button(dateSort);
         AppUi.BindInteractiveSurface(dateSort, AppThemeTokens.Surface, AppThemeTokens.SurfaceHover);
+        AppUi.BindGradient(dateSort, DownloadsVisual.ButtonTop, DownloadsVisual.ButtonEnd);
         AppUi.BindForeground(dateSort, AppThemeTokens.TextSecondary); AppTypography.Bind(dateSort, 9.5f);
         dateSort.TextAlign = ContentAlignment.MiddleLeft; DashboardVisual.SetPadding(dateSort, new Padding(0));
         DashboardVisual.Flat(dateSort); dateSort.Style.Border.Radius = 0;
@@ -264,7 +274,7 @@ internal sealed partial class HistoryEntryCard
         if (value)
         {
             AppUi.BindBackground(this, selected ? AppThemeTokens.RowSelected : AppThemeTokens.Surface);
-            AppTypography.Bind(title, DashboardVisual.ItemTitle); AppTypography.Bind(facts, DashboardVisual.Metadata);
+            AppTypography.Bind(title, 10); AppTypography.Bind(facts, 8.75f);
         }
         else
         {
@@ -305,7 +315,7 @@ internal sealed partial class HistoryEntryCard
         var factsHeight = HistoryTable.MeasuredHeight(facts, titleWidth, compact ? 2 : 1);
         var statusHeight = HistoryTable.LineHeight(cells[5]);
         var textHeight = titleHeight + 3 + factsHeight + (compact ? statusHeight + 6 : 0);
-        Height = Math.Max(AppTypography.TextHeight(70), textHeight + 12); Margin = new Padding(0, 0, 0, 1);
+        Height = Math.Max(AppTypography.TextHeight(68), textHeight + 12); Margin = new Padding(0, 0, 0, 1);
         placeholder.SetBounds(12, (Height - 48) / 2, 86, 48); thumbnail.Bounds = placeholder.Bounds;
         if (placeholderIcon is null)
         {
@@ -346,11 +356,18 @@ internal sealed partial class HistoryEntryCard
         cells[2].Text = entry.DurationSeconds is { } seconds ? DashboardStyle.Duration(seconds) : "—";
         cells[3].Text = System.IO.Path.GetExtension(entry.FinalPath).TrimStart('.').ToUpperInvariant() + "\n" + entry.Quality;
         cells[4].Text = entry.FileSizeBytes is { } bytes ? DashboardStyle.Bytes(bytes) : "—";
-        cells[5].Text = text["Status." + (entry.WasPartial ? "Partial" : entry.Status)];
+        var fullStatus = text["Status." + (entry.WasPartial ? "Partial" : entry.Status)];
+        cells[5].Text = !entry.WasPartial && entry.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase)
+            ? text["History.FailedShort"] : fullStatus;
+        cells[5].AccessibleName = fullStatus;
+        rowTips.SetToolTip(cells[5], fullStatus);
         for (var i = 0; i < cells.Count; i++)
         {
             var c = columns[i + 1]; var inset = i == 5 ? 22 : 0;
-            cells[i].Multiline = i is not 0 and not 5;
+            // Keep the full outcome readable inside the existing row allocation.
+            // The status column has room for two lines; a single line truncated
+            // localized outcomes such as Polish "Niepowodzenie" at desktop widths.
+            cells[i].Multiline = i != 0;
             cells[i].SetBounds(c.Left + inset, 10, Math.Max(1, c.Width - 8 - inset), Height - 20);
             cells[i].Visible = !compact; cells[i].AutoEllipsis = true;
         }
@@ -376,7 +393,7 @@ internal sealed partial class HistoryEntryCard
         more!.Visible = true; more.SetBounds(Width - 40, openFolder.Top, 30, 34);
         more.AccessibleAutomationId = "HistoryMore-" + entry.QueueItemId.ToString("N"); more.AccessibleName = text["Dashboard.MoreActions"];
         DownloadsVisual.Button(more);
-        DashboardVisual.Button(openFolder); DashboardVisual.Flat(this, !rowSelected);
+        DownloadsVisual.Button(openFolder); DashboardVisual.Flat(this, !rowSelected);
         AppUi.BindGradient(this, rowSelected ? DownloadsVisual.Selected : DownloadsVisual.Panel, rowSelected ? DownloadsVisual.SelectedEnd : DownloadsVisual.PanelEnd);
         if (rowSelected)
             foreach (var style in new[] { Style, StyleHover, StylePressed, StyleFocused, StyleDisabled })
