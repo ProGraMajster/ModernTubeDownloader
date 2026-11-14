@@ -4,7 +4,7 @@ ModernTubeDownloader uses the existing ModernFormsNext `AccessibleObject` tree t
 
 ## Start and discover
 
-Candidate.3 added `NotificationsSection`, `NotificationEnabled`, all individual `Notification<Property>` checkboxes, `NotificationSound`, `NotificationPresentation`, `NotificationDiagnostics`, `NotificationsTest` and `NotificationsReset`. Native smoke: `scripts/Test-Automation.ps1 -NotificationsSmoke -CaptureVisual -Language pl -Theme Dark`. Add `-NotificationManualHoldSeconds 180` only when a human is ready to observe/click the real OS notification. The test uses an isolated data root and fake media tools; OS provider/submission is real, but fake media is not a real download qualification. Close that owned QA process before rebuild or another smoke. Candidate 1.2 Settings has eleven categories; the original scroll regression uses DEBUG-only all-cards mode and checks exactly 18 cards. The old 14-card count is historical.
+Candidate.3 added `NotificationsSection`, `NotificationEnabled`, all individual `Notification<Property>` checkboxes, `NotificationSound`, `NotificationPresentation`, `NotificationDiagnostics`, `NotificationsTest` and `NotificationsReset`. Native smoke: `scripts/Test-Automation.ps1 -NotificationsSmoke -CaptureVisual -Language pl -Theme Dark`. Add `-NotificationManualHoldSeconds 180` only when a human is ready to observe/click the real OS notification. The test uses an isolated data root and fake media tools; OS provider/submission is real, but fake media is not a real download qualification. Close that owned QA process before rebuild or another smoke. Candidate 1.2 Settings has eleven categories; the original scroll regression uses DEBUG-only all-cards mode and checked 18 cards. The 1.3 candidate adds the interface card, so its current all-cards check requires exactly 19. The old 14-card count is historical.
 
 The UI harness captures only its owned HWND. Native banner/center/cold-click evidence is separate; see [candidate report](CANDIDATE3_NOTIFICATIONS_PIPELINE_REPORT.md). Running with an isolated environment-variable data root does not propagate that root to an Explorer/COM cold launch: do not claim an isolated cold-start test unless profile/identity ownership is established.
 
@@ -121,3 +121,59 @@ The `AutomationTestHostTests` use `ModernFormsNext.Testing` to create Details wi
 `scripts\Test-Automation.ps1 -LiveSmoke -SampleUrl https://example.test/live/active` invokes NavLive, analyzes a synthetic active stream, starts it explicitly, inspects its own statistics and Details, and invokes Stop and save. Use `-SampleUrl https://example.test/live/upcoming` for the scheduled list and separate persistence. `-Language pl|en`, `-Theme Light|Dark` and window size parameters exercise alternate presentation. Run native app smokes serially: the real single-instance transport intentionally forwards secondary launches.
 
 For bounded real qualification, `-RealLiveSmoke` uses the Debug semantic UI. `scripts\Test-ReleaseLive.ps1` starts the self-contained published app with an isolated profile, observes the separate `/api/live` API, and verifies Stop and save, History, ffprobe A/V and a short decode. `-ParallelDownloads` adds three short public Blender VOD ranges through the production remote allowlist and asserts three ordinary active jobs while LIVE continues. `-RestartDuringCapture` checks manual resume; add `-AutoResumeAfterRestart` for the opt-in policy. `-InterruptDownloader` kills only the isolated yt-dlp capture child and checks retry into Part 2; add `-NoRetryAfterInterruption` for terminal Partial. Explicit validated local tool paths are required. These are not human A/V playback, browser-extension or physical LAN tests. Current results are in [VALIDATION_REPORT.md](VALIDATION_REPORT.md).
+
+## Modern Dashboard candidate smoke
+
+Use the central MFN pin from Directory.Build.props (the historical pin in the
+original commands above is not the current authority). Build Debug, FakeTool and
+the matching Automation CLI before running these isolated native checks:
+
+```powershell
+.\scripts\Test-Automation.ps1 -DashboardSmoke -CaptureVisual -Language pl -Theme Dark -WindowWidth 1536 -WindowHeight 1024
+.\scripts\Test-Automation.ps1 -DashboardSmoke -DashboardSwitchStress -Language en -Theme Dark -WindowWidth 1920 -WindowHeight 1080
+.\scripts\Test-Automation.ps1 -DashboardSmoke -CaptureVisual -Language pl -Theme Light -WindowWidth 1280 -WindowHeight 720
+.\scripts\Test-Automation.ps1 -DashboardSmoke -CaptureVisual -Language pl -AppTextScale 150
+.\scripts\Test-Automation.ps1 -DashboardSmoke -CaptureVisual -Language en -AppTextScale 200
+.\scripts\Test-Automation.ps1 -ClassicUiRecovery -CaptureVisual
+```
+
+`-DashboardFixture` seeds 100 explicitly synthetic QA entries in the isolated test
+profile; it is not production sample data or evidence of a real source download.
+`-DashboardVisualFixture` also creates original labelled geometric QA thumbnails,
+mixed terminal/waiting states and multilingual/long titles in that owned temporary
+profile. `-DashboardEmptyFixture` captures native empty routes without quick-queue
+seeding. Neither flag changes production behavior. Captures include Classic after
+switching, and the script refuses to run while any owner instance is open.
+The script captures its owned HWND and semantic trees for all eight routes, checks
+runtime selection and persistence, and uses the real native app with fake media
+tools. `-DashboardSwitchStress` performs twenty Classic → Modern cycles. Recovery
+checks the saved Modern preference survives `--classic-ui`. Native physical DPI
+and real banner/cold activation still require separate evidence.
+
+`DashboardShellTests` covers v1 migration, schema rejection, selection/reset/restart,
+constructor fallback, common notification/external routes, chrome disposal, singleton
+runtime preservation, 100-item paging/reveal, logical size/text-scale layouts, action
+contrast and bounded/sanitized telemetry. These tests do not replace visual QA.
+`DashboardVisualTests` verifies real raster text overflow, dynamic font restoration,
+canonical toggle semantics and restoration of Classic borders. History tests use
+the real controls to verify filtering/sorting/date ranges preserve stored data.
+Native visual evidence is kept locally under `artifacts/dashboard-visual/` with
+before/after/comparisons, an audit, acceptance matrix and explicit limitations.
+
+### Downloads playlist visual qualification
+
+`pwsh -File scripts/Test-Automation.ps1 -PlaylistVisualSmoke -InterfaceMode ModernDashboard`
+uses a separately enabled heterogeneous 12-entry fixture through the normal metadata and queue
+services. Windows UIA verifies selection, unavailable entries, three ordered jobs, duplicate
+skipping, shared quality/container settings, inspector, same-profile restart and watch+list
+routing. `-PlaylistCount 120` also checks page selection and the 40-row bound. Original
+owned-HWND PNGs have UIA/queue snapshots and a hash/DPI/text-scale/source-commit manifest.
+This extends the existing `-PlaylistSmoke`; it does not replace its larger handoff checks.
+
+`-PlaylistTransferSmoke` additionally exercises real executor progress, Cancel/Retry,
+Interrupted recovery, deterministic failure and completion, an audio-only job, keyboard
+selection, a native context menu, F1 value popups and URL copy with clipboard restoration.
+Only the isolated FakeTool emits synthetic media. No global cursor injection is used.
+`-PublishStartupSmoke -ApplicationPath <published-exe>` runs the same UIA client against
+production Release without a Debug endpoint. These checks qualify the synthetic pipeline,
+not Internet providers or owner visual acceptance; automatic hover remains separate.

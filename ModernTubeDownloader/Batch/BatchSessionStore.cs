@@ -29,6 +29,34 @@ public sealed class BatchSessionStore(string root)
     }
     public Task SaveSessionAsync(BatchImportSession session, CancellationToken token = default)
         => AtomicJsonFile.WriteAsync(Path.Combine(Folder(session.Id), "session.json"), session, token);
+    public async Task<bool> HasUnfinishedSessionsAsync(CancellationToken token = default)
+    {
+        if (!Directory.Exists(root)) return false;
+        foreach (var directory in Directory.EnumerateDirectories(root))
+        {
+            token.ThrowIfCancellationRequested();
+            if (!Guid.TryParseExact(Path.GetFileName(directory), "N", out var id)) continue;
+            var value = await AtomicJsonFile.ReadAsync<BatchImportSession>(Path.Combine(directory, "session.json"), token);
+            if (value is null || value.SchemaVersion != 1 || value.Id != id ||
+                value.WorkflowPhase != BatchWorkflowPhase.Completed && value.ImportedCount > 0) return true;
+        }
+        return false;
+    }
+    public async Task<IReadOnlyList<BatchImportSession>> FindImportsAsync(string? fingerprint, string? destination, CancellationToken token)
+    {
+        if (!Directory.Exists(root)) return [];
+        var result = new List<BatchImportSession>();
+        foreach (var directory in Directory.EnumerateDirectories(root))
+        {
+            token.ThrowIfCancellationRequested();
+            if (!Guid.TryParseExact(Path.GetFileName(directory), "N", out var id)) continue;
+            var value = await AtomicJsonFile.ReadAsync<BatchImportSession>(Path.Combine(directory, "session.json"), token);
+            if (value?.SchemaVersion != 1 || value.Id != id) continue;
+            if (fingerprint is not null && value.SourceFingerprint == fingerprint || destination is not null &&
+                string.Equals(value.OutputDirectory, destination, StringComparison.OrdinalIgnoreCase)) result.Add(value);
+        }
+        return result;
+    }
     public async Task SaveEntryAsync(BatchImportSession session, BatchImportEntry entry, CancellationToken token = default)
         => await SaveEntriesAsync(session, [entry], token).ConfigureAwait(false);
 
@@ -64,6 +92,8 @@ public sealed class BatchSessionStore(string root)
         await ReadRows(Path.Combine(Folder(id), "entries.jsonl"), false);
         await ReadRows(Path.Combine(Folder(id), "updates.jsonl"), true);
         session.Paused = true;
+        if (session.WorkflowPhase is BatchWorkflowPhase.Analyzing or BatchWorkflowPhase.Queueing)
+            session.WorkflowPhase = BatchWorkflowPhase.Paused;
         foreach (var entry in session.Entries)
             if (entry.Status is BatchEntryStatus.Analyzing or BatchEntryStatus.Validating) entry.Status = BatchEntryStatus.Pending;
         return session;

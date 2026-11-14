@@ -60,6 +60,8 @@ public sealed class DownloadQueueItem
     public string? StatusMessageKey { get; set; } = "Queue.Detail.Queued";
     public List<string> TemporaryFiles { get; set; } = [];
     public string? FinalFile { get; set; }
+    /// <summary>Frozen destination for an explicitly prepared list. Null preserves legacy/global output behavior.</summary>
+    public string? OutputDirectory { get; set; }
     public string? ErrorMessage { get; set; }
     public string? FailureMessageKey { get; set; }
     public string? FailureTechnicalSummary { get; set; }
@@ -134,7 +136,9 @@ public sealed record DownloadHistoryEntry(
     DateTimeOffset? RecordingEndedAt = null,
     TimeSpan? RecordedDuration = null,
     bool WasPartial = false,
-    int? PartsCount = null);
+    int? PartsCount = null,
+    double? DurationSeconds = null,
+    long? FileSizeBytes = null);
 
 public enum QueueChangeKind
 {

@@ -9,7 +9,7 @@ using ModernTubeDownloader.Services;
 
 namespace ModernTubeDownloader.Tests;
 
-public sealed class BatchImportTests(ITestOutputHelper output)
+public sealed partial class BatchImportTests(ITestOutputHelper output)
 {
     private sealed class Fixture : IAsyncDisposable
     {

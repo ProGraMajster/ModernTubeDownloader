@@ -86,7 +86,7 @@ public sealed class PlaylistTests
             {"_type":"playlist","id":"PL123","title":"Samples","entries":[
               {"id":"late","title":"Late","webpage_url":"https://example.test/watch/late","playlist_index":20},
               {"id":"private","title":"Private","webpage_url":"https://example.test/watch/private","availability":"private"},
-              {"id":"early","title":"Early","webpage_url":"https://example.test/watch/early","playlist_index":1}
+              {"id":"early","title":"Early","webpage_url":"https://example.test/watch/early","playlist_index":1,"thumbnail":"https://example.test/early.png"}
             ]}
             """, PlaylistUrl);
         var selection = new PlaylistSelection(playlist);
@@ -100,6 +100,8 @@ public sealed class PlaylistTests
         var items = selection.CreateQueueItems(QualityPreset.Find("1080"));
 
         Assert.Equal(["early", "late"], items.Select(item => item.VideoId));
+        Assert.Equal("https://example.test/early.png", items[0].ThumbnailUrl);
+        Assert.Null(items[1].ThumbnailUrl);
         Assert.All(items, item =>
         {
             Assert.Equal("1080", item.QualityPresetId);
@@ -133,6 +135,27 @@ public sealed class PlaylistTests
         await restored.LoadAsync();
         Assert.Equal([1, 2], restored.Snapshot().Select(item => item.PlaylistIndex));
         Assert.All(restored.Snapshot(), item => Assert.Equal("PL123", item.PlaylistId));
+    }
+
+    [Fact]
+    public async Task PlaylistDedupeBlocksActiveAndInterruptedButAllowsAnExplicitCompletedDownloadAgain()
+    {
+        var root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ModernTubeDownloader.PlaylistTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = AppPaths.Create(root); paths.EnsureCreated();
+            var queue = new DownloadQueueService(new QueuePersistenceService(paths, new NullAppLogger()), new NullAppLogger());
+            queue.Add(new() { VideoId = "done", Status = DownloadStatus.Completed });
+            queue.Add(new() { VideoId = "active", Status = DownloadStatus.Queued });
+            queue.Add(new() { VideoId = "interrupted", Status = DownloadStatus.Interrupted });
+            var result = queue.AddRangeSkippingDuplicates([
+                new() { VideoId = "done" }, new() { VideoId = "active" }, new() { VideoId = "interrupted" }]);
+            await queue.SaveAsync();
+            Assert.Equal(1, result.Added);
+            Assert.Equal(2, result.DuplicatesSkipped);
+            Assert.Equal(4, queue.Snapshot().Count);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
     }
 
     [Fact]

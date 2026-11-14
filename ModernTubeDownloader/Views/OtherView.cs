@@ -4,7 +4,7 @@ using ModernTubeDownloader.Theming;
 
 namespace ModernTubeDownloader.Views;
 
-internal sealed class OtherView : UserControl
+internal sealed partial class OtherView : UserControl
 {
     private readonly AppServices services;
     private readonly Label heading = AppUi.Heading("", 22);
@@ -13,6 +13,7 @@ internal sealed class OtherView : UserControl
     private readonly Dictionary<string, (Label Title, Label Description, Button Open)> modules = [];
     private readonly Panel recent = new() { Height = 310 };
     private bool disposed;
+    private int recentRefreshVersion;
     public event EventHandler<ModernTubeDownloader.Batch.BatchImportSession>? ResumeBatch;
 
     public OtherView(AppServices services)
@@ -29,22 +30,46 @@ internal sealed class OtherView : UserControl
         ApplyLocalization();
         AppTypography.RegisterLayout(this, LayoutPage);
     }
+    internal Task RefreshToolsAsync() => RefreshRecentAsync();
     private async Task RefreshRecentAsync()
     {
+        var refreshVersion = Interlocked.Increment(ref recentRefreshVersion);
         try
         {
-            var sessions = await services.Batch.RecentAsync(); if (disposed) return;
-            foreach (var child in recent.Controls.ToArray()) { recent.Controls.Remove(child); child.Dispose(); }
-            var label = AppUi.Heading(services.Localization["Batch.Recent"], 16); label.SetBounds(24, 16, 600, 32); recent.Controls.Add(label);
-            var y = 56;
-            foreach (var session in sessions.Take(5))
+            var sessions = await services.Batch.RecentAsync();
+            IReadOnlyList<ThumbnailExportRecord> exports = [];
+            try { exports = await services.ThumbnailTool.ReadRecentAsync(); }
+            catch (Exception error) { services.Logger.Error("Thumbnail export history could not be read.", error); }
+            // I/O completion is not necessarily running with a UI SynchronizationContext
+            // (including during a shell switch). Publish one generation on the canonical
+            // dispatcher so it cannot race typography/layout enumerating recent.Controls.
+            await ModernFormsNext.WindowKit.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
-                var button = new Button { Text = $"{session.FileName} • {session.ImportedCount}", AccessibleAutomationId = "BatchRecent" + session.Id.ToString("N") };
-                AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(400, Width - 100), 38); y += 44;
-                button.Click += async (_, _) => { try { ResumeBatch?.Invoke(this, await services.Batch.OpenAsync(session.Id)); } catch (Exception ex) { services.Logger.Error("Batch session could not be reopened.", ex); } };
-                recent.Controls.Add(button);
-            }
-            recent.Height = Math.Max(100, y + 16); LayoutPage();
+                if (disposed || refreshVersion != Volatile.Read(ref recentRefreshVersion)) return;
+                foreach (var child in recent.Controls.ToArray()) { recent.Controls.Remove(child); child.Dispose(); }
+                var label = AppUi.Heading(services.Localization["Other.RecentTools"], dashboard ? 12 : 16); label.SetBounds(24, 16, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(36)); recent.Controls.Add(label);
+                var y = 56;
+                foreach (var export in exports.Take(3))
+                {
+                    var caption = services.Localization["Other.ThumbnailExport"] + " • " + System.IO.Path.GetFileName(export.OutputPath);
+                    var button = dashboard ? RecentToolButton(caption, $"{export.Width} × {export.Height} · {export.CompletedAt.ToLocalTime().ToString("g", services.Localization.Culture)}", AppIconKind.Media)
+                        : new DashboardButton { Text = caption };
+                    button.Enabled = File.Exists(export.OutputPath); button.AccessibleAutomationId = "OtherThumbnailExport" + y;
+                    AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
+                    button.Click += (_, _) => Utilities.ShellService.OpenFile(export.OutputPath); recent.Controls.Add(button);
+                }
+                foreach (var session in sessions.Take(5))
+                {
+                    var button = dashboard ? RecentToolButton(session.FileName, $"{session.ImportedCount} URL · {session.CreatedAt.ToLocalTime().ToString("g", services.Localization.Culture)}", AppIconKind.Clipboard)
+                        : new DashboardButton { Text = $"{session.FileName} • {session.ImportedCount}" };
+                    button.AccessibleAutomationId = "BatchRecent" + session.Id.ToString("N");
+                    AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
+                    button.Click += async (_, _) => { try { ResumeBatch?.Invoke(this, await services.Batch.OpenAsync(session.Id)); } catch (Exception ex) { services.Logger.Error("Batch session could not be reopened.", ex); } };
+                    recent.Controls.Add(button);
+                }
+                if (dashboard && sessions.Count == 0 && exports.Count == 0) { var hint = AppUi.Muted(services.Localization["Dashboard.NoRecent"]); hint.Multiline = true; hint.SetBounds(24, y, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(64)); recent.Controls.Add(hint); y = hint.Bottom; }
+                recent.Height = Math.Max(100, y + 16); LayoutPage();
+                });
         }
         catch (Exception ex) { services.Logger.Error("Recent batch sessions could not be loaded.", ex); }
     }
@@ -55,7 +80,7 @@ internal sealed class OtherView : UserControl
         if (modules.ContainsKey(id)) throw new InvalidOperationException("Tool already registered.");
         var card = new Panel { Height = 154, Margin = new Padding(0, 0, 0, 14) };
         AppUi.Card(card);
-        var title = AppUi.Heading("", 16); var description = AppUi.Muted(); var button = new Button { AccessibleAutomationId = "OtherOpen" + id };
+        var title = AppUi.Heading("", 16); var description = AppUi.Muted(); var button = new DashboardButton { AccessibleAutomationId = "OtherOpen" + id };
         title.SetBounds(24, 18, 600, 32); description.SetBounds(24, 56, 600, 28); button.SetBounds(24, 100, 160, 36);
         AppUi.Secondary(button); button.Click += (_, _) => open();
         card.Controls.AddRange([title, description, button]);
@@ -75,6 +100,7 @@ internal sealed class OtherView : UserControl
     }
     private void LayoutPage()
     {
+        if (dashboard) { LayoutDashboard(); return; }
         var width = Math.Max(480, ClientSize.Width - 48);
         heading.SetBounds(24, 20, width, AppTypography.TextHeight(36)); subtitle.SetBounds(24, heading.Bottom + 8, width, AppTypography.TextHeight(32));
         tools.SetBounds(24, subtitle.Bottom + 16, width, Math.Max(154, ClientSize.Height - subtitle.Bottom - 40));
@@ -90,7 +116,7 @@ internal sealed class OtherView : UserControl
             } else { AppTypography.ReflowRows(card); card.Height = card.Controls.Select(c => c.Bottom + 16).DefaultIfEmpty(100).Max(); }
         }
     }
-    private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(ApplyLocalization);
+    private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() => { ApplyLocalization(); LayoutPage(); });
     protected override void Dispose(bool disposing)
     {
         if (disposing) { disposed = true; services.Localization.LanguageChanged -= LanguageChanged; }

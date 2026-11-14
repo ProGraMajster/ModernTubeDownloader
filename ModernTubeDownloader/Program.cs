@@ -14,6 +14,7 @@ internal static class Program
     {
         UiCrashDiagnostics.RegisterUiThread();
         var paths = AppPaths.CreateDefault();
+        PerformanceDiagnostics.Start(paths);
         AppServices? services = null;
         IAppLogger? logger = null;
         ExternalLinkInstance? instance = null;
@@ -41,6 +42,8 @@ internal static class Program
                 ExternalProtocolRegistration.RegisterCurrentExecutable();
                 return 0;
             }
+            var classicUi = args.Contains("--classic-ui", StringComparer.Ordinal);
+            args = args.Where(arg => arg != "--classic-ui").ToArray();
             var enableAutomation = args.Length == 1 && args[0] == "--automation";
             var autostart = args.Length is 1 or 2 && args[0] == "--autostart" &&
                 (args.Length == 1 || args[1] == "--start-hidden");
@@ -81,7 +84,7 @@ internal static class Program
                 if (!preflightSettings.Current.BrowserIntegrationEnabled) return 3;
             }
             notificationService = RegisterNotifications(paths);
-            services = AppServices.Create(paths, notifications: notificationService);
+            services = AppServices.Create(paths, notifications: notificationService, deferWorkStart: true);
             logger = services.Logger;
             logger.Info($"Application version={typeof(Program).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion}; Windows={Environment.OSVersion.Version}; runtime={System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}; process64={Environment.Is64BitProcess}.");
             var diagnosticServices = services;
@@ -108,6 +111,11 @@ internal static class Program
             if (enableAutomation || Environment.GetEnvironmentVariable("MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL") == "1")
                 configureProtocol = false;
 #endif
+            // Explicit isolated QA never changes the owner's registered protocol, including Release QA.
+            if (Environment.GetEnvironmentVariable("MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL") == "1" &&
+                paths.RootDirectory.StartsWith(System.IO.Path.GetFullPath(System.IO.Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) &&
+                System.IO.Path.GetFileName(paths.RootDirectory).StartsWith("mtd-automation-smoke-", StringComparison.Ordinal))
+                configureProtocol = false;
             if (configureProtocol)
             {
                 try
@@ -122,7 +130,7 @@ internal static class Program
                     logger.Error("Browser protocol integration could not be configured.", error);
                 }
             }
-            var form = new MainForm(services, enableAutomation, initialRequest);
+            using var form = new MainForm(services, enableAutomation, initialRequest, classicUi, autostart || notificationLaunch);
             if (services.Notifications is { } notifications)
                 notifications.Navigate += (_, request) => Application.RunOnUIThread(() => form.HandleNotification(request));
             instance.Start(request =>
@@ -157,6 +165,7 @@ internal static class Program
             TaskScheduler.UnobservedTaskException -= taskHandler;
             instance?.Dispose();
             services?.Dispose();
+            PerformanceDiagnostics.Stop();
         }
     }
 

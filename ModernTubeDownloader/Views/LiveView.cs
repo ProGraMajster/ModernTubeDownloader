@@ -11,7 +11,7 @@ namespace ModernTubeDownloader.Views;
 
 internal sealed record LiveNavigationRequest(string SourceUrl, VideoMetadata? Metadata, MediaAvailabilityKind Kind);
 
-internal sealed class LiveView : UserControl
+internal sealed partial class LiveView : UserControl
 {
     private readonly AppServices services;
     private readonly LocalizationService text;
@@ -20,7 +20,7 @@ internal sealed class LiveView : UserControl
     private readonly Label statistics = AppUi.Muted();
     private readonly Panel analysis = new();
     private readonly TextBox url = new() { AccessibleAutomationId = "LiveUrlInput" };
-    private readonly Button analyze = new() { AccessibleAutomationId = "LiveAnalyzeButton" };
+    private readonly Button analyze = new DashboardButton() { AccessibleAutomationId = "LiveAnalyzeButton" };
     private readonly Label title = AppUi.Heading(string.Empty, 14);
     private readonly Label message = AppUi.Muted();
     private readonly ComboBox quality = new() { AccessibleAutomationId = "LiveQualitySelector" };
@@ -40,6 +40,7 @@ internal sealed class LiveView : UserControl
     private Guid? editingId;
     private int refreshPending;
     private bool disposed;
+    private bool analysisPresented;
 #if DEBUG
     internal Func<Form, IDisposable?>? RegisterDetailsForAutomation { get; set; }
 #endif
@@ -64,10 +65,12 @@ internal sealed class LiveView : UserControl
         start.Click += (_, _) => StartOrSchedule();
         vod.Click += (_, _) => OpenDownloadsRequested?.Invoke(this, url.Text);
         SizeChanged += (_, _) => LayoutPage();
+        VisibleChanged += (_, _) => { if (Visible && !disposed) RefreshSessions(); };
+        ParentChanged += (_, _) => { if (Parent is not null && Visible && !disposed) RefreshSessions(); };
         scroll.SizeChanged += (_, _) => LayoutPage();
         services.Live.Changed += StateChanged; text.LanguageChanged += LanguageChanged;
         clock = new System.Threading.Timer(_ => QueueRefresh(), null, 1000, 1000);
-        ApplyText(); RefreshSessions(); LayoutPage();
+        ApplyText(); LayoutPage();
         AppTypography.RegisterLayout(this, LayoutPage);
     }
 
@@ -76,18 +79,23 @@ internal sealed class LiveView : UserControl
     { url.Text = sourceUrl; await AnalyzeAsync(sourceUrl); }
     public void Present(LiveNavigationRequest request)
     {
+        analysisPresented = true;
+        dashboardSubmitted = false;
         url.Text = request.SourceUrl; metadata = request.Metadata; availability = request.Kind;
         editingId = null; PopulateAnalysis();
     }
 
     private async Task AnalyzeAsync(string sourceUrl)
     {
+        analysisPresented = true;
+        dashboardSubmitted = false;
         analysisCancellation?.Cancel(); analysisCancellation?.Dispose();
         analysisCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         var current = analysisCancellation;
         editingId = null; metadata = null; availability = MediaAvailabilityKind.Ready;
         start.Visible = vod.Visible = quality.Visible = container.Visible = fromNow.Visible = fromStart.Visible = false;
         analyze.Enabled = false; title.Text = text["Downloads.AnalyzingTitle"]; message.Text = string.Empty;
+        LayoutPage();
         try
         {
             await services.Tools.EnsureAnalysisReadyAsync(current.Token);
@@ -150,6 +158,7 @@ internal sealed class LiveView : UserControl
             else services.Live.Add(url.Text, metadata, selected.Value.Id, policy, availability == MediaAvailabilityKind.Upcoming);
             message.Text = text[availability == MediaAvailabilityKind.Upcoming ? "Live.WaitingQueued" : "Live.RecordingQueued"];
             editingId = null; start.Enabled = false;
+            if (dashboard) { dashboardSubmitted = true; LayoutPage(); }
         }
         catch (Exception ex)
         { services.Logger.Error("Could not add or edit a LIVE session.", ex); message.Text = text["Downloads.AlreadyQueued"]; }
@@ -157,6 +166,8 @@ internal sealed class LiveView : UserControl
 
     private void Edit(LiveSession session)
     {
+        analysisPresented = true;
+        dashboardSubmitted = false;
         editingId = session.Id; availability = MediaAvailabilityKind.Upcoming; metadata = null;
         url.Text = session.SourceUrl; PopulateAnalysis(); editingId = session.Id;
         title.Text = session.Title;
@@ -172,36 +183,67 @@ internal sealed class LiveView : UserControl
     private void QueueRefresh()
     {
         if (disposed || Interlocked.Exchange(ref refreshPending, 1) != 0) return;
-        Application.RunOnUIThread(() => { Interlocked.Exchange(ref refreshPending, 0); if (!disposed) RefreshSessions(); });
+        Application.RunOnUIThread(() => { Interlocked.Exchange(ref refreshPending, 0); if (!disposed && Visible) RefreshSessions(); });
     }
     private void RefreshSessions()
     {
-        UiCrashDiagnostics.VerifyUiThread("live.refresh");
-        var sessions = services.Live.Snapshot().OrderByDescending(item => item.CreatedAt).ToArray();
-        statistics.Text = text.Get("Live.Statistics",
-            sessions.Count(item => item.State is LiveSessionState.Starting or LiveSessionState.Recording or LiveSessionState.Finalizing),
-            sessions.Count(item => item.State is LiveSessionState.WaitingForLive or LiveSessionState.Pending),
-            sessions.Count(item => item.State == LiveSessionState.Reconnecting));
-        foreach (var missing in cards.Keys.Except(sessions.Select(item => item.Id)).ToArray())
-        { cards[missing].Dispose(); cards.Remove(missing); }
-        foreach (var session in sessions)
+        if (refreshingSessions || disposed) return;
+        refreshingSessions = true;
+        try
         {
-            if (!cards.TryGetValue(session.Id, out var card))
+            UiCrashDiagnostics.VerifyUiThread("live.refresh");
+            var snapshot = services.Live.Snapshot();
+            var sessions = snapshot.OrderByDescending(item => item.CreatedAt).ToArray();
+            statistics.Text = text.Get("Live.Statistics",
+                sessions.Count(item => item.State is LiveSessionState.Starting or LiveSessionState.Recording or LiveSessionState.Finalizing),
+                sessions.Count(item => item.State is LiveSessionState.WaitingForLive or LiveSessionState.Pending),
+                sessions.Count(item => item.State == LiveSessionState.Reconnecting));
+            if (dashboard)
             {
-                card = new LiveSessionCard(services, Edit); cards.Add(session.Id, card);
-#if DEBUG
-                card.RegisterDetailsForAutomation = RegisterDetailsForAutomation;
-#endif
+                liveProjection = LiveDashboardPage.Create(snapshot, showRecent, liveSource, liveSearch?.Text ?? "",
+                    (LiveDashboardSort)(liveSort?.SelectedIndex ?? 0), livePage, text.Culture);
+                livePage = liveProjection.Index;
+                sessions = liveProjection.Items;
             }
-            var section = sections[session.IsActive || session.State == LiveSessionState.Pending ? 0
-                : session.State == LiveSessionState.WaitingForLive ? 1 : 2];
-            if (card.Parent != section.List) { card.Parent?.Controls.Remove(card); section.List.Controls.Add(card); }
-            card.UpdateSession(session);
+            foreach (var section in sections) section.List.SuspendLayout();
+            try
+            {
+                foreach (var missing in cards.Keys.Except(sessions.Select(item => item.Id)).ToArray())
+                {
+                    var removed = cards[missing];
+                    removed.Parent?.Controls.Remove(removed); removed.Dispose(); cards.Remove(missing);
+                }
+                foreach (var session in sessions)
+                {
+                    if (!cards.TryGetValue(session.Id, out var card))
+                    {
+                        card = new LiveSessionCard(services, Edit); card.SelectionRequested += (_, value) => SelectSession(value); cards.Add(session.Id, card);
+                        card.SetDashboard(dashboard);
+#if DEBUG
+                        card.RegisterDetailsForAutomation = RegisterDetailsForAutomation;
+#endif
+                    }
+                    var section = sections[dashboard ? showRecent ? 2 : 0 : session.IsActive || session.State == LiveSessionState.Pending ? 0
+                        : session.State == LiveSessionState.WaitingForLive ? 1 : 2];
+                    if (card.Parent != section.List) { card.Parent?.Controls.Remove(card); section.List.Controls.Add(card); }
+                    card.UpdateSession(session);
+                }
+                foreach (var section in sections)
+                {
+                    var index = 0;
+                    foreach (var session in sessions)
+                        if (cards[session.Id].Parent == section.List) section.List.Controls.SetChildIndex(cards[session.Id], index++);
+                }
+            }
+            finally { foreach (var section in sections) section.List.ResumeLayout(true); }
+            LayoutPage();
         }
-        LayoutPage();
+        finally { refreshingSessions = false; }
     }
     private void LayoutPage()
     {
+        if (dashboard) { LayoutDashboard(); return; }
+        heading.Visible = statistics.Visible = true;
         var width = Math.Max(480, scroll.ClientSize.Width - 56);
         var origin = scroll.DisplayRectangle.Location;
         heading.SetBounds(origin.X + 28, origin.Y + 16, width, AppTypography.TextHeight(38));
@@ -266,7 +308,7 @@ internal sealed class LiveView : UserControl
     }
 }
 
-internal sealed class LiveSessionCard : Panel
+internal sealed partial class LiveSessionCard : Panel
 {
     internal const int CardHeight = 226;
     private readonly AppServices services;
@@ -274,15 +316,16 @@ internal sealed class LiveSessionCard : Panel
     private readonly Label title = AppUi.Heading(string.Empty, 13);
     private readonly Label state = AppUi.Muted();
     private readonly Label facts = AppUi.Muted();
-    private readonly Button primary = new();
-    private readonly Button secondary = new();
-    private readonly Button details = new();
-    private readonly Button folder = new();
+    private readonly Button primary = new DashboardButton();
+    private readonly Button secondary = new DashboardButton();
+    private readonly Button details = new DashboardButton();
+    private readonly Button folder = new DashboardButton();
     private LiveSession? current;
-    private readonly PictureBox thumbnail = new() { SizeMode = PictureBoxSizeMode.Zoom };
+    private readonly DownloadsPictureBox thumbnail = new() { SizeMode = PictureBoxSizeMode.Zoom };
     private string? imageUrl;
     private readonly CancellationTokenSource imageLifetime = new();
     private bool imageDisposed;
+    private bool dashboardSelectionWired;
 #if DEBUG
     internal Func<Form, IDisposable?>? RegisterDetailsForAutomation { get; set; }
 #endif
@@ -296,6 +339,9 @@ internal sealed class LiveSessionCard : Panel
         primary.Click += (_, _) => Act(); secondary.Click += (_, _) => Secondary(); details.Click += async (_, _) => await ShowDetailsAsync();
         folder.Click += (_, _) => { if (current?.Parts.LastOrDefault() is { } path && Directory.Exists(Path.GetDirectoryName(path)))
             Process.Start(new ProcessStartInfo("explorer.exe", Path.GetDirectoryName(path)!) { UseShellExecute = true }); };
+        Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
+        title.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
+        thumbnail.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
         SizeChanged += (_, _) => LayoutCard(); LayoutCard();
         AppTypography.RegisterLayout(this, () => { LayoutCard(); if (current is not null) UpdateSession(current); });
     }
@@ -303,6 +349,7 @@ internal sealed class LiveSessionCard : Panel
     {
         current = session; var text = services.Localization;
         AccessibleAutomationId = $"LiveSession-{session.Id:N}";
+        AccessibleName = session.Title;
         title.Text = session.Title; state.Text = text[$"Live.State.{session.State}"];
         state.AccessibleAutomationId = $"LiveState-{session.Id:N}";
         var countdown = session.State == LiveSessionState.WaitingForLive ? session.NextCheckAt : session.RetryAt;
@@ -320,7 +367,7 @@ internal sealed class LiveSessionCard : Panel
         facts.Text = string.Join(" • ", pieces) + Environment.NewLine + timingText +
             (countdown is { } next ? text.Get("Live.NextCheck", Math.Max(0, (int)(next - DateTimeOffset.UtcNow).TotalSeconds)) : session.FailureMessageKey is { } failureKey ? text[failureKey] : text[$"Quality.{session.QualityPresetId}"]);
         AppUi.BindBackground(this, appearance.EmphasizeActive && session.IsActive ? AppThemeTokens.NavigationSelected : AppThemeTokens.Surface);
-        if (appearance.ThumbnailSize != AppearanceSize.None && imageUrl != session.ThumbnailUrl) { imageUrl = session.ThumbnailUrl; _ = LoadImageAsync(imageUrl); }
+        if ((dashboard || appearance.ThumbnailSize != AppearanceSize.None) && imageUrl != session.ThumbnailUrl) { imageUrl = session.ThumbnailUrl; _ = LoadImageAsync(imageUrl); }
         primary.Visible = session.IsActive || session.CanResume || session.State == LiveSessionState.WaitingForLive;
         primary.Text = text[session.IsActive ? "Live.StopAndSave" : session.State == LiveSessionState.WaitingForLive ? "Live.Edit" : "Live.Resume"];
         primary.AccessibleAutomationId = (session.IsActive ? "LiveStopSaveButton-" : session.State == LiveSessionState.WaitingForLive ? "LiveEditButton-" : "LiveResumeButton-") + session.Id.ToString("N");
@@ -332,12 +379,9 @@ internal sealed class LiveSessionCard : Panel
         folder.Text = text["Common.OpenFolder"]; folder.AccessibleAutomationId = "LiveOpenFolderButton-" + session.Id.ToString("N");
         LayoutCard();
     }
-    private async Task LoadImageAsync(string? expected)
-    {
-        try { var image = await services.Thumbnails.GetAsync(expected, imageLifetime.Token); if (!imageDisposed && imageUrl == expected) thumbnail.Image = image; }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { services.Logger.Error("LIVE thumbnail unavailable.", ex); }
-    }
+    private Task LoadImageAsync(string? expected)
+        => ThumbnailImageBinding.For(thumbnail).LoadAsync(services.Thumbnails, expected, imageLifetime.Token,
+            () => { if (dashboard) LayoutCard(); }, () => !imageDisposed && imageUrl == expected);
     private void Act()
     {
         if (current is null) return;
@@ -357,23 +401,7 @@ internal sealed class LiveSessionCard : Panel
     {
         if (current is null || FindForm() is not { } owner) return;
         var session = services.Live.Find(current.Id) ?? current; var text = services.Localization;
-        using var form = new Form { Text = text["Live.Details"], Size = new System.Drawing.Size(650, 530), MinimumSize = new System.Drawing.Size(500, 400) };
-        form.AccessibilityObject.AutomationId = "LiveDetailsWindow";
-        AppBranding.Apply(form);
-        var body = new TextBox { Dock = DockStyle.Fill, MultiLine = true, ScrollBars = ScrollBars.Vertical, ReadOnly = true,
-            TextAlign = ContentAlignment.TopLeft, Font = AppTypography.Font(11f), Padding = new Padding(16),
-            AccessibleAutomationId = "LiveDetailsContent", Text =
-            $"{session.Title}\n{text[$"Live.State.{session.State}"]}\n" +
-            $"{text["Live.SourceState"]}: {session.SourceLiveStatus ?? "—"}\n" +
-            $"{text["Live.ScheduledLabel"]}: {session.ScheduledStartAt?.ToLocalTime().ToString("g", text.Culture) ?? "—"}\n" +
-            $"{text["Live.StartedLabel"]}: {session.RecordingStartedAt?.ToLocalTime().ToString("g", text.Culture) ?? "—"}\n" +
-            $"{session.RecordedDuration} • {session.BytesWritten / 1048576d:F1} MiB\n" +
-            $"{text[$"Quality.{session.QualityPresetId}"]} • MKV • {text[session.StartPolicy == LiveStartPolicy.FromStart ? "Live.FromStart" : "Live.FromNow"]}\n" +
-            $"{text.Get("Live.PartCount", session.Parts.Count)} • {text["Live.CurrentPart"]}: {session.PartIndex}\n" +
-            $"{text["Live.ReconnectCount"]}: {session.ResumeCount}\n" +
-            (session.FailureMessageKey is { } error ? text[error] : "—") + "\n" +
-            (session.RecoveryWarningKey is { } warning ? text[warning] : string.Empty) };
-        AppUi.Input(body); form.Controls.Add(body);
+        using var form = new LiveSessionDetailsForm(services, session);
         try
         {
 #if DEBUG
@@ -385,6 +413,17 @@ internal sealed class LiveSessionCard : Panel
     }
     private void LayoutCard()
     {
+        if (dashboard)
+        {
+            LayoutDashboardCard();
+            if (!dashboardSelectionWired && dashboardChannel is not null && dashboardTiming is not null && dashboardState is not null)
+            {
+                dashboardSelectionWired = true;
+                foreach (var child in new Control[] { dashboardChannel, dashboardTiming, dashboardState })
+                    child.Click += (_, _) => { if (current is not null) SelectionRequested?.Invoke(this, current); };
+            }
+            return;
+        }
         var appearance = AppearancePresentation.Current.Live;
         var compactWaiting = appearance.CompactWaiting && current?.State == LiveSessionState.WaitingForLive;
         var gap = appearance.CardDensity == AppearanceDensity.Compact ? 4 : appearance.CardDensity == AppearanceDensity.Comfortable ? 16 : 8;
@@ -402,5 +441,5 @@ internal sealed class LiveSessionCard : Panel
         details.Top = primary.Bottom + gap; folder.Top = details.Top;
         facts.Visible = !compactWaiting; Height = Math.Max(details.Bottom + 18, thumbnail.Bottom + 18);
     }
-    protected override void Dispose(bool disposing) { if (disposing && !imageDisposed) { imageDisposed = true; imageLifetime.Cancel(); imageLifetime.Dispose(); } base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing && !imageDisposed) { imageDisposed = true; imageLifetime.Cancel(); imageLifetime.Dispose(); dashboardTips.Dispose(); } base.Dispose(disposing); }
 }

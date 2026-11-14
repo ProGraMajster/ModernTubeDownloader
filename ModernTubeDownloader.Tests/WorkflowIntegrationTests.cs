@@ -5,7 +5,7 @@ using Xunit.Abstractions;
 
 namespace ModernTubeDownloader.Tests;
 
-public sealed class WorkflowIntegrationTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed partial class WorkflowIntegrationTests(ITestOutputHelper output) : IAsyncLifetime
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "ModernTubeDownloader.Tests", Guid.NewGuid().ToString("N"));
 

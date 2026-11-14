@@ -1,6 +1,7 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string] $ModernFormsNextRoot = "",
+    [string] $ArtifactsDirectory = "",
     [switch] $AllowUncommittedFrameworkForCandidate
 )
 
@@ -74,7 +75,15 @@ try {
         $_.CommandLine -match 'testhost' -and $_.CommandLine -match [regex]::Escape($repositoryRoot)
     })
     if ($testHosts) { throw 'An active testhost is using this checkout. Wait for it to finish before rebuilding.' }
-$artifactsRoot = Join-Path $repositoryRoot 'artifacts'
+$defaultArtifactsRoot = Join-Path $repositoryRoot 'artifacts'
+$artifactsRoot = $defaultArtifactsRoot
+if (-not [string]::IsNullOrWhiteSpace($ArtifactsDirectory)) {
+    $artifactsRoot = [IO.Path]::GetFullPath($ArtifactsDirectory, $repositoryRoot)
+    if (-not $artifactsRoot.StartsWith($defaultArtifactsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'A custom artifacts directory must be a new child of this checkout artifacts directory.'
+    }
+    if (Test-Path -LiteralPath $artifactsRoot) { throw 'Refusing to overwrite an existing qualification directory.' }
+}
 $publishRoot = Join-Path $artifactsRoot 'publish\win-x64'
 $releaseRoot = Join-Path $artifactsRoot 'release\win-x64'
 $symbolsRoot = Join-Path $artifactsRoot 'symbols\win-x64'
@@ -182,6 +191,8 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'UPDATES.md') -Destination $re
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'TRAY_AND_STARTUP.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'BATCH_IMPORT.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'PERSONALIZATION.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'MODERN_DASHBOARD_UI.md') -Destination $releaseRoot
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'MFN_DASHBOARD_REPRO.md') -Destination $releaseRoot
 Copy-Item -LiteralPath $licensePath -Destination $releaseRoot
 
 # Keep redistribution notices from the exact restored packages, not a moving web page.

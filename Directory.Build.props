@@ -1,9 +1,9 @@
 <Project>
   <PropertyGroup>
-    <Version>1.2.1</Version>
-    <AssemblyVersion>1.2.1.0</AssemblyVersion>
-    <FileVersion>1.2.1.0</FileVersion>
-    <InformationalVersion>1.2.1</InformationalVersion>
+    <Version>1.3.0-candidate.1</Version>
+    <AssemblyVersion>1.3.0.0</AssemblyVersion>
+    <FileVersion>1.3.0.0</FileVersion>
+    <InformationalVersion>1.3.0-candidate.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
     <Authors>ProGraMajster</Authors>
@@ -18,7 +18,7 @@
     <WarningLevel>8</WarningLevel>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
 
-    <ModernFormsNextCommit>8d8a7679779608b4edbee7dc687c13e3b1a611d9</ModernFormsNextCommit>
+    <ModernFormsNextCommit>7bf58d06d795d7298c86d9bf9471bbfb46852bab</ModernFormsNextCommit>
     <ModernTubeDownloaderTargetFramework>net10.0-windows10.0.26100.0</ModernTubeDownloaderTargetFramework>
     <!-- Must be explicit before the first restore of the optional notification projections. -->
     <WindowsSdkPackageVersion>10.0.28000.87</WindowsSdkPackageVersion>

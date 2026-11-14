@@ -38,6 +38,8 @@
     <PackageReference Include="QRCoder" Version="1.8.0" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <EmbeddedResource Include="Assets\AppIcon.png" LogicalName="ModernTubeDownloader.Assets.AppIcon.png" />
+    <EmbeddedResource Include="Assets\PreviewClassic.png" LogicalName="ModernTubeDownloader.Assets.PreviewClassic.png" />
+    <EmbeddedResource Include="Assets\PreviewModern.png" LogicalName="ModernTubeDownloader.Assets.PreviewModern.png" />
     <EmbeddedResource Include="Resources\Languages\*.json" />
     <EmbeddedResource Include="Resources\YtDlpOptions.json" />
     <EmbeddedResource Include="WebRemote\wwwroot\*" />
@@ -45,6 +47,11 @@
   <Target Name="CopyNativeHostForDevelopment" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == ''">
     <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>
     <Copy SourceFiles="@(NativeHostFiles)" DestinationFolder="$(OutDir)native-host" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="AddApplicationSourceMetadata" BeforeTargets="GetAssemblyAttributes" DependsOnTargets="InitializeSourceControlInformation">
+    <ItemGroup Condition="'$(SourceRevisionId)' != ''">
+      <AssemblyMetadata Include="SourceCommit" Value="$(SourceRevisionId)" />
+    </ItemGroup>
   </Target>
   <Target Name="CopyUpdaterForDevelopment" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == ''">
     <ItemGroup><UpdaterFiles Include="..\ModernTubeDownloader.Updater\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>

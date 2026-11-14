@@ -13,6 +13,7 @@ internal static class Program
             var request = JsonSerializer.Deserialize<UpdaterRequest>(await File.ReadAllTextAsync(requestPath))
                 ?? throw new InvalidDataException("Empty updater request.");
             await WaitForParentAsync(request);
+            StartupUpdateAdmission.Validate(requestPath, request);
             await UpdatePackageSecurity.VerifyAsync(request.Archive, request.Sha256);
             var extracted = Path.Combine(Path.GetDirectoryName(requestPath)!, "extracted-" + Guid.NewGuid().ToString("N"));
             var files = await UpdatePackageSecurity.ExtractAsync(request.Archive, extracted);
@@ -48,5 +49,6 @@ internal static class Program
 
 namespace ModernTubeDownloader.Updates
 {
-    public sealed record UpdaterRequest(string Installation, string Archive, string Sha256, int ParentProcessId, long ParentStartUtcTicks, bool Restart);
+    public sealed record UpdaterRequest(string Installation, string Archive, string Sha256, int ParentProcessId, long ParentStartUtcTicks, bool Restart,
+        string? StartupCommitToken = null);
 }

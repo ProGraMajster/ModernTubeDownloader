@@ -1,5 +1,60 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- One-click Batch import, analysis and canonical queue admission with durable phases,
+  per-list destination folders, idempotent task identities and explicit paused-queue consent.
+- Existing-download organizer with verified URL identity, dry-run, media/JSON/sidecar
+  relocation, atomic History/queue path updates, recovery journals and guarded undo.
+- Shared searchable language picker with vector region icons and fourteen additional
+  locale resources. Translation coverage is complete; full language review remains pending.
+- Independent opt-in installation at manual foreground startup, bounded preflight,
+  pending-work deferral and a per-request updater commitment preventing crash-driven installs.
+
+- Optional Modern Dashboard interface, preserving existing Classic preferences and
+  offering an explicit choice during first-run setup or migration.
+- Runtime interface selection and session-only `--classic-ui` recovery.
+- Dashboard queue inspector and editable queued options.
+- Real download speed, storage and observed-process widgets.
+- Responsive shell layout, bounded queue/history pages and shared navigation.
+- Modern LIVE, History, Other, Batch and categorized Settings presentation.
+- Reference-based rebuild of all six Modern pages: readable text, subtle surfaces,
+  vector actions, thumbnail duration, aligned history and grouped inspectors.
+- Real History date ranges, date sorting and audio/video/playlist filters.
+- Modern native switch/progress/text presentation with Classic recipe restoration.
+- Resumable six-step native setup, a one-time upgrade interface choice and offline
+  What's New, with Polish/English text and manual reopening.
+- Automatic verified stable updates on safe exit for new profiles; explicit legacy
+  policy migration preserves disabled checks, deferrals and skipped versions.
+- Structured LIVE details, History row actions, denser Batch Import and working
+  tool/recent-operation cards with responsive Settings editors.
+
+### Fixed
+
+- Startup update settings commit their measured height once; alternating intermediate
+  heights had caused a native stack overflow through recursive SizeChanged layout.
+- Failed History loads cannot subsequently overwrite unreadable user data with an empty list.
+
+- Font presentation refresh tolerates controls replaced or reparented by callbacks;
+  recent tool records publish on the UI dispatcher.
+- Setup dialog surfaces resolve correctly before Modern is chosen, save errors appear
+  immediately, and What's New has an explicit read-later action.
+- Settings path/cookie editors follow the actual scroll viewport at large text sizes;
+  LIVE toolbars and History/Batch rows use denser measured layouts.
+
+- Update rollback now continues past unchanged/locked destinations, retaining an
+  incomplete recovery journal if restoration cannot finish.
+- Serialized updater initialization preserves policy changes and notifies Settings
+  when a restored package is ready. Unreadable settings/update state are not replaced
+  by fresh defaults.
+- Wizard layout follows the actual scroll viewport at large text sizes; incomplete
+  journey markers cannot silently classify an existing profile as new.
+
+Development identity: **1.3.0-candidate.1**, local only; no 1.3.0 release published.
+
+
 ## 1.2.1 — 2026-10-18
 
 Stability/performance patch; Classic UI and the existing download/LIVE ownership remain.

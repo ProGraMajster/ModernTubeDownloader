@@ -1,34 +1,27 @@
 using System.Globalization;
-using System.Reflection;
-using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace ModernTubeDownloader.Localization;
 
 public sealed class LocalizationService
 {
     private const string FallbackLanguage = "en";
-    private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> languages;
+    private static readonly ConcurrentDictionary<string, Lazy<IReadOnlyDictionary<string, string>>> languages = new(StringComparer.OrdinalIgnoreCase);
     private string language;
 
     public LocalizationService(string requestedLanguage)
     {
-        languages = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["en"] = Load("en"),
-            ["pl"] = Load("pl")
-        };
-        language = Normalize(requestedLanguage);
+        language = LocaleRegistry.Normalize(requestedLanguage);
+        _ = Values(language); _ = Values(FallbackLanguage);
     }
 
     public event EventHandler? LanguageChanged;
 
     public string Language => language;
 
-    public CultureInfo Culture => language == "pl"
-        ? CultureInfo.GetCultureInfo("pl-PL")
-        : CultureInfo.GetCultureInfo("en-US");
+    public CultureInfo Culture => LocaleRegistry.Get(language).Culture;
 
-    public IReadOnlyCollection<string> AvailableLanguages => languages.Keys.ToArray();
+    public IReadOnlyCollection<string> AvailableLanguages => LocaleRegistry.Supported.Select(locale => locale.Code).ToArray();
 
     public string this[string key] => Get(key);
 
@@ -41,7 +34,8 @@ public sealed class LocalizationService
 
     public bool SetLanguage(string requestedLanguage)
     {
-        var normalized = Normalize(requestedLanguage);
+        var normalized = LocaleRegistry.Normalize(requestedLanguage);
+        _ = Values(normalized);
         if (string.Equals(language, normalized, StringComparison.OrdinalIgnoreCase))
             return false;
 
@@ -52,17 +46,17 @@ public sealed class LocalizationService
     }
 
     public IReadOnlyCollection<string> GetKeys(string languageCode)
-        => languages[Normalize(languageCode)].Keys.ToArray();
+        => Values(LocaleRegistry.Normalize(languageCode)).Keys.ToArray();
+
+    public IReadOnlyDictionary<string, string> GetResources(string languageCode) => Values(LocaleRegistry.Normalize(languageCode));
 
     private string? TryGet(string languageCode, string key)
-        => languages.TryGetValue(languageCode, out var values) && values.TryGetValue(key, out var value)
+        => Values(languageCode).TryGetValue(key, out var value)
             ? value
             : null;
 
-    private string Normalize(string? requestedLanguage)
-        => requestedLanguage is not null && languages.ContainsKey(requestedLanguage)
-            ? requestedLanguage.ToLowerInvariant()
-            : FallbackLanguage;
+    private static IReadOnlyDictionary<string, string> Values(string code)
+        => languages.GetOrAdd(code, static locale => new(() => Load(locale), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
 
     private static IReadOnlyDictionary<string, string> Load(string languageCode)
     {
@@ -74,7 +68,6 @@ public sealed class LocalizationService
 
         using var stream = assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException($"Could not open localization resource '{resourceName}'.");
-        return JsonSerializer.Deserialize<Dictionary<string, string>>(stream)
-            ?? throw new InvalidOperationException($"Localization resource '{resourceName}' is empty.");
+        return LocalizationResourceValidator.Read(stream, resourceName);
     }
 }

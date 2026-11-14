@@ -10,7 +10,7 @@ using ModernTubeDownloader.Updates;
 
 namespace ModernTubeDownloader.Tests;
 
-public sealed class ApplicationUpdateTests
+public sealed partial class ApplicationUpdateTests
 {
     private sealed class Fixture : IDisposable
     {
@@ -31,9 +31,10 @@ public sealed class ApplicationUpdateTests
     private sealed class TimeoutThenReadySource : IApplicationReleaseSource
     {
         private int calls;
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<ApplicationRelease?> GetLatestAsync(CancellationToken token)
         {
-            if (Interlocked.Increment(ref calls) == 1) await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            if (Interlocked.Increment(ref calls) == 1) { Entered.TrySetResult(); await Task.Delay(Timeout.InfiniteTimeSpan, token); }
             return Release();
         }
     }
@@ -163,6 +164,9 @@ public sealed class ApplicationUpdateTests
     [InlineData("1.2.1", "1.2.1", false)]
     [InlineData("1.2.2-candidate.1", "1.2.1", false)]
     [InlineData("1.3.0-beta.1", "1.2.0", false)]
+    [InlineData("1.3.0", "1.3.0+build.abc", false)]
+    [InlineData("1.3.0", "1.3.0-candidate.1+build.abc", true)]
+    [InlineData("1.3", "1.2.1", false)]
     [InlineData("garbage", "1.1.0", false)]
     public void VersionComparisonPreventsDowngrade(string latest, string current, bool expected)
         => Assert.Equal(expected, ApplicationUpdateService.IsNewer(latest, current));
@@ -243,7 +247,7 @@ public sealed class ApplicationUpdateTests
             await service.SetInstallOnExitAsync(true); await service.DeferAsync(true);
             using var restored = new ApplicationUpdateService(paths, settings, http, new NullAppLogger(), new Source(null), "1.1.0");
             await restored.InitializeAsync();
-            Assert.True(restored.Ready); Assert.True(restored.State.InstallOnExit); Assert.Equal("1.2.0", restored.State.SkippedVersion);
+            Assert.True(restored.Ready); Assert.False(restored.State.InstallOnExit); Assert.False(restored.ShouldInstallOnExit); Assert.Equal("1.2.0", restored.State.SkippedVersion);
             using var alreadyUpdated = new ApplicationUpdateService(paths, settings, http, new NullAppLogger(), new Source(null), "1.2.0");
             await alreadyUpdated.InitializeAsync(); Assert.False(alreadyUpdated.Ready); Assert.False(alreadyUpdated.State.InstallOnExit);
         }
@@ -255,12 +259,35 @@ public sealed class ApplicationUpdateTests
         using var fixture = new Fixture(); using var http = new HttpClient();
         var paths = AppPaths.Create(Path.Combine(fixture.Root, "data"));
         var settings = new SettingsService(paths, new NullAppLogger());
+        var clock = new DeadlineTestClock(); var source = new TimeoutThenReadySource();
         using var service = new ApplicationUpdateService(paths, settings, http, new NullAppLogger(),
-            new TimeoutThenReadySource(), "1.1.0", TimeSpan.FromMilliseconds(100));
-        await service.CheckAsync(); Assert.Equal("Updates.Failed", service.StatusKey); Assert.Null(service.State.LastCheck);
-        await service.CheckAsync(); Assert.Equal("Updates.Available", service.StatusKey); Assert.Equal("1.2.0", service.State.Available?.Version);
+            source, "1.1.0", TimeSpan.FromMilliseconds(100), clock);
+        var first = service.CheckAsync();
+        await source.Entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        clock.Advance(TimeSpan.FromMilliseconds(99));
+        Assert.False(first.IsCompleted);
+        Assert.Equal("Updates.Checking", service.StatusKey);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        await first.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal("Updates.Failed", service.StatusKey); Assert.Null(service.State.LastCheck);
+        await service.CheckAsync().WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal("Updates.Available", service.StatusKey); Assert.Equal("1.2.0", service.State.Available?.Version);
         using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckAsync(cancelled.Token));
+    }
+
+    [Fact]
+    public async Task CheckDeadlineStillCoversStatePersistenceAfterAnImmediateReply()
+    {
+        using var fixture = new Fixture(); using var http = new HttpClient();
+        var paths = AppPaths.Create(Path.Combine(fixture.Root, "data"));
+        var clock = new DeadlineTestClock();
+        using var service = new ApplicationUpdateService(paths, new SettingsService(paths, new NullAppLogger()), http,
+            new NullAppLogger(), new Source(Release()), "1.1.0", TimeSpan.FromMilliseconds(100), clock);
+        service.Changed += (_, _) => { if (service.StatusKey == "Updates.Checking") clock.Advance(TimeSpan.FromMilliseconds(100)); };
+        await service.CheckAsync().WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal("Updates.Failed", service.StatusKey);
+        Assert.False(File.Exists(Path.Combine(paths.RootDirectory, "Updates", "state.json")));
     }
 
     [Fact]
@@ -270,6 +297,7 @@ public sealed class ApplicationUpdateTests
         var paths = AppPaths.Create(Path.Combine(fixture.Root, "data"));
         using var service = new ApplicationUpdateService(paths, new SettingsService(paths, new NullAppLogger()), http,
             new NullAppLogger(), new Source(Release("1.3.0")), "1.1.0");
+        await service.InitializeAsync();
         service.State.Available = Release(); service.State.StagedArchive = fixture.Zip(("ModernTubeDownloader.exe", "old"));
         service.State.StagedHash = new string('0', 64); service.State.InstallOnExit = true;
         Assert.True(service.Ready); await service.CheckAsync();
