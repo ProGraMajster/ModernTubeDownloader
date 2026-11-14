@@ -54,7 +54,7 @@ public sealed partial class BatchImportTests
         await service.RunAutomaticAsync(session);
         Assert.Equal(4, f.Queue.Snapshot().Count);
         Assert.Equal(2, f.Queue.Snapshot().Select(item => item.QualityPresetId).Distinct().Count());
-        Assert.Single(f.Queue.Snapshot().Where(item => item.RequestedRange.Mode == MediaRangeMode.Custom));
+        Assert.Single(f.Queue.Snapshot(), item => item.RequestedRange.Mode == MediaRangeMode.Custom);
     }
 
     [Fact]

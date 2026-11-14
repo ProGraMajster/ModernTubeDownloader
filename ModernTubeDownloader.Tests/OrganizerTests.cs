@@ -90,7 +90,7 @@ public sealed class OrganizerTests(ITestOutputHelper output)
     {
         await using var f = new Fixture(); await f.SeedAsync(sidecar: false, central: true);
         var service = f.Service(); var plan = await f.PlanAsync(service); var match = Assert.Single(plan.Matches);
-        var metadata = Assert.Single(match.Files.Where(file => file.CopyOnly)); var bytes = await File.ReadAllBytesAsync(metadata.Source);
+        var metadata = Assert.Single(match.Files, file => file.CopyOnly); var bytes = await File.ReadAllBytesAsync(metadata.Source);
         var operation = await service.MoveSelectedAsync(plan, [match.Id]);
         Assert.Equal(bytes, await File.ReadAllBytesAsync(metadata.Source)); Assert.Equal(bytes, await File.ReadAllBytesAsync(metadata.Destination));
         await service.UndoAsync(operation.Id); Assert.Equal(bytes, await File.ReadAllBytesAsync(metadata.Source)); Assert.False(File.Exists(metadata.Destination));

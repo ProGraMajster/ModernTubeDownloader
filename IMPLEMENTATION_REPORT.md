@@ -112,6 +112,13 @@ owner downloads were scanned, moved or updated).
 Original compile failures, test failures, crash dump, logs and preliminary images are
 retained. No assertion weakening, timeout increase or CI retry was used.
 
+The first push CI for `f3e556b` failed before test execution: the repository's
+`-warnaserror` gate rejected two xUnit2031 analyzer diagnostics. Both assertions now
+use `Assert.Single(collection, predicate)` instead of filtering with Where first;
+their predicates and cardinality requirements are unchanged. The original failed
+CI logs remain in `ci-push-f3e556b-failed.log` (and the separate PR run record).
+The correction is a new commit, not a rerun of the failed build.
+
 ## Performance evidence
 
 Real isolated files and distinct JSON metadata, asynchronous indexed planning:
@@ -136,6 +143,7 @@ Development validation completed on 2026-11-14. Counts overlap and must not be a
 | --- | --- | --- |
 | Batch, organizer, update admission/handoff, locale, experience, remote and History targeted integration | **342/342 PASS**, zero skipped, exit 0 | `integration-qualified.log`, TRX under `tests/` |
 | Final Batch-label/layout and resource follow-up | **27/27 PASS**, zero skipped | `batch-final-labels.log`, `batch-final-labels.trx` |
+| CI analyzer correction: Batch/Organizer with `-warnaserror` | **90/90 PASS**, zero skipped | `ci-analyzer-correction.log`, TRX under `tests/` |
 | Web Remote JavaScript localization | **6/6 PASS** | `remote-locales-final.log` |
 | Real native workflow: Modern PL/Dark/100, EN/Light/150, DE/Dark/200, JA/Dark/200; Classic PL/Dark/100 | **5/5 PASS** | `native-*-reviewed.log`, final PL label follow-ups, `native-manifest.json` |
 | Public repository hygiene | **0 findings** | `public-hygiene-final.log` |
