@@ -68,6 +68,7 @@ internal sealed partial class SettingsView : UserControl
     private readonly Dictionary<Control, int> logicalCardHeights = [];
     private readonly Dictionary<Label, (int Top, int Height)> rowLabelBounds = [];
     public event EventHandler? InstallUpdateRequested;
+    public Func<Form, IDisposable?>? RegisterDialog { get => language.RegisterDialog; set => language.RegisterDialog = value; }
     private readonly NumericUpDown liveConcurrency;
     private readonly CheckBox preserveLive;
     private readonly CheckBox resumeLive;
@@ -165,7 +166,7 @@ internal sealed partial class SettingsView : UserControl
     private readonly Label cookiesWarning;
     private string? selectedCookieFilePath;
     private readonly ComboBox theme;
-    private readonly ComboBox language;
+    private readonly LocalePickerButton language;
     private readonly CheckBox browserEnabled;
     private readonly Label browserStatus;
     private readonly Label browserExtensionInfo;
@@ -336,10 +337,10 @@ internal sealed partial class SettingsView : UserControl
         theme = CreateCombo(appearanceCard);
         theme.AccessibleAutomationId = "ThemeSelector";
         AddRowLabel(appearanceCard, "Settings.Language", 148);
-        language = CreateCombo(appearanceCard);
+        language = new LocalePickerButton(text); appearanceCard.Controls.Add(language);
         language.AccessibleAutomationId = "LanguageSelector";
         theme.SelectedIndexChanged += ThemeSelected;
-        language.SelectedIndexChanged += LanguageSelected;
+        language.SelectedLanguageChanged += LanguageSelected;
 
         browserCard = CreateSection(190, "Settings.BrowserIntegration", "Settings.BrowserIntegrationDescription");
         browserEnabled = CreateCheck(browserCard, "Settings.BrowserEnabled");
@@ -1125,11 +1126,7 @@ internal sealed partial class SettingsView : UserControl
 
     private void PopulateLanguage(string selected)
     {
-        language.SelectedIndex = -1;
-        language.Items.Clear();
-        language.Items.Add(new LocalizedOption<string>("pl", text["Language.Polish"]));
-        language.Items.Add(new LocalizedOption<string>("en", text["Language.English"]));
-        SelectCombo(language, item => item is LocalizedOption<string> option && option.Value == selected);
+        language.SelectLanguage(selected);
     }
 
     private static void SelectCombo(ComboBox combo, Func<object, bool> predicate)
@@ -1269,10 +1266,10 @@ internal sealed partial class SettingsView : UserControl
 
     private async void LanguageSelected(object? sender, EventArgs e)
     {
-        if (applyingValues || language.SelectedItem is not LocalizedOption<string> option)
+        if (applyingValues)
             return;
-        services.Settings.Current.Language = option.Value;
-        text.SetLanguage(option.Value);
+        services.Settings.Current.Language = language.SelectedLanguage;
+        text.SetLanguage(language.SelectedLanguage);
         await services.Settings.SaveAsync();
     }
 

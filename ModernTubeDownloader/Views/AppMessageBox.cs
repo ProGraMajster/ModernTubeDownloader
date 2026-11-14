@@ -10,6 +10,7 @@ internal static class AppMessageBox
     public static MessageBoxForm Confirmation(string title, string message, string confirmText, string cancelText, string automationPrefix)
     {
         var dialog = new MessageBoxForm(title, message);
+        dialog.AccessibilityObject.AutomationId = automationPrefix + "Window";
         var buttons = dialog.Controls.OfType<Panel>().Single();
         foreach (var existing in buttons.Controls) { existing.Visible = false; existing.Enabled = false; }
         var cancel = new DashboardButton { Text = cancelText, AccessibleAutomationId = automationPrefix + "Cancel" };

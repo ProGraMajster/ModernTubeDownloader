@@ -16,20 +16,32 @@
       "pairing-invalid":"Nieprawidłowy kod parowania.","pairing-expired":"Kod wygasł lub został wykorzystany. Wygeneruj nowy kod w aplikacji.","pairing-rate-limit":"Za dużo prób. Odczekaj minutę i poproś o nowy kod w aplikacji.","pairing-disabled":"Parowanie jest wyłączone. Odśwież stronę.","pairing-unavailable":"Parowanie jest niedostępne. Sprawdź aplikację na komputerze."
     }
   };
+  let locales=[{code:"en",nativeName:"English (United States)",region:"neutral"},{code:"pl",nativeName:"Polski",region:"PL"}];
+  resources.en.followApp="Follow app";resources.en.browserLanguage="Browser language";
+  resources.pl.followApp="Z aplikacji";resources.pl.browserLanguage="Język przeglądarki";
+  function match(code){const lower=String(code||"").toLowerCase();return Object.keys(resources).find(key=>key.toLowerCase()===lower)||Object.keys(resources).find(key=>key.split('-')[0]===lower.split('-')[0])}
   function resolve(preference, languages, desktopLanguage="en"){
-    if(preference==="pl"||preference==="en")return preference;
-    if(preference==="browser"||preference==="auto")return String(languages?.[0]||"en").toLowerCase().startsWith("pl")?"pl":"en";
-    return desktopLanguage==="pl"?"pl":"en";
+    if(preference!=="app"&&preference!=="browser"&&preference!=="auto")return match(preference)||"en";
+    if(preference==="browser"||preference==="auto")return (languages||[]).map(match).find(Boolean)||"en";
+    return match(desktopLanguage)||"en";
   }
   let preference="app", desktopLanguage="en";
   try{preference=root.localStorage?.getItem("mtdRemoteLanguage")||"app"}catch{}
   // Preserve the previous browser-based Auto for existing users.
   if(preference==="auto")preference="browser";
-  if(!["app","browser","pl","en"].includes(preference))preference="app";
+  if(!["app","browser"].includes(preference)&&!/^[a-z]{2}(?:-[a-z]{2})?$/i.test(preference))preference="app";
   const browserLanguages=()=>root.navigator?.languages||[root.navigator?.language];
   let language=resolve(preference,browserLanguages(),desktopLanguage);
-  root.MTDRemoteI18n={resources,resolve,get language(){return language},get preference(){return preference},
+  root.MTDRemoteI18n={resources,resolve,get locales(){return locales},get language(){return language},get preference(){return preference},
     t:key=>resources[language][key]||resources.en[key]||resources[language].failed,
-    setDesktopLanguage(value){desktopLanguage=value==="pl"?"pl":"en";language=resolve(preference,browserLanguages(),desktopLanguage);return language},
-    select(value){preference=["app","browser","pl","en"].includes(value)?value:"app";language=resolve(preference,browserLanguages(),desktopLanguage);try{root.localStorage?.setItem("mtdRemoteLanguage",preference)}catch{}return language}};
+    installCatalog(catalog){
+      if(!Array.isArray(catalog?.locales)||catalog.locales.length>64||!catalog.resources)return false;
+      const accepted=catalog.locales.filter(locale=>/^[a-z]{2}(?:-[A-Z]{2})?$/.test(locale.code)&&typeof locale.nativeName==="string"&&
+        Object.keys(resources.en).every(key=>typeof catalog.resources[locale.code]?.[key]==="string"));
+      if(accepted.length!==catalog.locales.length||!accepted.some(locale=>locale.code==="en")||!accepted.some(locale=>locale.code==="pl"))return false;
+      for(const locale of accepted)resources[locale.code]={...catalog.resources[locale.code]};
+      locales=accepted;language=resolve(preference,browserLanguages(),desktopLanguage);return true;
+    },
+    setDesktopLanguage(value){desktopLanguage=value;language=resolve(preference,browserLanguages(),desktopLanguage);return language},
+    select(value){preference=["app","browser"].includes(value)?value:match(value)||"app";language=resolve(preference,browserLanguages(),desktopLanguage);try{root.localStorage?.setItem("mtdRemoteLanguage",preference)}catch{}return language}};
 })(typeof globalThis!=="undefined"?globalThis:this);

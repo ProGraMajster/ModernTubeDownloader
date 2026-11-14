@@ -9,6 +9,9 @@ param(
     [switch]$UpdateStatesSmoke,
     [switch]$OtherSmoke,
     [switch]$BatchSmoke,
+    [switch]$BatchWorkflowSmoke,
+    [switch]$OrganizerWorkflowSmoke,
+    [switch]$LocalePickerSmoke,
     [switch]$HotfixSmoke,
     [switch]$RealBatchSmoke,
     [switch]$TextScaleSmoke,
@@ -73,7 +76,7 @@ param(
     [ValidateRange(5, 60)][int]$LiveCaptureSeconds = 15,
     [ValidateRange(1, 200)][int]$CrashStressPasses = 15,
     [string]$ModernFormsNextRoot = '.mfn-master-worktree',
-    [ValidateSet('en', 'pl')][string]$Language = 'en',
+    [ValidateSet('en', 'pl', 'de-DE', 'fr-FR', 'es-ES', 'it-IT', 'pt-BR', 'nl-NL', 'cs-CZ', 'sk-SK', 'ru-RU', 'hu-HU', 'tr-TR', 'ja-JP', 'ko-KR', 'zh-CN')][string]$Language = 'en',
     [ValidateSet('Dark', 'Light')][string]$Theme = 'Dark',
     [ValidateRange(80, 200)][int]$AppTextScale = 100,
     [ValidateSet('Classic', 'ModernDashboard')][string]$InterfaceMode = 'Classic',
@@ -87,6 +90,8 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($ExperienceExternalActivation -and $ExperienceSmoke -ne 'Resume') { throw 'ExperienceExternalActivation requires ExperienceSmoke Resume.' }
 if ($ExperienceSmoke -eq 'News') { $InterfaceMode = 'ModernDashboard' }
+if ($OrganizerWorkflowSmoke) { $BatchWorkflowSmoke = $true }
+if ($BatchWorkflowSmoke -or $LocalePickerSmoke) { $CaptureVisual = $true }
 if ($UpdateStatesSmoke) {
     if ($ExperienceSmoke) { throw 'UpdateStatesSmoke uses a separate isolated profile from ExperienceSmoke.' }
     $UpdateSmoke = $true; $CaptureVisual = $true; $InterfaceMode = 'ModernDashboard'
@@ -767,6 +772,13 @@ $settings = @{
     UseCustomFfmpeg = $true; CustomFfmpegPath = (Join-Path $toolRoot 'ffmpeg.exe')
     UseCustomDeno = $true; CustomDenoPath = (Join-Path $toolRoot 'deno.exe')
 }
+if ($BatchWorkflowSmoke) {
+    # Owned media sibling: the organizer correctly rejects private profile/temporary roots.
+    $settings.FinalOutputDirectory = $dataRoot + '-media'
+    $settings.QueuePaused = $false
+    $settings.StoreMetadataJson = $true
+    $settings.SaveMetadataJsonSidecar = $true
+}
 if ($ExperienceSmoke) {
     $settings.Startup = @{ ShowTrayIcon = $false; CloseBehavior = 0; FirstHideNotice = $false }
     # Only the external-activation variant accepts the owned secondary process.
@@ -1097,6 +1109,10 @@ try {
     $mainRoot = $roots.value[0].rootId
     $tree = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot, '--depth', '8')
     if (-not @($tree.nodes | Where-Object { $_.node.automationId -eq 'MainWindow' }).Count) { throw 'MainWindow absent from tree.' }
+    if ($BatchWorkflowSmoke -or $LocalePickerSmoke) {
+        . (Join-Path $PSScriptRoot 'Invoke-BatchOrganizerSmoke.ps1')
+        return
+    }
     if ($DashboardSmoke) {
         function Capture-Dashboard([string]$name) {
             if (-not $CaptureVisual) { return }

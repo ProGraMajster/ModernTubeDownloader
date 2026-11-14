@@ -16,6 +16,62 @@ namespace ModernTubeDownloader.Tests;
 public sealed class ExperiencePresentationTests
 {
     [Theory]
+    [InlineData("pl", 100, true)] [InlineData("en", 150, false)]
+    [InlineData("de-DE", 200, true)] [InlineData("ja-JP", 200, false)]
+    public async Task StartupPreparationDialogCancelsWithoutInstallingAndKeepsContinueReachable(string language, int scale, bool userContinue)
+    {
+        using var fixture = new Fixture(); using var services = await fixture.Services(AppThemeMode.Dark);
+        services.Localization.SetLanguage(language);
+        using var cancellation = new CancellationTokenSource();
+        using var host = ModernFormsTestHost.Create();
+        services.Appearance.Initialize(); AppTypography.SetScale(scale);
+        using var form = new StartupUpdateForm(services, cancellation, async token =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return StartupUpdateOutcome.Ready;
+        });
+        // Shown starts asynchronous preparation. Raise it under the real dispatcher
+        // context, just as button actions in this fixture, rather than xUnit's pool.
+        TestWindowHost? window = null;
+        Ui(host, () => window = host.Show(form, 780, 460));
+        var button = Find<Button>(Root(form), "StartupUpdateContinue");
+        Assert.True(button.Enabled && button.Width > 0 && button.Height >= AppTypography.TextHeight(42));
+        Assert.True(button.Left >= 0 && button.Right <= button.Parent!.Width);
+        if (userContinue) Ui(host, button.PerformClick); else cancellation.Cancel();
+        Pump(host, () => window!.IsClosed);
+        Assert.Equal(userContinue ? StartupUpdateOutcome.Deferred : StartupUpdateOutcome.TimedOut, form.Outcome);
+        Assert.False(services.Updates.InstallationPending);
+        Assert.Null(services.Updates.State.LastStartupAttemptVersion);
+    }
+
+    [Theory]
+    [InlineData(false, 100)] [InlineData(true, 100)]
+    [InlineData(false, 200)] [InlineData(true, 200)]
+    public async Task StartupUpdateSettingsCommitOneStableHeightAcrossNativeLayout(bool modern, int scale)
+    {
+        using var fixture = new Fixture(); using var services = await fixture.Services(AppThemeMode.Dark);
+        using var host = ModernFormsTestHost.Create();
+        services.Appearance.Initialize(); AppTypography.SetScale(scale);
+        using var form = new Form(); using var panel = new UpdateSettingsPanel(services);
+        AppTypography.SetDashboardPresentation(panel, modern); form.Controls.Add(panel);
+        var window = host.Show(form, 1100, 900); host.ProcessPendingWork();
+        foreach (var width in new[] { 1050, 640, 960 })
+        {
+            var heightChanges = 0;
+            void Changed(object? sender, EventArgs args) => heightChanges++;
+            panel.SizeChanged += Changed;
+            Ui(host, () => { panel.Width = width; panel.LayoutForWidth(width); });
+            panel.SizeChanged -= Changed;
+            Assert.InRange(heightChanges, 0, 4);
+            var result = panel.Controls.Single(control => control.AccessibleAutomationId == "ApplicationUpdateStartupResult");
+            Assert.True(result.Bottom <= panel.Height);
+            var settled = panel.Height;
+            Ui(host, () => panel.LayoutForWidth(width));
+            Assert.Equal(settled, panel.Height);
+        }
+    }
+
+    [Theory]
     [InlineData(100, AppThemeMode.Dark)] [InlineData(150, AppThemeMode.Dark)] [InlineData(200, AppThemeMode.Dark)]
     [InlineData(100, AppThemeMode.Light)] [InlineData(150, AppThemeMode.Light)] [InlineData(200, AppThemeMode.Light)]
     public async Task AllSixStepsAndWhatsNewFitBothWindowSizesWithRealPreviews(int scale, AppThemeMode theme)
@@ -33,9 +89,9 @@ public sealed class ExperiencePresentationTests
             host.ProcessPendingWork(); var root = Root(wizard); var text = new LocalizationService("pl");
             Assert.Equal("SetupWizardWindow", wizard.AccessibilityObject.AutomationId);
             Assert.Equal(text["Experience.WelcomeTitle"], Find<Label>(root, "SetupHeading").Text);
-            Ui(host, () => Find<ComboBox>(root, "SetupLanguage").SelectedIndex = 1);
+            Ui(host, () => Find<LocalePickerButton>(root, "SetupLanguage").SelectLanguage("en", true));
             Assert.Equal(new LocalizationService("en")["Experience.WelcomeTitle"], Find<Label>(root, "SetupHeading").Text);
-            Ui(host, () => Find<ComboBox>(root, "SetupLanguage").SelectedIndex = 0);
+            Ui(host, () => Find<LocalePickerButton>(root, "SetupLanguage").SelectLanguage("pl", true));
             Assert.Equal(text["Experience.WelcomeTitle"], Find<Label>(root, "SetupHeading").Text);
 
             for (var step = 0; step < 6; step++)

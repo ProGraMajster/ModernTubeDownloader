@@ -258,8 +258,8 @@ internal sealed partial class HistoryView : UserControl
         finally { list.ResumeLayout(true); }
         empty.Visible = filtered.Length == 0;
         list.Visible = filtered.Length != 0;
-        emptyTitle.Text = total == 0 ? text["History.EmptyTitle"] : text["History.NoResultsTitle"];
-        emptyBody.Text = total == 0 ? text["History.EmptyBody"] : text["History.NoResultsBody"];
+        emptyTitle.Text = services.History.LoadFailed ? text["History.UnavailableTitle"] : total == 0 ? text["History.EmptyTitle"] : text["History.NoResultsTitle"];
+        emptyBody.Text = services.History.LoadFailed ? text["History.UnavailableBody"] : total == 0 ? text["History.EmptyBody"] : text["History.NoResultsBody"];
         classicPrevious.Enabled = page > 0;
         classicNext.Enabled = page + 1 < HistoryPage.Count(filtered.Length);
         pageSummary.Text = text.Get("History.PageSummary", page + 1, HistoryPage.Count(filtered.Length), filtered.Length, total);

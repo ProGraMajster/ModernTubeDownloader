@@ -22,6 +22,7 @@ internal sealed class SetupDraft
     public bool AutomaticUpdates { get; set; } = true;
     public UpdateCheckFrequency Frequency { get; set; }
     public UpdateInstallMode UpdateMode { get; set; } = UpdateInstallMode.InstallOnExit;
+    public bool InstallUpdatesAtStartup { get; set; }
     public bool Notifications { get; set; } = true;
     public bool Tray { get; set; } = true;
     public int Step { get; set; }
@@ -35,6 +36,7 @@ internal sealed class SetupDraft
         Container = services.Settings.Current.PreferredVideoContainer, Conflict = services.Settings.Current.ConflictBehavior,
         AutomaticUpdates = services.Settings.Current.Updates.AutomaticChecks,
         Frequency = services.Settings.Current.Updates.Frequency,
+        InstallUpdatesAtStartup = services.Settings.Current.Updates.InstallAtStartup,
         UpdateMode = services.Settings.UpdatePolicyNeedsConsent ? UpdateInstallMode.InstallOnExit : services.Settings.Current.Updates.Mode,
         Notifications = services.Settings.Current.Notifications.Enabled, Tray = services.Settings.Current.Startup.ShowTrayIcon
     };
@@ -98,7 +100,7 @@ internal sealed class UserExperienceService
                         !Enum.IsDefined(draft.Conflict) || !Enum.IsDefined(draft.Frequency)) service.State.Draft = null;
                     else
                     {
-                        draft.Language = string.Equals(draft.Language, "pl", StringComparison.OrdinalIgnoreCase) ? "pl" : "en";
+                        draft.Language = ModernTubeDownloader.Localization.LocaleRegistry.Normalize(draft.Language);
                         draft.Quality = QualityPreset.Find(draft.Quality).Id;
                         draft.Output ??= ""; draft.Temporary ??= ""; draft.Filename ??= "";
                     }

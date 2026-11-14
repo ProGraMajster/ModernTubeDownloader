@@ -9,7 +9,8 @@ internal sealed class UpdateSettingsPanel : Panel
 {
     private readonly AppServices services;
     private readonly Label heading = AppUi.Heading("", 15), versions = AppUi.Muted(), frequencyLabel = AppUi.Muted(), modeLabel = AppUi.Muted(), status = AppUi.Muted(), policyHelp = AppUi.Muted();
-    private readonly DashboardToggle automatic = new(), onExit = new();
+    private readonly DashboardToggle automatic = new(), onExit = new(), atStartup = new();
+    private readonly Label startupHelp = AppUi.Muted(), startupResult = AppUi.Muted();
     private readonly ComboBox frequency = new(), mode = new();
     private readonly Button save = new(), check = new(), download = new(), install = new(), notes = new(), later = new(), skip = new();
     private readonly ProgressBar progress = new() { Minimum = 0, Maximum = 100 };
@@ -23,11 +24,16 @@ internal sealed class UpdateSettingsPanel : Panel
         AccessibleAutomationId = "ApplicationUpdatesSection";
         AppUi.Card(this);
         automatic.Checked = services.Settings.Current.Updates.AutomaticChecks;
-        AppUi.BindForeground(automatic); AppUi.BindForeground(onExit);
+        AppUi.BindForeground(automatic); AppUi.BindForeground(onExit); AppUi.BindForeground(atStartup);
+        startupHelp.Multiline = startupResult.Multiline = true;
+        atStartup.Checked = services.Settings.Current.Updates.InstallAtStartup;
         AppUi.Input(frequency); AppUi.Input(mode);
         foreach (var button in new[] { save, check, download, install, notes, later, skip }) AppUi.Secondary(button);
         AppUi.Primary(install);
         Controls.AddRange([heading, versions, automatic, policyHelp, frequencyLabel, frequency, modeLabel, mode, save, check, status, progress, download, install, notes, later, skip, onExit]);
+        Controls.AddRange([atStartup, startupHelp, startupResult]);
+        atStartup.AccessibleAutomationId = "ApplicationUpdateAtStartup";
+        startupResult.AccessibleAutomationId = "ApplicationUpdateStartupResult";
         automatic.AccessibleAutomationId = "ApplicationUpdateAutomatic"; onExit.AccessibleAutomationId = "ApplicationUpdateOnExit";
         save.AccessibleAutomationId = "ApplicationUpdateSave"; notes.AccessibleAutomationId = "ApplicationUpdateNotes";
         later.AccessibleAutomationId = "ApplicationUpdateLater"; skip.AccessibleAutomationId = "ApplicationUpdateSkip";
@@ -39,12 +45,13 @@ internal sealed class UpdateSettingsPanel : Panel
         frequency.SelectedIndex = (int)services.Settings.Current.Updates.Frequency;
         mode.SelectedIndex = (int)services.Settings.Current.Updates.Mode;
         automatic.CheckedChanged += (_, _) => { if (!applyingPolicy) policyEdited = true; };
+        atStartup.CheckedChanged += (_, _) => { if (!applyingPolicy) policyEdited = true; };
         frequency.SelectedIndexChanged += (_, _) => { if (!applyingPolicy) policyEdited = true; };
         mode.SelectedIndexChanged += (_, _) => { if (!applyingPolicy) policyEdited = true; };
         save.Click += (_, _) => _ = RunAsync(async () =>
         {
             await services.Updates.ApplyPolicyAsync(automatic.Checked, (UpdateCheckFrequency)Math.Max(0, frequency.SelectedIndex),
-                (UpdateInstallMode)Math.Max(0, mode.SelectedIndex));
+                (UpdateInstallMode)Math.Max(0, mode.SelectedIndex), installAtStartup: atStartup.Checked);
             policyEdited = false;
         });
         check.Click += (_, _) => _ = RunAsync(() => services.Updates.CheckAsync());
@@ -98,6 +105,7 @@ internal sealed class UpdateSettingsPanel : Panel
         save.Text = text["Updates.Save"]; check.Text = text["Updates.Check"]; download.Text = text["Updates.Download"];
         install.Text = text["Updates.Install"]; notes.Text = text["Updates.Notes"]; later.Text = text["Updates.Later"]; skip.Text = text["Updates.Skip"];
         onExit.Text = text["Updates.OnExit"];
+        atStartup.Text = text["Updates.StartupInstall"]; startupHelp.Text = text["Updates.StartupHelp"];
     }
     private void Refresh()
     {
@@ -108,12 +116,15 @@ internal sealed class UpdateSettingsPanel : Panel
             try
             {
                 automatic.Checked = services.Settings.Current.Updates.AutomaticChecks;
+                atStartup.Checked = services.Settings.Current.Updates.InstallAtStartup;
                 frequency.SelectedIndex = (int)services.Settings.Current.Updates.Frequency;
                 mode.SelectedIndex = (int)services.Settings.Current.Updates.Mode;
             }
             finally { applyingPolicy = false; }
         }
         var state = services.Updates.State; var ready = services.Updates.Ready;
+        startupResult.Text = services.Localization.Get("Updates.StartupLastResult",
+            services.Localization[state.LastStartupResultKey ?? "Updates.StartupNotAttempted"]);
         versions.Text = services.Localization.Get("Updates.Versions", services.Updates.CurrentVersion, state.Available?.Version ?? "—");
         status.Text = services.Localization[actionFailed ? "Updates.Failed" : services.Updates.StatusKey];
         AppUi.BindForeground(status, actionFailed || services.Updates.StatusKey is "Updates.Failed" or "Updates.InstallFailed" ? AppThemeTokens.Error : ready ? AppThemeTokens.Success : AppThemeTokens.TextSecondary);
@@ -148,11 +159,18 @@ internal sealed class UpdateSettingsPanel : Panel
                 if (x > 16 && x + buttonWidth > 16 + innerWidth) { x = 16; y += line + 8; }
                 button.SetBounds(x,y,buttonWidth,line); x += buttonWidth + 8;
             }
-            onExit.SetBounds(16,buttons[^1].Bottom+10,innerWidth,AppTypography.TextHeight(44)); Height=onExit.Bottom+16; return;
+            onExit.SetBounds(16,buttons[^1].Bottom+10,innerWidth,AppTypography.TextHeight(44));
+            atStartup.SetBounds(16,onExit.Bottom+10,innerWidth,AppTypography.TextHeight(68));
+            startupHelp.SetBounds(16,atStartup.Bottom+8,innerWidth,DashboardVisual.LabelHeight(startupHelp,innerWidth,10));
+            startupResult.SetBounds(16,startupHelp.Bottom+8,innerWidth,DashboardVisual.LabelHeight(startupResult,innerWidth,5));
+            Height=startupResult.Bottom+16; return;
         }
 
         var inner = Math.Max(480, width - 48);
-        policyHelp.SetBounds(24, 440, inner, 70); Height = policyHelp.Bottom + 16;
+        // Commit the panel height only after all rows have been measured. SizeChanged
+        // invokes this layout too; alternating an intermediate and final height
+        // recursively re-entered native startup until the UI stack overflowed.
+        policyHelp.SetBounds(24, 440, inner, 70);
         heading.SetBounds(24, 20, inner, 30); versions.SetBounds(24, 56, inner, 28);
         automatic.SetBounds(24, 94, inner, 30);
         frequencyLabel.SetBounds(24, 138, 190, 30); frequency.SetBounds(220, 136, inner - 196, 36);
@@ -161,6 +179,10 @@ internal sealed class UpdateSettingsPanel : Panel
         status.SetBounds(24, 282, inner, 30); progress.SetBounds(24, 316, inner, 8);
         download.SetBounds(24, 340, 136, 38); install.SetBounds(170, 340, 148, 38); notes.SetBounds(328, 340, 160, 38);
         later.SetBounds(24, 390, 136, 38); skip.SetBounds(170, 390, 148, 38); onExit.SetBounds(328, 390, Math.Max(150, inner - 304), 38);
+        atStartup.SetBounds(24, policyHelp.Bottom + 12, inner, AppTypography.TextHeight(60));
+        startupHelp.SetBounds(24, atStartup.Bottom + 8, inner, DashboardVisual.LabelHeight(startupHelp, inner, 10));
+        startupResult.SetBounds(24, startupHelp.Bottom + 8, inner, DashboardVisual.LabelHeight(startupResult, inner, 5));
+        Height = startupResult.Bottom + 20;
     }
     private void UpdateChanged(object? sender, EventArgs e) => Application.RunOnUIThread(Refresh);
     private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() => { if (!disposed) { var edited = policyEdited; ApplyLocalization(); policyEdited = edited; Refresh(); } });

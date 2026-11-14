@@ -1,5 +1,11 @@
 # Setup and migration to the 1.3.0 candidate
 
+The language step now uses the same searchable locale registry and local vector
+region indicators as Settings. Existing `pl`/`en` preferences remain compatible.
+The update step includes a separate, optional manual-startup installation preference;
+it remains off when absent in older profiles and does not replace InstallOnExit.
+See `LOCALIZATION_COVERAGE.md` and `STARTUP_UPDATE_POLICY.md` for scope and limitations.
+
 The native setup journey uses the existing `AppServices`, `SettingsService`,
 `AppAppearanceService` and `ApplicationUpdateService`. Classic and Modern continue to
 share one queue, history, LIVE runtime and profile. Completing setup does not create a

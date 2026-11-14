@@ -48,6 +48,9 @@ public sealed partial class MainForm : Form
     private bool shutdownStarted;
     private bool shutdownCompleted;
     private bool updateInstallRequested;
+    private bool startupInstallRequested, startupInstallerLaunched, runtimeAdmissionStarted, startupInterrupted;
+    private readonly bool startupUpdateEligible;
+    private CancellationTokenSource? startupUpdateCancellation;
     private readonly TrayApplicationController tray;
     private readonly ExternalMediaRequest? initialExternalRequest;
     private readonly HashSet<Guid> externalRequestIds = [];
@@ -61,6 +64,7 @@ public sealed partial class MainForm : Form
         using var constructionTiming = PerformanceDiagnostics.Measure("main.constructor");
         this.services = services;
         suppressExperience = classicUi || backgroundActivation || initialExternalRequest is not null;
+        startupUpdateEligible = !classicUi && !backgroundActivation && initialExternalRequest is null && !enableAutomation;
         if (classicUi) services.Appearance.ForceClassicForSession();
         this.initialExternalRequest = initialExternalRequest;
         text = services.Localization;
@@ -109,8 +113,12 @@ public sealed partial class MainForm : Form
         liveView.OpenDownloadsRequested += async (_, url) =>
         { ShowView(downloadsView); await downloadsView.AcceptDesktopUrlAsync(url); };
         settingsView = new SettingsView(services) { Visible = false };
+#if DEBUG
+        if (automation is not null) settingsView.RegisterDialog = automation.RegisterWindow;
+#endif
         otherView = new OtherView(services) { Visible = false };
         otherView.RegisterTool("Batch", () => _ = OpenBatchAsync());
+        otherView.RegisterTool("Organizer", () => _ = OpenOrganizerAsync());
         otherView.RegisterTool("Thumbnails", () => _ = OpenThumbnailToolAsync());
         otherView.ResumeBatch += (_, session) => _ = OpenBatchAsync(session);
         settingsView.InstallUpdateRequested += (_, _) => _ = RequestUpdateInstallationAsync();
@@ -119,6 +127,7 @@ public sealed partial class MainForm : Form
         liveView.SupportedSourcesRequested += OpenSupportedSources;
         otherView.NavigateRequested += (_, page) => Navigate(page);
         batchView = new BatchImportView(services) { Visible = false };
+        batchView.OrganizeRequested += (_, _) => _ = OpenOrganizerAsync(batchView.CurrentSession);
         otherView.PickBatchFileRequested += async (_, _) => { Navigate(AppPageId.Batch); await batchView.BrowseSourceAsync(); };
 #if DEBUG
         if (automation is not null) batchView.RegisterDialog = automation.RegisterWindow;
@@ -261,6 +270,7 @@ public sealed partial class MainForm : Form
                 Navigate(AppPageId.Batch); return;
             }
             using var window = new BatchImportForm(services, session);
+            window.OrganizeRequested += (_, _) => _ = OpenOrganizerAsync(window.CurrentSession, window);
 #if DEBUG
             if (automation is not null) window.RegisterDialog = automation.RegisterWindow;
             using var registration = automation?.RegisterWindow(window);
@@ -268,6 +278,24 @@ public sealed partial class MainForm : Form
             await window.ShowDialog(this);
         }
         catch (Exception ex) { services.Logger.Error("Batch window failed.", ex); }
+    }
+
+    private bool organizerOpen;
+    private async Task OpenOrganizerAsync(ModernTubeDownloader.Batch.BatchImportSession? session = null, Form? owner = null)
+    {
+        if (organizerOpen || shutdownStarted) return;
+        organizerOpen = true;
+        try
+        {
+            using var window = new OrganizerForm(services, session);
+#if DEBUG
+            if (automation is not null) window.RegisterDialog = automation.RegisterWindow;
+            using var registration = automation?.RegisterWindow(window);
+#endif
+            await window.ShowDialog(owner ?? this);
+        }
+        catch (Exception error) { services.Logger.Error("Organizer window failed.", error); }
+        finally { organizerOpen = false; }
     }
 
     public AppPageId CurrentPage => shellHost.CurrentPage;
@@ -551,8 +579,11 @@ public sealed partial class MainForm : Form
         suppressExperience |= autostart || hiddenArgument;
         InitializeRuntime();
         tray.Start(autostart, hiddenArgument);
-        experienceRuntimeStarted = true;
-        TryStartExperience();
+        if (!runtimeAdmissionStarted)
+        {
+            runtimeAdmissionStarted = true;
+            _ = StartApplicationWorkAsync(autostart || hiddenArgument);
+        }
     }
 
     public void RestoreWindow() { if (!shutdownStarted) tray.Restore(); }
@@ -581,7 +612,6 @@ public sealed partial class MainForm : Form
                 $"captured={FindDiagnosticControl(Controls, control => control.Capture)}; content-children={content.Controls.Count}" : state;
         });
         services.Appearance.RefreshSystemTheme();
-        services.Updates.Start();
         UpdateStatus();
         if (initialExternalRequest is not null)
             _ = HandleExternalUrlAsync(initialExternalRequest);
@@ -617,6 +647,7 @@ public sealed partial class MainForm : Form
     public async void HandleNotification(NotificationNavigation request)
     {
         if (shutdownStarted || !NotificationNavigation.TryParse(request.Encode(), out _)) return;
+        InterruptStartupUpdate();
         try
         {
             await SuspendExperienceAsync();
@@ -645,6 +676,7 @@ public sealed partial class MainForm : Form
         if (shutdownStarted || !services.Settings.Current.BrowserIntegrationEnabled ||
             !ExternalMediaRequest.TryValidateSource(request.SourceUrl, out var sourceUrl))
             return;
+        InterruptStartupUpdate();
         if (request.RequestId is { } id)
         {
             if (!externalRequestIds.Add(id)) return;
@@ -709,6 +741,12 @@ public sealed partial class MainForm : Form
     private void BeginShutdown()
     {
         if (shutdownStarted) return;
+        if (services.Updates.StartupAbortBlocked)
+        {
+            shellHost.SetStatus(text["Updates.StartupAbortBlocked"]);
+            return;
+        }
+        startupUpdateCancellation?.Cancel();
         shutdownStarted = true;
         shellHost.SetStatus(text["Footer.Stopping"]);
         _ = ShutdownAndCloseAsync();
@@ -735,9 +773,9 @@ public sealed partial class MainForm : Form
         {
             await SuspendExperienceAsync();
             await services.ShutdownAsync();
-            if (services.Updates.Ready && (updateInstallRequested || services.Updates.ShouldInstallOnExit))
+            if (!startupInstallerLaunched && services.Updates.Ready && (updateInstallRequested || services.Updates.ShouldInstallOnExit))
             {
-                try { await services.Updates.LaunchInstallerAsync(restart: updateInstallRequested); }
+                try { await services.Updates.LaunchInstallerAsync(restart: updateInstallRequested, startup: startupInstallRequested); }
                 catch (Exception error) { services.Logger.Error("The staged updater could not be started; the installation was left unchanged.", error); }
             }
         }
@@ -747,8 +785,16 @@ public sealed partial class MainForm : Form
         }
         finally
         {
-            shutdownCompleted = true;
-            Application.RunOnUIThread(Close);
+            if (services.Updates.StartupAbortBlocked)
+            {
+                shutdownStarted = false;
+                shellHost.SetStatus(text["Updates.StartupAbortBlocked"]);
+            }
+            else
+            {
+                shutdownCompleted = true;
+                Application.RunOnUIThread(Close);
+            }
         }
     }
 

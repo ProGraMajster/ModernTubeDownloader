@@ -60,6 +60,8 @@ public sealed class DownloadQueueItem
     public string? StatusMessageKey { get; set; } = "Queue.Detail.Queued";
     public List<string> TemporaryFiles { get; set; } = [];
     public string? FinalFile { get; set; }
+    /// <summary>Frozen destination for an explicitly prepared list. Null preserves legacy/global output behavior.</summary>
+    public string? OutputDirectory { get; set; }
     public string? ErrorMessage { get; set; }
     public string? FailureMessageKey { get; set; }
     public string? FailureTechnicalSummary { get; set; }

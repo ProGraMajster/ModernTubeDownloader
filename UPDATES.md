@@ -1,5 +1,12 @@
 # Application updates
 
+The optional **Install at manual startup** preference is off for all new and old
+profiles unless explicitly selected. It is independent of InstallOnExit. A bounded
+foreground preparation runs before queue/LIVE worker admission, respects pending
+work, Skip/Later and previous attempts, then uses the existing graceful shutdown and
+updater. Background/URL startup does not install. See `STARTUP_UPDATE_POLICY.md` for
+the admission and recovery contract and `IMPLEMENTATION_REPORT.md` for test evidence.
+
 `ApplicationUpdateService` checks **ProGraMajster/ModernTubeDownloader GitHub Releases**,
 not master. Stable selects the API's latest public non-prerelease, verifies the exact
 repository/tag and assets `ModernTubeDownloader-X.Y.Z-win-x64.zip` / `.zip.sha256`.

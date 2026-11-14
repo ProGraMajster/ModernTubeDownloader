@@ -28,6 +28,7 @@ internal sealed class SetupWizardForm : Form
     private bool building, busy, closeAllowed, closeWhenIdle, arrangingRows;
     private Task pendingSave = Task.CompletedTask;
     public bool Accepted { get; private set; }
+    public Func<Form, IDisposable?>? RegisterDialog { get; set; }
 
     internal SetupWizardForm(AppServices services, bool upgrade, SetupDraft draft)
     {
@@ -96,7 +97,7 @@ internal sealed class SetupWizardForm : Form
         }
         // Only explicit completion applies preferences. A crash between the independent
         // atomic stores leaves InProgress; repeating completion is idempotent.
-        await services.Updates.ApplyPolicyAsync(draft.AutomaticUpdates, draft.Frequency, draft.UpdateMode);
+        await services.Updates.ApplyPolicyAsync(draft.AutomaticUpdates, draft.Frequency, draft.UpdateMode, installAtStartup: draft.InstallUpdatesAtStartup);
         var appearance = services.Appearance.Profile.Copy(); appearance.InterfaceMode = draft.Interface;
         await services.Appearance.ApplyProfileAsync(appearance);
         services.Localization.SetLanguage(settings.Language);
@@ -126,7 +127,7 @@ internal sealed class SetupWizardForm : Form
             {
                 case 0:
                     AddText("Experience.Introduction", 70);
-                    AddCombo("Settings.Language", "SetupLanguage", new[] { "Polski", "English" }, draft.Language == "pl" ? 0 : 1, index => { draft.Language = index == 0 ? "pl" : "en"; text.SetLanguage(draft.Language); Changed(); BuildStep(); });
+                    AddLanguagePicker();
                     AddText("Experience.Privacy", 76); break;
                 case 1: AddInterfaces(); break;
                 case 2:
@@ -146,13 +147,14 @@ internal sealed class SetupWizardForm : Form
                     AddText("Experience.Privacy", 72); break;
                 case 5:
                     AddText("Experience.SummaryHint", 52);
-                    AddValue(text["Settings.Language"], draft.Language == "pl" ? "Polski" : "English");
+                    AddValue(text["Settings.Language"], LocaleRegistry.Get(draft.Language).DisplayName(text));
                     AddValue(text["Dashboard.InterfaceStyle"], text[draft.Interface == AppInterfaceMode.Classic ? "Appearance.Value.Classic" : "Appearance.Value.ModernDashboard"]);
                     AddValue(text["Settings.OutputDirectory"], draft.Output); AddValue(text["Settings.TemporaryDirectory"], draft.Temporary);
                     AddValue(text["Settings.FilenameTemplate"], draft.Filename);
                     AddValue(text["Experience.Conflict"], text["Experience.Conflict" + draft.Conflict]);
                     AddValue(text["Settings.DefaultQuality"], text["Quality." + draft.Quality] + " · " + text["Container." + draft.Container]);
                     AddValue(text["Updates.Automatic"], draft.AutomaticUpdates ? text["Experience.Mode" + draft.UpdateMode] : text["Dashboard.Disabled"]);
+                    AddValue(text["Updates.StartupInstall"], text[draft.AutomaticUpdates && draft.InstallUpdatesAtStartup ? "Dashboard.Enabled" : "Dashboard.Disabled"]);
                     AddValue(text["Notification.Preference.Enabled"], text[draft.Notifications ? "Dashboard.Enabled" : "Dashboard.Disabled"]);
                     AddValue(text["Tray.ShowIcon"], text[draft.Tray ? "Dashboard.Enabled" : "Dashboard.Disabled"]);
                     break;
@@ -160,6 +162,19 @@ internal sealed class SetupWizardForm : Form
             AppTypography.CaptureRecipes(body).Invoke(); LayoutPage();
         }
         finally { building = false; LayoutPage(); }
+    }
+
+    private void AddLanguagePicker()
+    {
+        var card = new ExperienceCard(); var label = ExperienceVisual.Paragraph(text["Settings.Language"]);
+        var picker = new LocalePickerButton(text) { AccessibleAutomationId = "SetupLanguage", RegisterDialog = dialog => RegisterDialog?.Invoke(dialog) }; picker.SelectLanguage(draft.Language);
+        picker.SelectedLanguageChanged += (_, _) => { draft.Language = picker.SelectedLanguage; text.SetLanguage(draft.Language); Changed(); BuildStep(); };
+        card.Controls.AddRange([label, picker]); body.Controls.Add(card); rows.Add((card, 0));
+        card.ArrangeContent = width =>
+        {
+            var inside = Math.Max(1, width - 32); label.SetBounds(16, 12, inside, DashboardVisual.LabelHeight(label, inside, 12));
+            picker.SetBounds(16, label.Bottom + 8, inside, AppTypography.TextHeight(40)); return picker.Bottom + 14;
+        };
     }
 
     private void AddInterfaces()
@@ -223,6 +238,8 @@ internal sealed class SetupWizardForm : Form
         { draft.AutomaticUpdates = value; if (mode is not null) mode.Enabled = value; });
         mode = AddCombo("Experience.UpdateMode", "SetupUpdateMode", Enum.GetValues<UpdateInstallMode>().Select(value => text["Experience.Mode" + value]).ToArray(), (int)draft.UpdateMode, i => draft.UpdateMode = (UpdateInstallMode)i);
         mode.Enabled = draft.AutomaticUpdates;
+        AddCheck("Updates.StartupInstall", "SetupStartupUpdate", draft.InstallUpdatesAtStartup, value => draft.InstallUpdatesAtStartup = value);
+        AddText("Updates.StartupHelp", 84);
         AddText(services.Settings.UpdatePolicyNeedsConsent ? "Experience.LegacyUpdates" : "Experience.UpdateSafety", 84);
     }
     private void AddText(string key, int height)

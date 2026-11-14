@@ -5,6 +5,7 @@ namespace ModernTubeDownloader.Batch;
 
 public enum BatchEntryStatus { Pending, Validating, Analyzing, Ready, Duplicate, Unsupported, AuthRequired, AddedToQueue, Downloading, Completed, Failed, Skipped, Cancelled }
 public enum BatchFilter { All, Ready, Errors, Duplicates, Unsupported, AuthRequired, Queued, Completed }
+public enum BatchWorkflowPhase { Prepared, Analyzing, Queueing, WaitingForQueue, Downloading, Finalizing, Completed, Paused, Cancelled, Attention }
 public sealed class BatchImportEntry
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -37,6 +38,14 @@ public sealed class BatchImportSession
     public int AnalysisWorkers { get; set; } = 1;
     public bool Paused { get; set; } = true;
     public int ImportedCount { get; set; }
+    public string? SourceFingerprint { get; set; }
+    public string? OutputDirectory { get; set; }
+    public string? OutputRoot { get; set; }
+    public string? ListName { get; set; }
+    public bool CreateListSubfolder { get; set; }
+    public bool DestinationConfirmed { get; set; } = true;
+    public bool AutomaticRequested { get; set; }
+    public BatchWorkflowPhase WorkflowPhase { get; set; }
     [JsonIgnore] internal object Sync { get; } = new();
     [JsonIgnore] internal List<BatchImportEntry> Entries { get; } = [];
     [JsonIgnore] internal Dictionary<Guid, BatchImportEntry> ById { get; } = [];

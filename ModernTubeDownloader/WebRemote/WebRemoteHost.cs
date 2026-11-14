@@ -277,6 +277,7 @@ public sealed class WebRemoteHost : IDisposable
         app.MapGet("/time-input.js", () => Asset("time-input.js", "text/javascript; charset=utf-8"));
         app.MapGet("/app.js", () => Asset("app.js", "text/javascript; charset=utf-8"));
         app.MapGet("/i18n.js", () => Asset("i18n.js", "text/javascript; charset=utf-8"));
+        app.MapGet("/locales.json", () => Results.Json(RemoteLocalizationCatalog.Current.Value));
         app.MapPost("/api/pair", (PairRequest request, HttpContext context) =>
         {
             if (!services.Settings.Current.WebRemoteRequireAuthentication) return Results.Conflict(new { error = "pairing-disabled" });
@@ -295,7 +296,7 @@ public sealed class WebRemoteHost : IDisposable
         app.MapGet("/api/auth-mode", () => Results.Json(new
         {
             authenticationRequired = services.Settings.Current.WebRemoteRequireAuthentication,
-            desktopLanguage = services.Localization.Language == "pl" ? "pl" : "en"
+            desktopLanguage = services.Localization.Language
         }));
         app.MapGet("/api/status", () => Results.Json(new
         {

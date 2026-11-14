@@ -110,7 +110,7 @@ public sealed class SettingsService(AppPaths paths, IAppLogger logger)
         settings.MinimumInterDownloadDelaySeconds = Math.Clamp(settings.MinimumInterDownloadDelaySeconds, 0, 300);
         settings.MaximumInterDownloadDelaySeconds = Math.Clamp(settings.MaximumInterDownloadDelaySeconds,
             settings.MinimumInterDownloadDelaySeconds, 300);
-        settings.Language = string.Equals(settings.Language, "pl", StringComparison.OrdinalIgnoreCase) ? "pl" : "en";
+        settings.Language = ModernTubeDownloader.Localization.LocaleRegistry.Normalize(settings.Language);
         settings.TemporaryDirectory = string.IsNullOrWhiteSpace(settings.TemporaryDirectory)
             ? defaults.TemporaryDirectory
             : settings.TemporaryDirectory.Trim();

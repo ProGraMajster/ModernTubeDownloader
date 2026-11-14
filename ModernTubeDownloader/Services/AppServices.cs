@@ -9,6 +9,8 @@ public sealed class AppServices : IDisposable
 {
     private bool disposed;
     private readonly HttpClient httpClient;
+    private int workStarted;
+    public bool WorkStarted => Volatile.Read(ref workStarted) != 0;
 
     private AppServices(
         AppPaths paths,
@@ -59,6 +61,7 @@ public sealed class AppServices : IDisposable
     public SourceCheckService SourceCheck { get; private set; } = null!;
     public ApplicationUpdateService Updates { get; private set; } = null!;
     public ModernTubeDownloader.Batch.BatchImportService Batch { get; private set; } = null!;
+    public ModernTubeDownloader.Organizer.DownloadOrganizerService Organizer { get; private set; } = null!;
     internal UserExperienceService Experience { get; private set; } = null!;
 
     public static AppServices Create(
@@ -66,7 +69,8 @@ public sealed class AppServices : IDisposable
         HttpClient? httpClient = null,
         IToolReleaseSource? releaseSource = null,
         IToolBinaryValidator? toolValidator = null,
-        ModernFormsNext.Notifications.ISystemNotificationService? notifications = null)
+        ModernFormsNext.Notifications.ISystemNotificationService? notifications = null,
+        bool deferWorkStart = false)
     {
         using var createTiming = PerformanceDiagnostics.Measure("services.create");
         paths.EnsureCreated();
@@ -135,31 +139,40 @@ public sealed class AppServices : IDisposable
                 PerformanceDiagnostics.Set("thumbnail.displayCopiesBytes", Views.ThumbnailImageBinding.OwnedBytes);
             };
         }
-        processor.Start();
-        liveScheduler.Start();
         tools.Start();
         services.Sources = new SupportedSourcesService(tools, processRunner, logger);
         services.SourceCheck = new SourceCheckService(metadata, logger);
         services.Batch = new(new ModernTubeDownloader.Batch.BatchSessionStore(Path.Combine(paths.RootDirectory, "Batch")),
             services.SourceCheck.CheckAsync, queue, settings, logger);
+        services.Organizer = new(paths, history, queue, settings, logger);
         services.Updates.UpdatePrepared += (_, version) => services.Notifications?.UpdateReady(version);
         services.Batch.AnalysisCompleted += (_, counts) => services.Notifications?.BatchCompleted(counts.Analyzed, counts.Total);
         services.WebRemote = new WebRemoteHost(services);
-        using (PerformanceDiagnostics.Measure("remote.initialize")) services.WebRemote.ReconcileAsync().GetAwaiter().GetResult();
+        if (!deferWorkStart) services.StartWorkAsync().GetAwaiter().GetResult();
         return services;
+    }
+
+    /// <summary>One canonical admission point; startup updates finish before these workers are admitted.</summary>
+    public async Task StartWorkAsync()
+    {
+        if (Interlocked.Exchange(ref workStarted, 1) != 0) return;
+        Processor.Start();
+        LiveScheduler.Start();
+        using (PerformanceDiagnostics.Measure("remote.initialize")) await WebRemote.ReconcileAsync().ConfigureAwait(false);
     }
 
     public async Task ShutdownAsync()
     {
         await Updates.StopAsync().ConfigureAwait(false);
         await Batch.StopAsync().ConfigureAwait(false);
+        await Organizer.StopAsync().ConfigureAwait(false);
         if (Notifications is not null) await Notifications.DisposeAsync().ConfigureAwait(false);
         await WebRemote.StopAsync().ConfigureAwait(false);
         await Task.WhenAll(Processor.StopAsync(), LiveScheduler.StopAsync()).ConfigureAwait(false);
         await Tools.StopAsync().ConfigureAwait(false);
         await Queue.SaveAsync().ConfigureAwait(false);
         if (!Settings.LoadFailed) await Settings.SaveAsync().ConfigureAwait(false);
-        await History.SaveAsync().ConfigureAwait(false);
+        if (!History.LoadFailed) await History.SaveAsync().ConfigureAwait(false);
     }
 
     public void Dispose()
@@ -171,6 +184,7 @@ public sealed class AppServices : IDisposable
         WebRemote.Dispose();
         Updates.Dispose();
         Batch.Dispose();
+        Organizer.Dispose();
         Thumbnails.Dispose();
         Processor.Dispose();
         LiveScheduler.Dispose();

@@ -54,6 +54,7 @@ public sealed partial class MainForm
                 using var wizard = new SetupWizardForm(services, action == StartupExperience.UpgradeChoice, draft);
                 activeExperience = wizard;
 #if DEBUG
+                if (automation is not null) wizard.RegisterDialog = automation.RegisterWindow;
                 using var registration = automation?.RegisterWindow(wizard);
 #endif
                 await wizard.ShowDialog(this);

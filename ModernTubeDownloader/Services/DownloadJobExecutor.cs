@@ -35,6 +35,10 @@ public sealed class DownloadJobExecutor(
         CancellationToken cancellationToken)
     {
         storage?.ThrowIfBlocked();
+        // A list owns its accepted destination for every retry/restart. Legacy jobs
+        // still use the global folder, captured once for this execution attempt.
+        var outputDirectory = item.OutputDirectory is { Length: > 0 } destination
+            ? DownloadOutputPolicy.NormalizeDirectory(destination) : settings.Current.FinalOutputDirectory;
         using var authenticationSession = ytDlpRunner.BeginAuthenticationSession(item.SourceUrl);
         if (item.LiveSession is not null)
             throw new InvalidOperationException("LIVE sessions must use the independent LIVE subsystem.");
@@ -83,11 +87,11 @@ public sealed class DownloadJobExecutor(
             {
                 var expected = (long)sizes.Sum(size => (decimal)size!.Value);
                 storage?.Preflight(settings.Current.TemporaryDirectory, expected * 2);
-                storage?.Preflight(settings.Current.FinalOutputDirectory, expected);
+                storage?.Preflight(outputDirectory, expected);
             }
         }
         FileSystemUtilities.EnsureWritableDirectory(settings.Current.TemporaryDirectory);
-        FileSystemUtilities.EnsureWritableDirectory(settings.Current.FinalOutputDirectory);
+        FileSystemUtilities.EnsureWritableDirectory(outputDirectory);
 
         // A format-specific directory is stable across retries and restarts. yt-dlp's
         // default .part/.ytdl continuation can only be reused with the same stream
@@ -265,15 +269,18 @@ public sealed class DownloadJobExecutor(
             var sidecarSuffixes = keepSubtitleSidecars
                 ? subtitleFiles.Select(file => Path.GetFileName(file)["subtitle.".Length..]).ToArray()
                 : [];
+            if (item.OutputDirectory is not null && settings.Current.SaveMetadataJsonSidecar && !string.IsNullOrWhiteSpace(item.RawMetadataJson))
+                sidecarSuffixes = [.. sidecarSuffixes, "json"];
+            if (item.OutputDirectory is not null) DownloadOutputPolicy.NormalizeDirectory(outputDirectory);
             var finalPath = FileSystemUtilities.ResolveFinalPath(
-                settings.Current.FinalOutputDirectory,
+                outputDirectory,
                 baseName,
                 container,
                 settings.Current.ConflictBehavior,
                 settings.Current.OverwriteExistingFiles,
                 sidecarSuffixes);
             storage?.ThrowIfBlocked();
-            storage?.Preflight(settings.Current.FinalOutputDirectory, new FileInfo(preparedFile).Length);
+            storage?.Preflight(outputDirectory, new FileInfo(preparedFile).Length);
             File.Move(preparedFile, finalPath, settings.Current.OverwriteExistingFiles || settings.Current.ConflictBehavior == Settings.FileConflictBehavior.Overwrite);
             if (!File.Exists(finalPath) || new FileInfo(finalPath).Length == 0)
                 throw new IOException("The final output file is missing or empty.");

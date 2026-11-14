@@ -4,6 +4,15 @@
 
 ### Added
 
+- One-click Batch import, analysis and canonical queue admission with durable phases,
+  per-list destination folders, idempotent task identities and explicit paused-queue consent.
+- Existing-download organizer with verified URL identity, dry-run, media/JSON/sidecar
+  relocation, atomic History/queue path updates, recovery journals and guarded undo.
+- Shared searchable language picker with vector region icons and fourteen additional
+  locale resources. Translation coverage is complete; full language review remains pending.
+- Independent opt-in installation at manual foreground startup, bounded preflight,
+  pending-work deferral and a per-request updater commitment preventing crash-driven installs.
+
 - Optional Modern Dashboard interface, preserving existing Classic preferences and
   offering an explicit choice during first-run setup or migration.
 - Runtime interface selection and session-only `--classic-ui` recovery.
@@ -23,6 +32,10 @@
   tool/recent-operation cards with responsive Settings editors.
 
 ### Fixed
+
+- Startup update settings commit their measured height once; alternating intermediate
+  heights had caused a native stack overflow through recursive SizeChanged layout.
+- Failed History loads cannot subsequently overwrite unreadable user data with an empty list.
 
 - Font presentation refresh tolerates controls replaced or reparented by callbacks;
   recent tool records publish on the UI dispatcher.

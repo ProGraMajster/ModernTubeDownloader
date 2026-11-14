@@ -8,8 +8,8 @@ namespace ModernTubeDownloader.Views;
 
 internal sealed partial class BatchImportView
 {
-    private static readonly string[] SourceActions = ["Browse", "Paste", "Import", "Examples"];
-    private static readonly string[] PrimaryActions = ["Add", "Analyze", "Pause", "Cancel", "Export"];
+    private static readonly string[] SourceActions = ["Browse", "Paste", "Import", "Automatic", "Examples", "Organize"];
+    private static readonly string[] PrimaryActions = ["Add", "Analyze", "Pause", "Cancel", "ResumeQueue", "Export"];
     private static readonly string[] SelectionActions = ["SelectPage", "ClearSelection", "Apply", "Remove"];
     private bool dashboard, dashboardOptionsExpanded;
     private Panel? sourceCard, resultCard, dashboardOptions, dashboardHeader;
@@ -201,10 +201,12 @@ internal sealed partial class BatchImportView
         var icon = lastErrorKey is null && (busy || services.Batch.IsAnalyzing) ? AppIconKind.Retry : AppIconKind.Info;
         if (lastErrorKey is null && !busy && session is { } current && !services.Batch.IsAnalyzing)
         {
+            var phase = services.Batch.CurrentWorkflowPhase(current);
             lock (current.Sync)
             {
                 var ready = current.Entries.Count(entry => !entry.Removed && entry.Status == BatchEntryStatus.Ready);
-                status.Text = services.Localization[ready > 0 ? "Batch.ReviewReady" : "Batch.ReviewPending"];
+                status.Text = current.AutomaticRequested ? services.Localization["Batch.Workflow." + phase] :
+                    services.Localization[ready > 0 ? "Batch.ReviewReady" : "Batch.ReviewPending"];
                 token = ready > 0 ? AppThemeTokens.Success : AppThemeTokens.TextSecondary;
                 icon = ready > 0 ? AppIconKind.Check : AppIconKind.Info;
             }
@@ -222,6 +224,7 @@ internal sealed partial class BatchImportView
         var origin = body.DisplayRectangle.Location; var width = Math.Max(1, body.DisplayRectangle.Width - 36);
         var line = AppTypography.TextHeight(36); var gap = 10;
         var inline = width >= AppTypography.TextHeight(900);
+        var compactOverview = inline && session is not null;
         heading.SetBounds(18 + origin.X, 12 + origin.Y, width,
             Math.Max(AppTypography.TextHeight(40), DashboardVisual.LabelHeight(heading, width, 1)));
         var left = inline ? width * 42 / 100 - 6 : width;
@@ -238,7 +241,16 @@ internal sealed partial class BatchImportView
         DownloadsVisual.Button(pickFile!, true); pickFile!.Enabled = !busy;
         var pickWidth = Math.Min(dropZone.Width - 32, DashboardVisual.ActionWidth(pickFile));
         pickFile.SetBounds((dropZone.Width - pickWidth) / 2, sourceHint.Bottom + 8, pickWidth, line);
-        dropZone.Height = pickFile.Bottom + 10;
+        if (compactOverview)
+        {
+            sourceIcon.SetBounds(12, 12, 28, 28);
+            sourceTitle.TextAlign = sourceHint.TextAlign = ContentAlignment.MiddleLeft;
+            pickFile.SetBounds(dropZone.Width - pickWidth - 12, 10, pickWidth, line);
+            sourceTitle.SetBounds(50, 10, Math.Max(1, pickFile.Left - 60), AppTypography.TextHeight(24));
+            sourceHint.SetBounds(50, Math.Max(sourceTitle.Bottom, pickFile.Bottom) + 3, dropZone.Width - 62,
+                DashboardVisual.LabelHeight(sourceHint, dropZone.Width - 62, 2));
+        }
+        dropZone.Height = Math.Max(pickFile.Bottom, sourceHint.Bottom) + 10;
         path.SetBounds(10, dropZone.Bottom + 8, left - 20, line);
         DashboardVisual.SetPadding(path, new Padding(10, 0, 10, 0));
         dashboardTips.SetToolTip(path, path.Text);
@@ -246,6 +258,7 @@ internal sealed partial class BatchImportView
         resultCard!.SetBounds(inline ? sourceCard.Right + 12 : sourceCard.Left, inline ? sourceCard.Top : sourceCard.Bottom + 12,
             inline ? width - left - 12 : width, sourceCard.Height);
         resultTitle!.SetBounds(16, 12, resultCard.Width - 32, AppTypography.TextHeight(28));
+        if (compactOverview) resultTitle.SetBounds(16, 8, (resultCard.Width - 44) / 2, AppTypography.TextHeight(24));
         var metricColumns = resultCard.Width >= AppTypography.TextHeight(440) ? 4 : 2;
         var metricWidth = (resultCard.Width - 24 - (metricColumns - 1) * 8) / metricColumns;
         var metricHeight = metrics.Max(metric => metric.DesiredHeight(metricWidth));
@@ -253,10 +266,15 @@ internal sealed partial class BatchImportView
         {
             metrics[i].Style.Border.Radius = 8;
             metrics[i].SetBounds(12 + i % metricColumns * (metricWidth + 8),
-                resultTitle.Bottom + 10 + i / metricColumns * (metricHeight + 8), metricWidth, metricHeight);
+                resultTitle.Bottom + (compactOverview ? 6 : 10) + i / metricColumns * (metricHeight + 8), metricWidth, metricHeight);
         }
         counters!.SetBounds(16, metrics[^1].Bottom + 8, resultCard.Width - 32, AppTypography.TextHeight(24));
         parserDetails!.SetBounds(16, counters.Bottom + 2, resultCard.Width - 32, AppTypography.TextHeight(24));
+        if (compactOverview)
+        {
+            counters.SetBounds(resultTitle.Right + 12, resultTitle.Top, resultCard.Width - resultTitle.Right - 28, resultTitle.Height);
+            parserDetails.SetBounds(16, metrics[^1].Bottom + 4, resultCard.Width - 32, AppTypography.TextHeight(22));
+        }
         dashboardTips.SetToolTip(parserDetails, parserDetails.Text);
         AppTypography.Bind(counters, 9);
         status.Multiline = true; AppTypography.Bind(status, 9);
@@ -264,16 +282,35 @@ internal sealed partial class BatchImportView
         status.SetBounds(34, 8, statusWidth, DashboardVisual.LabelHeight(status, statusWidth, lastErrorKey is null ? 2 : 4));
         resultStatusFrame!.SetBounds(12, parserDetails.Bottom + 6, resultCard.Width - 24, status.Bottom + 8);
         resultStatusIcon!.SetBounds(8, (resultStatusFrame.Height - 20) / 2, 20, 20);
-        resultCard.Height = Math.Max(inline ? sourceCard.Height : 0, resultStatusFrame.Bottom + 12);
+        // The workflow strip below shows the current phase. Retain this extra
+        // result message when importing or reporting an error, without duplicating
+        // a second status paragraph in every prepared-file overview.
+        resultStatusFrame.Visible = !compactOverview || busy || lastErrorKey is not null;
+        resultCard.Height = Math.Max(inline ? sourceCard.Height : 0,
+            resultStatusFrame.Visible ? resultStatusFrame.Bottom + 12 : parserDetails.Bottom + 6);
+        if (!resultStatusFrame.Visible) resultStatusFrame.SetBounds(0, 0, 0, 0);
         if (inline) sourceCard.Height = resultCard.Height;
 
-        var top = Math.Max(sourceCard.Bottom, resultCard.Bottom) + 12;
+        var top = Math.Max(sourceCard.Bottom, resultCard.Bottom) + 6;
+        if (width >= AppTypography.TextHeight(1160))
+        {
+            var destinationWidth = width * 72 / 100 - 4;
+            LayoutDestination(sourceCard.Left, top, destinationWidth);
+            LayoutWorkflow(destinationCard.Right + 8, top, width - destinationWidth - 8);
+            top = Math.Max(destinationCard.Bottom, workflowCard.Bottom) + 6;
+        }
+        else
+        {
+            LayoutDestination(sourceCard.Left, top, width);
+            LayoutWorkflow(sourceCard.Left, destinationCard.Bottom + 8, width);
+            top = workflowCard.Bottom + 8;
+        }
         var toolbarHeight = LayoutDashboardActions(PrimaryActions.Select(k => buttons[k]), width, 0, 0, line);
         DownloadsVisual.Button(dashboardOptionsButton!); AppTypography.Bind(dashboardOptionsButton!, 9.5f);
         var optionsWidth = Math.Min(width / 3, DashboardVisual.ActionWidth(dashboardOptionsButton!, true));
         // FlowLayoutPanel can already have wrapped these controls under its previous
         // allocation. Sum widths, not their transient positions, and include margins.
-        var actionsWidth = PrimaryActions.Sum(key => buttons[key].Width + buttons[key].Margin.Horizontal);
+        var actionsWidth = PrimaryActions.Where(key => buttons[key].Visible).Sum(key => buttons[key].Width + buttons[key].Margin.Horizontal);
         var filterWidth = Math.Min(AppTypography.TextHeight(140), width / 3);
         var combineActions = toolbarHeight == line && actionsWidth + filterWidth + AppTypography.TextHeight(180) + optionsWidth + 3 * gap <= width;
         toolbar.SetBounds(18 + origin.X, top, combineActions ? actionsWidth : width, toolbarHeight);
@@ -316,9 +353,9 @@ internal sealed partial class BatchImportView
     private int LayoutDashboardActions(IEnumerable<Button> actions, int width, int top, int left, int line)
     {
         var x = left; var y = top;
-        foreach (var button in actions)
+        foreach (var button in actions.Where(button => button.Visible))
         {
-            DownloadsVisual.Button(button, button == buttons["Add"] || button == buttons["Browse"]);
+            DownloadsVisual.Button(button, button == buttons["Automatic"] || button == buttons["Browse"]);
             AppTypography.Bind(button, 9.5f);
             var icon = button == buttons["Add"] ? AppIconKind.Download : button == buttons["Analyze"] ? AppIconKind.Search :
                 button == buttons["Browse"] ? AppIconKind.Folder : button == buttons["Paste"] ? AppIconKind.Clipboard : (AppIconKind?)null;

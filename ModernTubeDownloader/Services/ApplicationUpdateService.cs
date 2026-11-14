@@ -25,6 +25,9 @@ public sealed class ApplicationUpdateState
     public long? LastInstallerStartUtcTicks { get; set; }
     public bool InstallationFailed { get; set; }
     public string? AutomaticInstallSuppressedVersion { get; set; }
+    public string? LastStartupAttemptVersion { get; set; }
+    public DateTimeOffset? LastStartupAttemptAt { get; set; }
+    public string? LastStartupResultKey { get; set; }
 }
 
 public interface IApplicationReleaseSource { Task<ApplicationRelease?> GetLatestAsync(CancellationToken token); }
@@ -83,7 +86,7 @@ public sealed partial class GitHubApplicationReleaseSource(HttpClient http) : IA
     private static partial Regex StableTag();
 }
 
-public sealed class ApplicationUpdateService : IDisposable
+public sealed partial class ApplicationUpdateService : IDisposable
 {
     private readonly SettingsService settings;
     private readonly HttpClient http;
@@ -128,6 +131,12 @@ public sealed class ApplicationUpdateService : IDisposable
         {
             if (initialized) return;
             await InitializeCoreAsync(token);
+            if (!StateUnavailable && pendingStartupResultKey is { } startupResult)
+            {
+                State.LastStartupResultKey = startupResult;
+                await SaveAsync(token);
+                pendingStartupResultKey = null;
+            }
             initialized = true;
         }
         finally { gate.Release(); }
@@ -179,6 +188,8 @@ public sealed class ApplicationUpdateService : IDisposable
                     if (new FileInfo(result).Length > 65536) throw new InvalidDataException("Installer result exceeds the limit.");
                     using var json = JsonDocument.Parse(await File.ReadAllTextAsync(result, token));
                     State.InstallationFailed = !json.RootElement.GetProperty("success").GetBoolean();
+                    if (State.LastStartupResultKey == "Updates.StartupInstalling")
+                        State.LastStartupResultKey = State.InstallationFailed ? "Updates.InstallFailed" : "Updates.Current";
                     State.LastInstallerRequest = null;
                     State.LastInstallerProcessId = null; State.LastInstallerStartUtcTicks = null;
                     State.InstallOnExit = false;
@@ -187,6 +198,8 @@ public sealed class ApplicationUpdateService : IDisposable
                 else if (!InstallerProcessIsRunning())
                 {
                     State.LastInstallerRequest = null; State.InstallationFailed = true; State.InstallOnExit = false;
+                    if (State.LastStartupResultKey == "Updates.StartupInstalling")
+                        State.LastStartupResultKey = "Updates.InstallFailed";
                     State.LastInstallerProcessId = null; State.LastInstallerStartUtcTicks = null;
                     await SaveAsync(token);
                 }
@@ -245,7 +258,7 @@ public sealed class ApplicationUpdateService : IDisposable
         finally { gate.Release(); }
     }
 
-    public async Task ApplyPolicyAsync(bool automaticChecks, UpdateCheckFrequency frequency, UpdateInstallMode mode, CancellationToken token = default)
+    public async Task ApplyPolicyAsync(bool automaticChecks, UpdateCheckFrequency frequency, UpdateInstallMode mode, CancellationToken token = default, bool? installAtStartup = null)
     {
         if (!Enum.IsDefined(frequency) || !Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
         await InitializeAsync(token);
@@ -259,6 +272,7 @@ public sealed class ApplicationUpdateService : IDisposable
                 var unavailableOptions = settings.Current.Updates;
                 unavailableOptions.AutomaticChecks = automaticChecks; unavailableOptions.Frequency = frequency;
                 unavailableOptions.Mode = mode; unavailableOptions.PolicyVersion = 1;
+                if (installAtStartup.HasValue) unavailableOptions.InstallAtStartup = installAtStartup.Value;
                 await settings.SaveAsync(token); Changed?.Invoke(this, EventArgs.Empty); return;
             }
             // Disarm first, even when a later settings write fails. A staged package
@@ -268,6 +282,7 @@ public sealed class ApplicationUpdateService : IDisposable
             await SaveAsync(token);
             var options = settings.Current.Updates;
             options.AutomaticChecks = automaticChecks; options.Frequency = frequency; options.Mode = mode; options.PolicyVersion = 1;
+            if (installAtStartup.HasValue) options.InstallAtStartup = installAtStartup.Value;
             await settings.SaveAsync(token);
             State.AutomaticInstallSuppressedVersion = null;
             State.InstallOnExit = automaticChecks && mode == UpdateInstallMode.InstallOnExit && Ready && !IsDeferred && !State.InstallationFailed && !InstallationPending;
@@ -437,48 +452,142 @@ public sealed class ApplicationUpdateService : IDisposable
         finally { gate.Release(); }
     }
 
-    public async Task LaunchInstallerAsync(bool restart, CancellationToken token = default)
+    // Narrow process boundary used by isolated tests; the production path always
+    // starts the packaged updater copied to its owned runner directory.
+    internal string InstallerSourceDirectory { get; set; } = Path.Combine(AppContext.BaseDirectory, "updater");
+    internal Func<ProcessStartInfo, Process?> InstallerProcessFactory { get; set; } = Process.Start;
+    internal Action<Process> InstallerProcessStopper { get; set; } = process => process.Kill();
+    private bool startupAbortBlocked;
+    internal bool StartupAbortBlocked
+    {
+        get
+        {
+            if (!startupAbortBlocked) return false;
+            try { if (InstallerProcessIsRunning()) return true; }
+            catch { return true; } // An unverifiable child is still pending.
+            startupAbortBlocked = false;
+            return false;
+        }
+    }
+
+    public Task LaunchInstallerAsync(bool restart, CancellationToken token = default, bool startup = false)
+        => LaunchInstallerCoreAsync(restart, token, startup, null, null);
+
+    internal Task LaunchStartupInstallerAsync(Func<bool> workStillAllowsInstallation, Action commitShutdown, CancellationToken token = default)
+        => LaunchInstallerCoreAsync(true, token, true, workStillAllowsInstallation, commitShutdown);
+
+    private async Task LaunchInstallerCoreAsync(bool restart, CancellationToken token, bool startup,
+        Func<bool>? workStillAllowsInstallation, Action? commitShutdown)
     {
         await InitializeAsync(token); EnsureStateWritable();
         await gate.WaitAsync(token);
         if (InstallationPending) { gate.Release(); throw new InvalidOperationException("An updater process is already pending."); }
+        Process? updater = null;
+        var committed = false;
+        string? startupCommitMarker = null;
         try
         {
         if (!Ready) throw new InvalidOperationException("No verified staged update.");
+        if (startup && !CanInstallAtStartup) throw new InvalidOperationException("Startup installation is no longer eligible.");
+        CheckStartupAdmission();
         ValidateRelease(State.Available ?? throw new InvalidDataException("No release metadata."));
         ValidateStagedPath();
         if (!IsNewer(State.Available.Version, CurrentVersion)) throw new InvalidDataException("The staged release cannot replace this version.");
         await UpdatePackageSecurity.VerifyAsync(State.StagedArchive!, State.StagedHash!, token);
         var runner = Path.Combine(root, "runner-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(runner);
-        var source = Path.Combine(AppContext.BaseDirectory, "updater");
+        var source = InstallerSourceDirectory;
         foreach (var file in Directory.EnumerateFiles(source)) File.Copy(file, Path.Combine(runner, Path.GetFileName(file)));
         using var parent = Process.GetCurrentProcess();
-        var request = new UpdaterRequest(AppContext.BaseDirectory, State.StagedArchive!, State.StagedHash!, parent.Id, parent.StartTime.ToUniversalTime().Ticks, restart);
+        var request = new UpdaterRequest(AppContext.BaseDirectory, State.StagedArchive!, State.StagedHash!, parent.Id, parent.StartTime.ToUniversalTime().Ticks, restart,
+            startup ? Guid.NewGuid().ToString("N") : null);
         var requestFile = Path.Combine(runner, "request.json");
+        if (startup) startupCommitMarker = StartupUpdateAdmission.MarkerPath(requestFile);
         await File.WriteAllTextAsync(requestFile, JsonSerializer.Serialize(request), token);
+        CheckStartupAdmission();
         State.LastInstallerRequest = requestFile; State.InstallationFailed = false; State.InstallOnExit = false;
+        if (startup)
+        {
+            State.LastStartupAttemptVersion = State.Available.Version;
+            State.LastStartupAttemptAt = DateTimeOffset.UtcNow;
+            State.LastStartupResultKey = "Updates.StartupInstalling";
+        }
         await SaveAsync(token);
         var start = new ProcessStartInfo(Path.Combine(runner, "ModernTubeDownloader.Updater.exe")) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = runner };
         start.ArgumentList.Add("--request"); start.ArgumentList.Add(requestFile);
-        using var updater = Process.Start(start) ?? throw new IOException("The external updater process could not be started.");
+        updater = InstallerProcessFactory(start) ?? throw new IOException("The external updater process could not be started.");
         State.LastInstallerProcessId = updater.Id; State.LastInstallerStartUtcTicks = updater.StartTime.ToUniversalTime().Ticks;
-        try { await SaveAsync(CancellationToken.None); }
-        catch
+        await SaveAsync(CancellationToken.None);
+        CheckStartupAdmission();
+        if (startup && updater.HasExited) throw new IOException("The startup updater exited before shutdown admission.");
+        if (startupCommitMarker is not null)
         {
-            // This owned child is still waiting for this live parent. If its identity
-            // cannot be persisted, stop it before allowing the application to exit.
-            if (!updater.HasExited) { updater.Kill(); await updater.WaitForExitAsync(); }
-            throw;
+            // This newly created marker is bound to this request's unique token.
+            // A crash before this point leaves an inert child, even if it later
+            // observes this parent exiting. No await opens a guard/commit gap.
+            using var marker = new FileStream(startupCommitMarker, FileMode.CreateNew, FileAccess.Write, FileShare.Read,
+                4096, FileOptions.WriteThrough);
+            marker.Write(System.Text.Encoding.UTF8.GetBytes(request.StartupCommitToken!));
+            marker.Flush(flushToDisk: true);
         }
+        // No await separates the final guard from shutdown admission. MainForm
+        // passes a synchronous UI callback, so external activation cannot slip
+        // between this guard and the point at which shutdown becomes authoritative.
+        commitShutdown?.Invoke();
+        committed = true;
         logger.Info("The verified external updater is waiting for graceful application exit.");
         }
-        catch
+        catch (Exception error)
         {
+            if (committed) throw;
+            // Only this operation's directly retained child can be stopped. It is
+            // still waiting for this live parent and has not begun installation.
+            // Termination and marker revocation must be independent: a locked
+            // marker must never prevent stopping the owned waiting process.
+            var childStopped = updater is null;
+            if (updater is not null)
+            {
+                try
+                {
+                    if (!updater.HasExited) { InstallerProcessStopper(updater); await updater.WaitForExitAsync(); }
+                    childStopped = updater.HasExited;
+                }
+                catch (Exception stopError) { logger.Error("Stopping the owned waiting updater failed.", stopError); }
+            }
+            var markerRevoked = false;
+            if (startupCommitMarker is not null)
+            {
+                try { File.Delete(startupCommitMarker); markerRevoked = true; }
+                catch (Exception markerError) { logger.Error("Revoking this startup handoff commitment failed.", markerError); }
+            }
+            if (startup && !childStopped && !markerRevoked)
+            {
+                // Preserve the exact pending identity. Ordinary shutdown must not
+                // release an armed child after a cancelled handoff. The block may
+                // clear only after this child's exit can be verified.
+                startupAbortBlocked = true;
+                State.InstallOnExit = false; State.InstallationFailed = false;
+                State.LastStartupResultKey = "Updates.StartupAbortBlocked";
+                try { await SaveAsync(CancellationToken.None); }
+                catch (Exception persistenceError) { logger.Error("The unresolved updater identity could not be saved again.", persistenceError); }
+                Publish("Updates.StartupAbortBlocked");
+                throw new IOException("The pending startup updater could neither be stopped nor disarmed; normal exit is blocked.", error);
+            }
             State.InstallOnExit = false; State.InstallationFailed = true; State.LastInstallerRequest = null;
+            State.LastInstallerProcessId = null; State.LastInstallerStartUtcTicks = null;
+            if (startup) State.LastStartupResultKey = error is OperationCanceledException ? "Updates.StartupDeferred" : "Updates.StartupFailed";
             await SaveAsync(CancellationToken.None); Publish("Updates.InstallFailed"); throw;
         }
-        finally { gate.Release(); }
+        finally { updater?.Dispose(); gate.Release(); }
+
+        void CheckStartupAdmission()
+        {
+            if (!startup) return;
+            token.ThrowIfCancellationRequested();
+            if (!settings.Current.Updates.AutomaticChecks || !settings.Current.Updates.InstallAtStartup || IsDeferred ||
+                State.AutomaticInstallSuppressedVersion == State.Available?.Version || workStillAllowsInstallation?.Invoke() == false)
+                throw new OperationCanceledException("Startup installation was interrupted before shutdown admission.", token);
+        }
     }
 
     private void EnsureStateWritable()

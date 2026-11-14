@@ -150,6 +150,7 @@ public sealed class DownloadQueueService
         Guid? lastAdded = null;
         lock (sync)
         {
+            var existingIds = items.Select(item => item.Id).ToHashSet();
             var activeKeys = items
                 .Where(item => item.Status is not (DownloadStatus.Completed or DownloadStatus.Failed or DownloadStatus.Cancelled or DownloadStatus.Partial))
                 .Select(item => (item.VideoId, Quality: (item.QualityPresetId ?? string.Empty).ToUpperInvariant(), item.PreferredVideoContainer,
@@ -158,6 +159,10 @@ public sealed class DownloadQueueService
             foreach (var item in candidates)
             {
                 ArgumentNullException.ThrowIfNull(item);
+                // A persisted Batch entry reuses its own queue identity. Its terminal
+                // job also counts here, so a crash between admission and link journal
+                // cannot submit the same operation twice after restart.
+                if (!existingIds.Add(item.Id)) { duplicates++; continue; }
                 var key = (item.VideoId, Quality: (item.QualityPresetId ?? string.Empty).ToUpperInvariant(), item.PreferredVideoContainer,
                     Range: item.RequestedRange ?? MediaTimeRange.Full, Enhancements: EnhancementKey(item.SubtitleOptions, item.SponsorBlockOptions));
                 if (!activeKeys.Add(key)) { duplicates++; continue; }
@@ -327,6 +332,38 @@ public sealed class DownloadQueueService
     }
 
     public Task SaveAsync(CancellationToken cancellationToken = default) => SaveCheckpointAsync(true, cancellationToken);
+
+    /// <summary>Updates completed media references without replacing queue identities or statuses.</summary>
+    public async Task RelocateCompletedPathsAsync(IReadOnlyDictionary<string, string> replacements, CancellationToken token = default)
+    {
+        await checkpointGate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            var lookup = new Dictionary<string, string>(replacements, StringComparer.OrdinalIgnoreCase);
+            DownloadQueueItem[] snapshot; long writingRevision;
+            lock (sync)
+            {
+                if (items.Any(item => item.FinalFile is { } file && lookup.ContainsKey(file) && item.Status != DownloadStatus.Completed))
+                    throw new IOException("Organizer.Error.Active");
+                snapshot = items.Select(item => item.PersistenceCopy()).ToArray();
+                foreach (var item in snapshot)
+                    if (item.FinalFile is { } file && lookup.TryGetValue(file, out var destination)) item.FinalFile = destination;
+                writingRevision = revision;
+            }
+            try { await persistence.SaveAsync(snapshot, token).ConfigureAwait(false); }
+            catch (Exception error) { ReportPersistenceFailure(error); throw; }
+            lock (sync)
+            {
+                foreach (var item in items)
+                    if (item.Status == DownloadStatus.Completed && item.FinalFile is { } file && lookup.TryGetValue(file, out var destination)) item.FinalFile = destination;
+                revision++;
+                // Concurrent queue changes were not in this snapshot; keep them dirty.
+                if (writingRevision + 1 == revision) savedRevision = revision;
+            }
+        }
+        finally { checkpointGate.Release(); }
+        Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Collection));
+    }
 
     private async Task SaveCheckpointAsync(bool retryDegraded, CancellationToken cancellationToken = default)
     {

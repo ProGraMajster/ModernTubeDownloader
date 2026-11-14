@@ -18,8 +18,7 @@ function applyLanguage(){
   $("connection").textContent=t($("dashboard").hidden?"offline":"online");
   $("pauseButton").textContent=t(paused?"resume":"pause");
   $("language").value=i18n.preference;
-  $("language").options[0].textContent=language==="pl"?"🔄 Z aplikacji":"🔄 Follow app";
-  $("language").options[3].textContent=language==="pl"?"🌐 Język przeglądarki":"🌐 Browser language";
+  for(const option of $("language").options){if(option.value==="app")option.textContent=t("followApp");if(option.value==="browser")option.textContent=t("browserLanguage")}
   $("message").textContent=messageKey?t(messageKey):"";
   updateRangePreview();updateCountdown();
 }
@@ -146,5 +145,15 @@ async function poll(){
   }catch{showLogin();message("connectionFailed")}
   finally{polling=false}
 }
-async function bootstrap(){await poll();if(!timer)timer=setInterval(poll,2000)}
+async function bootstrap(){
+  try{
+    const response=await fetch("/locales.json",{credentials:"same-origin"});
+    if(response.ok&&i18n.installCatalog(await response.json())){
+      const choices=[{code:"app",nativeName:t("followApp")},...i18n.locales,{code:"browser",nativeName:t("browserLanguage")}];
+      $("language").replaceChildren(...choices.map(locale=>{const option=document.createElement("option");option.value=locale.code;option.textContent=locale.nativeName;return option}));
+      language=i18n.language;applyLanguage();
+    }
+  }catch{/* Static EN/PL fallback remains usable if the resource request fails. */}
+  await poll();if(!timer)timer=setInterval(poll,2000)
+}
 updateRangeMode();applyLanguage();setInterval(updateCountdown,1000);bootstrap();
