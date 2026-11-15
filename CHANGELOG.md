@@ -44,6 +44,9 @@
 - Failed onboarding/update/language saves do not publish uncommitted state; shutdown
   drains remaining process owners even when a service checkpoint fails.
 - Settings retain usable category/card geometry after Classic/Modern reattachment.
+- Downloads retain the open drawer, option drafts and widget geometry after a theme
+  transaction reattaches the shell at the same size. Read-only Audio/Folder fields
+  refresh their text cache when switching between dark and light themes.
 - Small JSON store reads and atomic publication share the existing I/O gate,
   avoiding overlapping open-file replacement by the Batch completion observer on Windows.
 - Empty queues and Batch lists still awaiting analysis/admission no longer present a

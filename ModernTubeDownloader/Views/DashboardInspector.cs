@@ -28,7 +28,7 @@ internal sealed partial class DashboardInspector : AppScrollPanel
     private readonly Button subtitleEditor = new DashboardButton { AccessibleAutomationId = "InspectorSubtitles" };
     private readonly Button folderOpen = new DashboardButton { AccessibleAutomationId = "InspectorOpenFolder" };
     private readonly Label subtitleLabel = AppUi.Muted(), audioLabel = AppUi.Muted(), folderLabel = AppUi.Muted();
-    private readonly TextBox audioValue = new() { ReadOnly = true, AccessibleAutomationId = "InspectorAudio" }, folderValue = new() { ReadOnly = true, AccessibleAutomationId = "InspectorFolder" };
+    private readonly TextBox audioValue = new AppThemeTextBox { ReadOnly = true, AccessibleAutomationId = "InspectorAudio" }, folderValue = new AppThemeTextBox { ReadOnly = true, AccessibleAutomationId = "InspectorFolder" };
     private readonly Label qualityLabel = AppUi.Muted(), containerLabel = AppUi.Muted();
     private readonly ComboBox quality = new() { AccessibleAutomationId = "InspectorQuality" }, container = new() { AccessibleAutomationId = "InspectorContainer" };
     private readonly MediaRangeEditor range;

@@ -33,6 +33,7 @@ param(
     [switch]$DashboardSmoke,
     [ValidateSet('Live', 'History', 'Batch', 'Other', 'Settings')][string]$DashboardScreenSmoke,
     [switch]$BatchAnalysisVisualSmoke,
+    [switch]$BatchComboBoxRefreshSmoke,
     [switch]$DashboardScreenRoundTrip,
     [switch]$DashboardLayoutSmoke,
     [switch]$DashboardTransferSmoke,
@@ -99,6 +100,7 @@ if ($UpdateStatesSmoke) {
     $UpdateSmoke = $true; $CaptureVisual = $true; $InterfaceMode = 'ModernDashboard'
 }
 if ($DashboardScreenSmoke) { $DashboardPopulatedFixture = $true; $DashboardFixtureCount = 5; $CaptureVisual = $true }
+if ($BatchComboBoxRefreshSmoke) { $BatchAnalysisVisualSmoke = $true }
 if ($BatchAnalysisVisualSmoke -and $DashboardScreenSmoke -ne 'Batch') { throw 'BatchAnalysisVisualSmoke requires DashboardScreenSmoke Batch.' }
 if ($DashboardScreenRoundTrip -and -not $DashboardScreenSmoke) { throw 'DashboardScreenRoundTrip requires DashboardScreenSmoke.' }
 if ($PlaylistTransferSmoke -or $PlaylistGroupsSmoke -or $PlaylistShellSwitchCycles -gt 0) { $PlaylistVisualSmoke = $true }
@@ -140,6 +142,11 @@ if ($RealSourcesSmoke) {
     }
 }
 if ($LiveReplayNavigationSmoke) { $LiveSmoke = $true; $SampleUrl = 'https://example.test/live/replay' }
+if ($LiveSmoke -and -not $RealLiveSmoke -and $SampleUrl -eq 'https://example.test/watch/sample123') {
+    # A LIVE smoke must not accidentally analyze the default VOD fixture. The
+    # controlled wait variant is released by the production Stop & Save action.
+    $SampleUrl = if ($CaptureVisual) { 'https://example.test/live/active?behavior=wait' } else { 'https://example.test/live/active' }
+}
 if ($PlaylistSmoke -and $SampleUrl -eq 'https://example.test/watch/sample123') {
     $SampleUrl = 'https://example.test/playlist/synthetic'
 }
@@ -969,6 +976,9 @@ try {
     if ($DashboardScreenSmoke -eq 'Batch') {
         $batchMetadataGate = Join-Path $dataRoot 'qa-metadata-gate'
         New-Item -ItemType Directory -Path $batchMetadataGate | Out-Null
+        # Other seeded workflows (including LIVE) also invoke metadata. They must
+        # not consume this gate or become the witness for the Batch operation.
+        [System.IO.File]::WriteAllText((Join-Path $batchMetadataGate 'request-prefix.txt'), 'https://example.test/watch/visual')
         $env:MTD_QA_FAKE_METADATA_GATE = $batchMetadataGate
         $env:MTD_FAKE_METADATA_DELAY_MS = $null
     }
@@ -1297,12 +1307,15 @@ try {
                 Wait-Node 'BatchPause' $mainRoot 'Enabled' | Out-Null
                 $metadataReadyWait = [System.Diagnostics.Stopwatch]::StartNew()
                 do {
-                    $metadataReady = @(Get-ChildItem -LiteralPath $batchMetadataGate -Filter '*.ready.json' -File)
+                    $metadataReady = @(Get-ChildItem -LiteralPath $batchMetadataGate -Filter '*.ready.json' -File | ForEach-Object {
+                        $marker = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
+                        if ($marker.sourceUrl -eq 'https://example.test/watch/visual1') { $marker }
+                    })
                     if ($metadataReady.Count -gt 0) { break }
                     if ($metadataReadyWait.Elapsed.TotalSeconds -ge 30) { throw 'The owned fake metadata process never reached its QA gate.' }
                     Start-Sleep -Milliseconds 25
                 } while ($true)
-                $heldMetadata = Get-Content -LiteralPath $metadataReady[0].FullName -Raw | ConvertFrom-Json
+                $heldMetadata = $metadataReady[0]
                 $analysisCapture = if ($BatchAnalysisVisualSmoke) { 'batch-import-analyzing' } else { 'batch-import-analysis-transition' }
                 Capture-Dashboard $analysisCapture
                 if ($BatchAnalysisVisualSmoke) {
@@ -1319,9 +1332,75 @@ try {
                         throw 'The observed QA metadata process did not remain held through the capture.'
                     }
                 } finally { $heldMetadataProcess.Dispose() }
+                if ($BatchComboBoxRefreshSmoke) {
+                    function Read-BatchPopupWitness([string]$stage) {
+                        $node = Find-Node 'BatchFilter' $mainRoot
+                        $detail = (Invoke-AutomationCli -CliArguments @('inspect','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,
+                            '--session',$node.handle.sessionId,'--node',$node.handle.runtimeId)).value
+                        $popupWidth = 0; $popupHeight = 0
+                        $popup = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id,$script:automationMainWindow,[ref]$popupWidth,[ref]$popupHeight)
+                        $focus = [MtdAutomationWindowCloser]::NativeFocusSnapshot($script:automationMainWindow)
+                        @{ utc=[DateTime]::UtcNow.ToString('O'); stage=$stage; node=$detail; popup=$popup.ToInt64(); width=$popupWidth; height=$popupHeight;
+                            foreground=$focus[0]; active=$focus[1]; focus=$focus[2] } | ConvertTo-Json -Depth 12 -Compress |
+                            Add-Content -LiteralPath (Join-Path $dataRoot 'batch-popup-refresh.jsonl') -Encoding utf8
+                        return @{ node=$detail; popup=$popup; width=$popupWidth; height=$popupHeight }
+                    }
+                    Invoke-NodeAction (Find-Node 'BatchFilter' $mainRoot) $mainRoot 'Expand' | Out-Null
+                    $batchPopupBefore = Read-BatchPopupWitness 'held-analysis-expanded'
+                    if ($batchPopupBefore.node.states -notmatch '\bExpanded\b' -or $batchPopupBefore.popup -eq [IntPtr]::Zero -or
+                        -not $batchPopupBefore.node.handle.runtimeId -or -not $batchPopupBefore.node.handle.sessionId -or
+                        [string]::IsNullOrWhiteSpace($batchPopupBefore.node.value) -or $batchPopupBefore.width -le 0 -or $batchPopupBefore.height -le 0) {
+                        throw 'Batch filter did not expose an expanded native popup before the real analysis transition.'
+                    }
+                }
                 [System.IO.File]::WriteAllText((Join-Path $batchMetadataGate 'release'), 'captured')
                 Wait-Node 'BatchAnalyze' $mainRoot 'Enabled' | Out-Null
                 Capture-Dashboard 'batch-import-analyzed'
+                if ($BatchComboBoxRefreshSmoke) {
+                    $batchPopupAfter = Read-BatchPopupWitness 'analysis-completed-refreshed'
+                    if ($batchPopupAfter.node.states -notmatch '\bExpanded\b' -or $batchPopupAfter.popup -ne $batchPopupBefore.popup -or
+                        $batchPopupAfter.node.handle.runtimeId -ne $batchPopupBefore.node.handle.runtimeId -or
+                        $batchPopupAfter.node.handle.sessionId -ne $batchPopupBefore.node.handle.sessionId -or $batchPopupAfter.node.value -ne $batchPopupBefore.node.value) {
+                        throw 'Batch analysis refresh closed/replaced the open filter or changed its selection.'
+                    }
+                    # Enabled alone also follows cancellation/error. Independently
+                    # verify durable Ready rows and metadata, without invoking store recovery.
+                    $batchSessions = @(Get-ChildItem -LiteralPath (Join-Path $dataRoot 'Batch') -Filter 'session.json' -Recurse -File)
+                    if ($batchSessions.Count -ne 1) { throw 'Expected exactly one analyzed Batch session.' }
+                    $batchFolder = $batchSessions[0].DirectoryName
+                    $batchRowsById = @{}
+                    foreach ($line in Get-Content -LiteralPath (Join-Path $batchFolder 'entries.jsonl')) {
+                        $entry = $line | ConvertFrom-Json
+                        if ($batchRowsById.ContainsKey($entry.id)) { throw 'Duplicate persisted Batch identity.' }
+                        $batchRowsById[$entry.id] = $entry
+                    }
+                    foreach ($line in Get-Content -LiteralPath (Join-Path $batchFolder 'updates.jsonl')) {
+                        $entry = $line | ConvertFrom-Json
+                        $previous = $batchRowsById[$entry.id]
+                        if (-not $previous -or $entry.ordinal -ne $previous.ordinal -or $entry.revision -lt $previous.revision) { throw 'Invalid Batch journal identity/revision.' }
+                        $batchRowsById[$entry.id] = $entry
+                    }
+                    $batchAnalyzedRows = @($batchRowsById.Values | Sort-Object ordinal)
+                    if ($batchAnalyzedRows.Count -ne 12 -or (($batchAnalyzedRows.ordinal -join ',') -ne ((1..12) -join ','))) { throw 'Batch analysis changed the imported row set.' }
+                    foreach ($entry in $batchAnalyzedRows | Select-Object -First 10) {
+                        if ($entry.status -ne 3 -or -not $entry.hasMetadata -or $entry.removed -or $entry.errorKey) { throw "Batch row $($entry.ordinal) did not finish Ready with metadata." }
+                        $metadata = Get-Content -LiteralPath (Join-Path $batchFolder (([Guid]$entry.id).ToString('N') + '.json')) -Raw | ConvertFrom-Json
+                        if ([string]::IsNullOrWhiteSpace($metadata.title) -or @($metadata.formats).Count -eq 0) { throw 'Batch Ready row lacks real metadata formats/title.' }
+                    }
+                    if ($batchAnalyzedRows[10].status -ne 4 -or $batchAnalyzedRows[11].status -ne 10) { throw 'Batch duplicate/invalid rows changed unexpectedly.' }
+                    $batchAnalyzedRows | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'batch-popup-durable-result.json') -Encoding utf8
+                    $popupImage = [Drawing.Bitmap]::new($batchPopupAfter.width,$batchPopupAfter.height)
+                    $popupDrawing = [Drawing.Graphics]::FromImage($popupImage)
+                    try {
+                        $dc = $popupDrawing.GetHdc()
+                        try { if (-not [MtdAutomationWindowCloser]::CaptureOwnPopup($script:automationProcess.Id,$batchPopupAfter.popup,$dc)) { throw 'Batch popup capture failed.' } }
+                        finally { $popupDrawing.ReleaseHdc($dc) }
+                        $popupImage.Save((Join-Path $dataRoot 'batch-filter-open-after-refresh.png'))
+                    } finally { $popupDrawing.Dispose(); $popupImage.Dispose() }
+                    Invoke-NodeAction (Find-Node 'BatchFilter' $mainRoot) $mainRoot 'Collapse' | Out-Null
+                    if ((Read-BatchPopupWitness 'explicit-collapse').node.states -notmatch '\bCollapsed\b') { throw 'Batch filter did not collapse explicitly.' }
+                    Write-Output 'Batch native popup refresh PASS: same expanded filter, selection and HWND across real gated analysis completion; explicit Collapse.'
+                }
                 # Exercise the saved import through the same recent-operation UI used
                 # by users, without seeding decorative activity or adding downloads.
                 $savedBatch = @(Get-ChildItem -LiteralPath (Join-Path $dataRoot 'Batch') -Filter 'session.json' -Recurse -File)
@@ -2683,8 +2762,10 @@ try {
                 $items = @(Read-LiveState $store)
                 if ($CaptureVisual -and $activeLive -and -not $RealLiveSmoke -and -not $capturedFakeRecording -and $items.Count -eq 1 -and $items[0].state -eq 3) {
                     if ($heldFakeLive) {
-                        # Let the existing one-second presentation timers observe the controlled session.
-                        Start-Sleep -Milliseconds 1500
+                        # Observe the real presentation event instead of waiting
+                        # a guessed number of one-second timer ticks.
+                        $recordingAction = 'LiveStopSaveButton-' + ([Guid]$items[0].sessionId).ToString('N')
+                        Wait-Node $recordingAction $mainRoot 'Enabled' | Out-Null
                         $beforeCapture = @(Read-LiveState $store)
                         if ($beforeCapture.Count -ne 1 -or $beforeCapture[0].state -ne 3) { throw 'Held LIVE left Recording before capture.' }
                     }

@@ -299,6 +299,7 @@ internal sealed partial class DownloadsView : UserControl
 
         Controls.AddRange([header, urlPanel, previewPanel, playlistPreview, queueToolbar, storageWarning, queueArea]);
         SizeChanged += ViewSizeChanged;
+        VisibleChanged += ViewVisibleChanged;
         text.LanguageChanged += LanguageChanged;
         services.Queue.Changed += QueueChanged;
         services.Settings.Changed += SettingsChanged;
@@ -1362,6 +1363,10 @@ internal sealed partial class DownloadsView : UserControl
             : value ?? text["Common.NotAvailable"];
 
     private void ViewSizeChanged(object? sender, EventArgs e) => UpdateLayout();
+    private void ViewVisibleChanged(object? sender, EventArgs e)
+    {
+        if (!disposed && dashboard && Visible) UpdateLayout();
+    }
     private void QueueHostSizeChanged(object? sender, EventArgs e) => ResizeCards();
     private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(ApplyLocalization);
 
@@ -1378,6 +1383,7 @@ internal sealed partial class DownloadsView : UserControl
             playlistPreview.AddRequested -= PlaylistAddRequested;
             playlistPreview.AdvancedOptionsRequested -= AdvancedClicked;
             SizeChanged -= ViewSizeChanged;
+            VisibleChanged -= ViewVisibleChanged;
             queueHost.SizeChanged -= QueueHostSizeChanged;
             pasteToolTip.Dispose();
             admissionCountdownTimer.Dispose();

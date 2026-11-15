@@ -3,6 +3,8 @@ using ModernFormsNext.Accessibility;
 using ModernFormsNext.Testing;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Services;
+using ModernTubeDownloader.Settings;
+using ModernTubeDownloader.Shell;
 using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Views;
 using Path = System.IO.Path;
@@ -12,6 +14,216 @@ namespace ModernTubeDownloader.Tests;
 [Collection("ModernFormsNext TestHost")]
 public sealed class DownloadsDashboardPresentationTests
 {
+    [Theory]
+    [InlineData(AppThemeMode.Dark, AppThemeMode.Light, 100)]
+    [InlineData(AppThemeMode.Light, AppThemeMode.Dark, 100)]
+    [InlineData(AppThemeMode.Dark, AppThemeMode.Light, 200)]
+    [InlineData(AppThemeMode.Light, AppThemeMode.Dark, 200)]
+    public async Task RetainedReadonlyInspectorFieldsRenderLikeFreshFieldsAfterThemeChange(AppThemeMode initial, AppThemeMode target, int scale)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-readonly-inspector-theme-" + Guid.NewGuid().ToString("N"));
+        AppServices? services = null;
+        Task? write = null;
+        try
+        {
+            services = await CreateServicesAsync(directory);
+            services.Appearance.Profile.InterfaceMode = AppInterfaceMode.ModernDashboard;
+            services.Appearance.Profile.Global.Theme = (AppearanceTheme)(int)initial;
+            services.Appearance.Profile.Global.Animations = false;
+            services.Appearance.Profile.Typography.AppTextScale = scale;
+            services.Settings.Current.ThemeMode = initial;
+            var item = new ModernTubeDownloader.Models.DownloadQueueItem
+            {
+                Title = "Theme test — Łódź", SourceUrl = "https://example.test/watch/readonly-fields",
+                SelectedFormats = new ModernTubeDownloader.Models.FormatSelection("18", null, "mp4", null, false, false),
+                RawMetadataJson = """{"id":"readonly","duration":120,"formats":[{"format_id":"18","ext":"mp4","height":720,"vcodec":"h264","acodec":"mp4a.40.2","url":"https://example.test/file"}]}"""
+            };
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize();
+                var root = new Panel(); AppUi.Surface(root);
+                AppTypography.SetDashboardPresentation(root, true);
+                var window = host.Show(root, 1400, 960);
+                // Exercise the production inspector/editor constructors after the
+                // window exists, matching late-created dashboard theme bindings.
+                var inspector = CreateInspector();
+                var audio = Find<TextBox>(inspector, "InspectorAudio");
+                var folder = Find<TextBox>(inspector, "InspectorFolder");
+                var audioText = audio.Text; var folderText = folder.Text;
+                Assert.Equal("mp4a.40.2", audioText);
+                Assert.False(string.IsNullOrWhiteSpace(folderText));
+                Assert.True(audio.ReadOnly && folder.ReadOnly && audio.Enabled && folder.Enabled);
+                var textChanges = 0;
+                audio.TextChanged += (_, _) => textChanges++;
+                folder.TextChanged += (_, _) => textChanges++;
+                using var before = window.CaptureRenderedSnapshot();
+                write = services.Appearance.SetModeAsync(target);
+                host.ProcessPendingWork();
+                using var retained = window.CaptureRenderedSnapshot();
+                Assert.Equal(audioText, audio.Text); Assert.Equal(folderText, folder.Text);
+                Assert.Equal(0, textChanges);
+                Assert.True(audio.ReadOnly && folder.ReadOnly && audio.Enabled && folder.Enabled);
+                Assert.False(before.CopyPixels().SequenceEqual(retained.CopyPixels()), "The target palette must change the rendered inspector.");
+                root.Controls.Remove(inspector); inspector.Dispose();
+                var freshInspector = CreateInspector();
+                Assert.Equal(audioText, Find<TextBox>(freshInspector, "InspectorAudio").Text);
+                Assert.Equal(folderText, Find<TextBox>(freshInspector, "InspectorFolder").Text);
+                using var fresh = window.CaptureRenderedSnapshot();
+                Assert.True(retained.CopyPixels().SequenceEqual(fresh.CopyPixels()),
+                    "The retained inspector, including read-only glyphs, must render exactly like a fresh inspector in the target theme.");
+                host.Dispatcher.ThrowUnhandledExceptions();
+
+                DashboardInspector CreateInspector()
+                {
+                    var value = new DashboardInspector(services);
+                    root.Controls.Add(value); AppTypography.SetDashboardPresentation(value, true);
+                    value.SetBounds(10, 10, 1380, 940); value.ShowQueue(item);
+                    host.ProcessPendingWork(); return value;
+                }
+            }
+            if (write is not null) await write;
+        }
+        finally
+        {
+            if (write is not null) await write;
+            if (services is not null) { await services.ShutdownAsync(); services.Dispose(); }
+            AppTypography.SetScale(100); AppearancePresentation.Current = new();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Theory]
+    [InlineData(100, 1100)]
+    [InlineData(200, 1536)]
+    public async Task ThemeTransactionRetainsOpenDrawerDraftAndWidgetsWithoutResize(int scale, int width)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "mtd-downloads-theme-drawer-" + Guid.NewGuid().ToString("N"));
+        AppServices? services = null;
+        try
+        {
+            services = await CreateServicesAsync(directory);
+            services.Appearance.Profile.InterfaceMode = AppInterfaceMode.ModernDashboard;
+            services.Appearance.Profile.Global.Animations = false;
+            services.Appearance.Profile.Global.Theme = AppearanceTheme.Dark;
+            services.Settings.Current.ThemeMode = AppThemeMode.Dark;
+            services.Appearance.Profile.Typography.AppTextScale = scale;
+            services.Appearance.Profile.ModernDashboardShell.Inspector = DashboardInspectorMode.Auto;
+            services.Appearance.Profile.ModernDashboardShell.Widgets = DashboardWidgetsMode.All;
+            var item = new ModernTubeDownloader.Models.DownloadQueueItem
+            {
+                Title = "Retained drawer draft", SourceUrl = "https://example.test/watch/theme-drawer",
+                RawMetadataJson = """{"id":"drawer","duration":120,"formats":[{"format_id":"18","ext":"mp4","height":720,"vcodec":"h264","acodec":"aac","url":"https://example.test/file"}]}"""
+            };
+            services.Queue.Add(item);
+            using (var host = ModernFormsTestHost.Create())
+            using (var form = new MainForm(services, backgroundActivation: true))
+            {
+                Ui(() => host.Show(form, width, 1024));
+                var view = Assert.Single(form.Controls.SelectMany(control => new[] { control }.Concat(Descendants(control))).OfType<DownloadsView>());
+                Ui(() =>
+                {
+                    form.Navigate(AppPageId.Downloads);
+                    view.RevealQueueItem(item.Id);
+                    var toggle = Find<Button>(view, "DashboardToggleInspector");
+                    Assert.True(toggle.Visible && toggle.Width > 0,
+                        $"Drawer fixture must expose its toggle: page={view.ClientSize}, viewport={view.DisplayRectangle}, scale={scale}.");
+                    toggle.PerformClick();
+                });
+                var inspector = Find<DashboardInspector>(view, "DashboardInspector");
+                var widgets = Find<Control>(view, "DashboardWidgets");
+                var quality = Find<ComboBox>(inspector, "InspectorQuality");
+                var container = Find<ComboBox>(inspector, "InspectorContainer");
+                Ui(() =>
+                {
+                    quality.SelectedIndex = 4; container.SelectedIndex = 2;
+                    Find<Button>(inspector, "InspectorOptions").PerformClick();
+                    Find<ComboBox>(inspector, "InspectorRangeMode").SelectedIndex = 1;
+                    Find<TextBox>(inspector, "InspectorRangeStart").Text = "00:00:02";
+                    Find<TextBox>(inspector, "InspectorRangeEnd").Text = "00:00:10";
+                });
+                var pageSize = view.ClientSize;
+                var processor = services.Processor;
+                var darkInput = quality.Style.GetBackgroundColor();
+                var darkCanvas = AppUi.GetColor(DownloadsVisual.Background);
+                AssertRetainedPresentation();
+
+                foreach (var target in new[] { AppThemeMode.Light, AppThemeMode.Dark })
+                {
+                    Task? change = null;
+                    Ui(() => change = services.Appearance.SetModeAsync(target));
+                    // Match the existing shell lifecycle tests: pump the owning UI
+                    // while persistence completes; the poll is not a layout delay.
+                    var deadline = DateTime.UtcNow.AddSeconds(5);
+                    while (!change!.IsCompleted && DateTime.UtcNow < deadline)
+                    { host.ProcessPendingWork(); Thread.Sleep(5); }
+                    Assert.True(change!.IsCompleted, "The isolated theme transaction did not complete.");
+                    await change; host.ProcessPendingWork();
+                    // No resize, inspector toggle, selection refresh or synthetic layout:
+                    // the real presentation transaction must restore the retained page.
+                    AssertRetainedPresentation();
+                    if (target == AppThemeMode.Light)
+                    {
+                        Assert.NotEqual(darkInput, quality.Style.GetBackgroundColor());
+                        Assert.NotEqual(darkCanvas, AppUi.GetColor(DownloadsVisual.Background));
+                    }
+                    else
+                    {
+                        Assert.Equal(darkInput, quality.Style.GetBackgroundColor());
+                        Assert.Equal(darkCanvas, AppUi.GetColor(DownloadsVisual.Background));
+                    }
+                }
+
+                Ui(() => form.Navigate(AppPageId.Other));
+                Ui(() => form.Navigate(AppPageId.Downloads));
+                AssertRetainedPresentation();
+                host.Dispatcher.ThrowUnhandledExceptions();
+
+                void AssertRetainedPresentation()
+                {
+                    Assert.Equal(pageSize, view.ClientSize);
+                    Assert.Same(processor, services.Processor);
+                    Assert.Equal(item.Id, view.SelectedItemId);
+                    Assert.Same(inspector, Find<DashboardInspector>(view, "DashboardInspector"));
+                    Assert.Same(quality, Find<ComboBox>(inspector, "InspectorQuality"));
+                    Assert.True(inspector.Visible && inspector.Width > 0 && inspector.Height > 0,
+                        $"The open drawer lost its bounds: {inspector.Bounds}.");
+                    Assert.True(inspector.Top >= Find<Control>(view, "DashboardQueuePanel").Bottom,
+                        "This case must exercise the narrow drawer rather than the inline inspector.");
+                    Assert.True(widgets.Visible && widgets.Width > 0 && widgets.Height > 0);
+                    Assert.True(widgets.Top >= inspector.Bottom);
+                    Assert.Contains(widgets.Controls, control => control.Visible);
+                    Assert.All(widgets.Controls.Where(control => control.Visible), control =>
+                        Assert.True(control.Width > 0 && control.Height > 0, $"Widget lost its bounds: {control.Bounds}."));
+                    foreach (var field in new Control[] { quality, container })
+                    {
+                        Assert.True(field.Visible && field.Width > 0 && field.Height > 0);
+                        var fieldPosition = field.PointToScreen(System.Drawing.Point.Empty);
+                        var inspectorPosition = inspector.PointToScreen(System.Drawing.Point.Empty);
+                        Assert.InRange(fieldPosition.X - inspectorPosition.X, 0, inspector.ClientSize.Width - field.Width);
+                    }
+                    Assert.False(Assert.IsType<AccessibleScrollInfo>(inspector.AccessibilityObject.ScrollInfo).Horizontal.IsScrollable);
+                    Assert.Equal(4, quality.SelectedIndex); Assert.Equal(2, container.SelectedIndex);
+                    Assert.Equal(1, Find<ComboBox>(inspector, "InspectorRangeMode").SelectedIndex);
+                    Assert.Equal("00:00:02", Find<TextBox>(inspector, "InspectorRangeStart").Text);
+                    Assert.Equal("00:00:10", Find<TextBox>(inspector, "InspectorRangeEnd").Text);
+                    Assert.Equal("best", item.QualityPresetId); // Appearance must not commit a draft.
+                    Assert.Same(item, services.Queue.Find(item.Id));
+                }
+                void Ui(Action action)
+                { host.Dispatcher.Post(action); host.ProcessPendingWork(); host.Dispatcher.ThrowUnhandledExceptions(); }
+            }
+        }
+        finally
+        {
+            if (services is not null) { await services.ShutdownAsync(); services.Dispose(); }
+            AppTypography.SetScale(100); AppearancePresentation.Current = new();
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    private static IEnumerable<Control> Descendants(Control parent)
+    { foreach (var child in parent.Controls) { yield return child; foreach (var nested in Descendants(child)) yield return nested; } }
+
     [Theory]
     [InlineData(100)] [InlineData(150)] [InlineData(200)]
     public async Task EmptyInspectorReflowsWhenItsHiddenPageIsFirstShown(int scale)

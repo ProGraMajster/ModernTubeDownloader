@@ -103,27 +103,48 @@ if (arguments.Contains("--dump-single-json"))
     if (int.TryParse(Environment.GetEnvironmentVariable("MTD_FAKE_METADATA_DELAY_MS"), out var metadataDelay) && metadataDelay > 0)
         await Task.Delay(Math.Min(metadataDelay, 10000));
     // Explicit opt-in for native QA: the harness owns this unique directory and
-    // releases metadata only after observing/capturing the real analysis state.
+    // releases only the requested metadata after observing/capturing its real
+    // analysis state. Unrelated LIVE probes must not publish the ready witness.
     // Production cancellation still terminates this tool through its process owner.
     if (Environment.GetEnvironmentVariable("MTD_QA_FAKE_METADATA_GATE") is { Length: > 0 } metadataGate)
     {
         if (!Path.IsPathFullyQualified(metadataGate) || !Directory.Exists(metadataGate))
         { Console.Error.WriteLine("ERROR: Invalid owned QA metadata gate."); return 75; }
-        using var self = Process.GetCurrentProcess();
-        var marker = Path.Combine(metadataGate, self.Id + ".ready.json");
-        await File.WriteAllTextAsync(marker + ".tmp", new JsonObject
+        string requestPrefix;
+        try
         {
-            ["processId"] = self.Id,
-            ["startUtcTicks"] = self.StartTime.ToUniversalTime().Ticks
-        }.ToJsonString());
-        File.Move(marker + ".tmp", marker);
-        var waiting = Stopwatch.StartNew();
-        var release = Path.Combine(metadataGate, "release");
-        while (!File.Exists(release))
+            await using var scope = File.OpenRead(Path.Combine(metadataGate, "request-prefix.txt"));
+            var bytes = new byte[4097];
+            var count = await scope.ReadAtLeastAsync(bytes, bytes.Length, throwOnEndOfStream: false);
+            if (count is 0 or > 4096) throw new InvalidDataException("Invalid QA scope length.");
+            requestPrefix = new UTF8Encoding(false, true).GetString(bytes, 0, count).Trim('\uFEFF', ' ', '\r', '\n', '\t');
+            if (requestPrefix.Length == 0 || requestPrefix.Any(char.IsWhiteSpace) ||
+                !Uri.TryCreate(requestPrefix, UriKind.Absolute, out var prefixUri) ||
+                prefixUri.Scheme is not ("http" or "https") || string.IsNullOrEmpty(prefixUri.Host) ||
+                prefixUri.UserInfo.Length != 0 || prefixUri.Fragment.Length != 0)
+                throw new InvalidDataException("Invalid QA request prefix.");
+        }
+        catch (Exception failure) when (failure is IOException or InvalidDataException or UnauthorizedAccessException or DecoderFallbackException)
+        { Console.Error.WriteLine("ERROR: Missing or invalid owned QA metadata request prefix."); return 75; }
+        if (checkUrl.StartsWith(requestPrefix, StringComparison.Ordinal))
         {
-            if (waiting.Elapsed >= TimeSpan.FromSeconds(30))
-            { Console.Error.WriteLine("ERROR: Owned QA metadata gate was not released within 30 seconds."); return 75; }
-            await Task.Delay(25);
+            using var self = Process.GetCurrentProcess();
+            var marker = Path.Combine(metadataGate, self.Id + ".ready.json");
+            await File.WriteAllTextAsync(marker + ".tmp", new JsonObject
+            {
+                ["processId"] = self.Id,
+                ["startUtcTicks"] = self.StartTime.ToUniversalTime().Ticks,
+                ["sourceUrl"] = checkUrl
+            }.ToJsonString());
+            File.Move(marker + ".tmp", marker);
+            var waiting = Stopwatch.StartNew();
+            var release = Path.Combine(metadataGate, "release");
+            while (!File.Exists(release))
+            {
+                if (waiting.Elapsed >= TimeSpan.FromSeconds(30))
+                { Console.Error.WriteLine("ERROR: Owned QA metadata gate was not released within 30 seconds."); return 75; }
+                await Task.Delay(25);
+            }
         }
     }
     var sourceUrl = ValueAfter(arguments, "--") ?? arguments.LastOrDefault() ?? string.Empty;

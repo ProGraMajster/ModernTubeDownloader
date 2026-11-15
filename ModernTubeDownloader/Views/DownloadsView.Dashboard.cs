@@ -192,7 +192,10 @@ internal sealed partial class DownloadsView
     }
     private void LayoutDashboard()
     {
-        if (arrangingDashboard) return;
+        // Appearance transactions detach the shared shell while preparing it. A
+        // child's effective Visible is false off-tree, so defer visibility-based
+        // layout until the same page is reattached, even if its size is unchanged.
+        if (arrangingDashboard || !Visible) return;
         arrangingDashboard = true;
         try
         {
@@ -356,8 +359,9 @@ internal sealed partial class DownloadsView
         var listTop = queueToolbar.Bottom + 4;
         if (services.Queue.Storage.State.IsBlocked) { storageWarning.SetBounds(margin + origin.X + 12, listTop, queueWidth - 24, AppTypography.TextHeight(104)); listTop = storageWarning.Bottom + gap; }
         else storageWarning.SetBounds(0, 0, 0, 0);
-        dashboardWidgets!.Visible = p.Widgets != DashboardWidgetsMode.Hidden;
-        dashboardWidgets.Width = width; var widgetsHeight = dashboardWidgets.Visible ? dashboardWidgets.Height : 0;
+        var showWidgets = p.Widgets != DashboardWidgetsMode.Hidden;
+        dashboardWidgets!.Visible = showWidgets;
+        dashboardWidgets.Width = width; var widgetsHeight = showWidgets ? dashboardWidgets.Height : 0;
         var queueHeight = Math.Max(AppTypography.TextHeight(250), ClientSize.Height - (top - origin.Y) - Math.Min(widgetsHeight, 160) - 24);
         dashboardQueue.SetBounds(margin + origin.X, top, queueWidth, queueHeight);
         var pagingHeight = hasPages ? AppTypography.TextHeight(36) : 0;
@@ -365,12 +369,13 @@ internal sealed partial class DownloadsView
         dashboardPrevious.SetBounds(queueWidth - 162, queueHeight - pagingHeight, 30, AppTypography.TextHeight(28));
         dashboardPaging.SetBounds(dashboardPrevious.Right + 10, dashboardPrevious.Top + 1, 56, dashboardPrevious.Height);
         dashboardNext.SetBounds(queueWidth - 52, dashboardPrevious.Top, 30, dashboardPrevious.Height);
-        dashboardInspector!.Visible = inline || p.Inspector != DashboardInspectorMode.Hidden && (dashboardDrawer || p.Inspector == DashboardInspectorMode.Always);
+        var showInspector = inline || p.Inspector != DashboardInspectorMode.Hidden && (dashboardDrawer || p.Inspector == DashboardInspectorMode.Always);
+        dashboardInspector!.Visible = showInspector;
         if (inline) dashboardInspector.SetBounds(dashboardQueue.Right + gap, top, inspectorWidth, queueHeight);
-        else if (dashboardInspector.Visible) dashboardInspector.SetBounds(margin + origin.X, dashboardQueue.Bottom + gap, width, AppTypography.TextHeight(470));
+        else if (showInspector) dashboardInspector.SetBounds(margin + origin.X, dashboardQueue.Bottom + gap, width, AppTypography.TextHeight(470));
         else dashboardInspector.SetBounds(0, 0, 0, 0);
-        if (dashboardWidgets.Visible)
-            dashboardWidgets.SetBounds(margin + origin.X, (!inline && dashboardInspector.Visible ? dashboardInspector.Bottom : dashboardQueue.Bottom) + gap, width, widgetsHeight);
+        if (showWidgets)
+            dashboardWidgets.SetBounds(margin + origin.X, (!inline && showInspector ? dashboardInspector.Bottom : dashboardQueue.Bottom) + gap, width, widgetsHeight);
         else dashboardWidgets.SetBounds(0, 0, 0, 0);
         var emptyCenter = Math.Max(70, queueArea.Height / 2);
         queueEmptyIcon.SetBounds((queueArea.Width - 42) / 2, emptyCenter - 72, 42, 42);

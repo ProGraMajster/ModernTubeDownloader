@@ -20,7 +20,8 @@ in Settings → Personalization. Use `--classic-ui` for session-only recovery.
 This branch does not publish or promote the preceding hotfix.
 
 Candidate scope and evidence are tracked in the [functional matrix](docs/1.3.0-FUNCTIONAL-COMPLETENESS.md),
-[scenario matrix](docs/1.3.0-SCENARIO-MATRIX.md) and [release readiness report](docs/1.3.0-RELEASE-READINESS.md).
+[scenario matrix](docs/1.3.0-SCENARIO-MATRIX.md), [release readiness report](docs/1.3.0-RELEASE-READINESS.md)
+and [test-design and timing audit](docs/1.3.0-TEST-DESIGN-AUDIT.md).
 Synthetic process tests, native desktop checks and unqualified physical/source scenarios
 are reported separately; this is not a release announcement.
 
