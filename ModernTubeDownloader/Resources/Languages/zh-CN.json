@@ -1,4 +1,5 @@
 {
+  "Batch.Error.FileSelection": "请选择 1 至 32 个现有的 TXT、JSON 或 CSV 文件。未导入任何文件。",
   "History.PageSummary": "{1}的第{0}页 成果:{2} / {3}",
   "Appearance.TextTitle": "个性化 • 文本大小",
   "Appearance.TextHint": "逻辑文本大小,独立于Windows DPI.小的90%, 默认的100%, 大的125%, 额外的150%; 自定义的80–200 % 。图标保持自己的尺寸.",

@@ -1,4 +1,5 @@
 {
+  "Batch.Error.FileSelection": "Válasszon ki 1–32 létező TXT-, JSON- vagy CSV-fájlt. Egyetlen fájl sem lett importálva.",
   "History.PageSummary": "Oldal {0} of {1} • Eredmények: {2} / {3}",
   "Appearance.TextTitle": "Személyre szabás • Szöveg mérete",
   "Appearance.TextHint": "Logikus szövegméret, a Windows dPI-től függetlenül. Kicsi 90%, Alapértelmezés 100%, Nagy 125%, Extra nagy 150%; Egyéni 80- 200%. Az Ikonoknak megvan a saját méretük.",

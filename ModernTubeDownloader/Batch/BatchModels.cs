@@ -47,6 +47,10 @@ public sealed class BatchImportSession
     public bool AutomaticRequested { get; set; }
     public BatchWorkflowPhase WorkflowPhase { get; set; }
     [JsonIgnore] internal object Sync { get; } = new();
+    [JsonIgnore] internal SemaphoreSlim ReconciliationGate { get; } = new(1, 1);
+    [JsonIgnore] internal SemaphoreSlim MetadataWriteGate { get; } = new(1, 1);
+    [JsonIgnore] internal bool PendingPhaseCommit { get; set; }
+    internal BatchImportSession MetadataSnapshot() { lock (Sync) return (BatchImportSession)MemberwiseClone(); }
     [JsonIgnore] internal List<BatchImportEntry> Entries { get; } = [];
     [JsonIgnore] internal Dictionary<Guid, BatchImportEntry> ById { get; } = [];
     public IReadOnlyList<BatchImportEntry> Snapshot() { lock (Sync) return Entries.Where(entry => !entry.Removed).Select(entry => entry.Copy()).ToArray(); }

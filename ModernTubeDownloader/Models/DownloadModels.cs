@@ -148,8 +148,9 @@ public enum QueueChangeKind
     Pause
 }
 
-public sealed class QueueChangedEventArgs(QueueChangeKind kind, Guid? itemId = null) : EventArgs
+public sealed class QueueChangedEventArgs(QueueChangeKind kind, Guid? itemId = null, DownloadStatus? status = null) : EventArgs
 {
     public QueueChangeKind Kind { get; } = kind;
     public Guid? ItemId { get; } = itemId;
+    public DownloadStatus? Status { get; } = status;
 }

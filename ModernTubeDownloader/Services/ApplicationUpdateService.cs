@@ -28,6 +28,8 @@ public sealed class ApplicationUpdateState
     public string? LastStartupAttemptVersion { get; set; }
     public DateTimeOffset? LastStartupAttemptAt { get; set; }
     public string? LastStartupResultKey { get; set; }
+
+    internal ApplicationUpdateState Copy() => (ApplicationUpdateState)MemberwiseClone();
 }
 
 public interface IApplicationReleaseSource { Task<ApplicationRelease?> GetLatestAsync(CancellationToken token); }
@@ -310,11 +312,15 @@ public sealed partial class ApplicationUpdateService : IDisposable
             Publish("Updates.Checking");
             var latest = await releases.GetLatestAsync(token);
             var available = latest is not null && IsNewer(latest.Version, CurrentVersion) ? latest : null;
-            if (State.Available?.Version != available?.Version || available is null)
-            { ClearStaging(); State.InstallationFailed = false; }
-            State.Available = available;
-            State.LastCheck = DateTimeOffset.UtcNow;
-            await SaveAsync(token);
+            var next = State.Copy();
+            if (next.Available?.Version != available?.Version || available is null)
+            { next.StagedArchive = null; next.StagedHash = null; next.InstallOnExit = false; next.InstallationFailed = false; }
+            next.Available = available;
+            next.LastCheck = DateTimeOffset.UtcNow;
+            // A failed or canceled durable write is not a successful check. Keep
+            // the previous release/staging and retry eligibility until commit.
+            await SaveAsync(next, token);
+            State = next;
             Publish(State.InstallationFailed ? "Updates.InstallFailed" : Ready ? "Updates.Ready" : State.Available is null ? "Updates.Current" : "Updates.Available");
         }
         catch (OperationCanceledException error) when (!callerToken.IsCancellationRequested && !lifetime.IsCancellationRequested)
@@ -595,9 +601,11 @@ public sealed partial class ApplicationUpdateService : IDisposable
         if (StateUnavailable) throw new InvalidDataException("Stored update state is unavailable; the original state must be repaired before this operation.");
     }
     private Task SaveAsync(CancellationToken token)
+        => SaveAsync(State, token);
+    private Task SaveAsync(ApplicationUpdateState state, CancellationToken token)
     {
         EnsureStateWritable();
-        return AtomicJsonFile.WriteRawJsonAsync(stateFile, JsonSerializer.Serialize(State, JsonDefaults.Options), token);
+        return AtomicJsonFile.WriteRawJsonAsync(stateFile, JsonSerializer.Serialize(state, JsonDefaults.Options), token);
     }
     private void Publish(string key) { StatusKey = key; Changed?.Invoke(this, EventArgs.Empty); }
     private void Fail(string message, Exception error) { logger.Error(message, error); Publish("Updates.Failed"); }

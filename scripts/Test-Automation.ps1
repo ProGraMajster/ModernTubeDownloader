@@ -14,6 +14,7 @@ param(
     [switch]$LocalePickerSmoke,
     [switch]$HotfixSmoke,
     [switch]$RealBatchSmoke,
+    [switch]$RealVodSmoke,
     [switch]$TextScaleSmoke,
     [switch]$AppearanceSmoke,
     [ValidateSet('New', 'Upgrade', 'Resume', 'News', 'Reopen')][string]$ExperienceSmoke,
@@ -91,6 +92,7 @@ $ErrorActionPreference = 'Stop'
 if ($ExperienceExternalActivation -and $ExperienceSmoke -ne 'Resume') { throw 'ExperienceExternalActivation requires ExperienceSmoke Resume.' }
 if ($ExperienceSmoke -eq 'News') { $InterfaceMode = 'ModernDashboard' }
 if ($OrganizerWorkflowSmoke) { $BatchWorkflowSmoke = $true }
+if ($RealVodSmoke -and $InterfaceMode -ne 'Classic') { throw 'RealVodSmoke currently exercises the Classic analysis/add controls; Modern transfer has its own native lane.' }
 if ($BatchWorkflowSmoke -or $LocalePickerSmoke) { $CaptureVisual = $true }
 if ($UpdateStatesSmoke) {
     if ($ExperienceSmoke) { throw 'UpdateStatesSmoke uses a separate isolated profile from ExperienceSmoke.' }
@@ -114,11 +116,7 @@ if ($DashboardLayoutSmoke) { $DashboardSmoke = $true }
 $previousFakeDownloadDelay = $env:MTD_FAKE_DOWNLOAD_DELAY_MS
 $previousFakeThumbnail = $env:MTD_FAKE_METADATA_THUMBNAIL
 $previousFakeMetadataDelay = $env:MTD_FAKE_METADATA_DELAY_MS
-# Controlled fake-provider latency makes the real asynchronous analysis state observable.
-# It is not an application delay, timeout relaxation, or performance measurement.
-# Every Batch screen lane asserts the active-analysis state. Keep that state observable
-# with bounded latency in the fake provider; an immediate fixture can finish before UIA observes it.
-if ($DashboardScreenSmoke -eq 'Batch') { $env:MTD_FAKE_METADATA_DELAY_MS = '1500' }
+$previousFakeMetadataGate = $env:MTD_QA_FAKE_METADATA_GATE
 if ($DashboardPopulatedFixture) { $env:MTD_FAKE_METADATA_THUMBNAIL = 'https://example.test/dashboard/fixture-0.png' }
 if ($DashboardTransferSmoke) { $DashboardSmoke = $true; $env:MTD_FAKE_DOWNLOAD_DELAY_MS = '10000' }
 if ($DashboardSmoke) { $InterfaceMode = 'ModernDashboard' }
@@ -165,6 +163,21 @@ function Invoke-AutomationCli {
     $start.RedirectStandardInput = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
+    # The pinned CLI uses Console.In, whose Windows OEM default corrupts CJK.
+    # Apply a QA-only managed UTF-8 pipe adapter to this owned child. Do not
+    # change the shared console code page or the application's environment.
+    $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
+    $start.StandardInputEncoding = $utf8
+    $start.StandardOutputEncoding = $utf8
+    $start.StandardErrorEncoding = $utf8
+    $qaHook = [IO.Path]::GetFullPath((Join-Path $fake 'ModernTubeDownloader.FakeTool.dll'))
+    if (-not (Test-Path -LiteralPath $qaHook -PathType Leaf)) { throw "Missing QA UTF-8 hook: $qaHook" }
+    $inheritedHooks = $start.Environment['DOTNET_STARTUP_HOOKS']
+    if (-not [string]::IsNullOrEmpty($inheritedHooks) -and $inheritedHooks -ne $qaHook) {
+        throw 'Unexpected inherited DOTNET_STARTUP_HOOKS; refusing to replace or combine diagnostic hooks.'
+    }
+    $start.Environment['MTD_QA_AUTOMATION_UTF8'] = '1'
+    $start.Environment['DOTNET_STARTUP_HOOKS'] = $qaHook
     $start.ArgumentList.Add($cli)
     foreach ($argument in $CliArguments) { $start.ArgumentList.Add($argument) }
     $start.ArgumentList.Add('--json')
@@ -837,7 +850,10 @@ if ($WebRemotePairingSmoke) {
     $settings.WebRemoteBindAddress = '127.0.0.1'
     $settings.WebRemotePort = $remotePort
 }
-if ($RealLiveSmoke -or $RealSourcesSmoke -or $RealBatchSmoke) {
+if ($RealLiveSmoke -or $RealSourcesSmoke -or $RealBatchSmoke -or $RealVodSmoke) {
+    foreach ($tool in @($YtDlpPath,$FfmpegPath,$FfprobePath,$DenoPath)) {
+        if (-not $tool -or -not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw 'Real media smoke requires four explicit installed tools.' }
+    }
     $settings.CustomYtDlpPath = $YtDlpPath
     $settings.CustomFfmpegPath = $FfmpegPath
     $settings.CustomFfprobePath = $FfprobePath
@@ -949,6 +965,13 @@ if ($PublishStartupSmoke) {
     }
 }
 try {
+    $batchMetadataGate = $null
+    if ($DashboardScreenSmoke -eq 'Batch') {
+        $batchMetadataGate = Join-Path $dataRoot 'qa-metadata-gate'
+        New-Item -ItemType Directory -Path $batchMetadataGate | Out-Null
+        $env:MTD_QA_FAKE_METADATA_GATE = $batchMetadataGate
+        $env:MTD_FAKE_METADATA_DELAY_MS = $null
+    }
     if ($ExperienceSmoke) { Invoke-ExperienceSmoke; return }
     if ($TraySmoke) {
         $settings.Startup.CloseBehavior = 0
@@ -1126,6 +1149,22 @@ try {
             finally { $graphics.Dispose(); $bitmap.Dispose() }
             $snapshot = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
             $snapshot | ConvertTo-Json -Depth 60 | Set-Content -LiteralPath (Join-Path $dataRoot ($name + '-tree.json')) -Encoding utf8
+            if ($DashboardScreenSmoke -eq 'Settings' -and $name -match '^(after-shell-roundtrip-settings|settings-general)$') {
+                $categoryNodes = @($snapshot.nodes | Where-Object { $_.node.automationId -match '^SettingsCategory(General|Downloads|Live|Notifications|Authentication|Browser|WebRemote|Updates|Startup|Personalization|Advanced)$' })
+                if ($categoryNodes.Count -ne 11 -or @($categoryNodes | Where-Object { $_.node.bounds.width -le 0 -or $_.node.bounds.height -le 0 }).Count -ne 0) {
+                    throw "Settings category geometry is empty after visibility restoration: $name."
+                }
+                $settingsViewport = @($snapshot.nodes | Where-Object { $_.node.automationId -eq 'SettingsScroll' })
+                if ($settingsViewport.Count -ne 1) { throw "Settings viewport absent in $name." }
+                $viewport = $settingsViewport[0].node.bounds
+                $visibleCards = @($snapshot.nodes | Where-Object {
+                    $_.node.parentRuntimeId -eq $settingsViewport[0].node.runtimeId -and
+                    $_.node.bounds.width -gt 0 -and $_.node.bounds.height -gt 0 -and
+                    $_.node.bounds.x -lt ($viewport.x + $viewport.width) -and ($_.node.bounds.x + $_.node.bounds.width) -gt $viewport.x -and
+                    $_.node.bounds.y -lt ($viewport.y + $viewport.height) -and ($_.node.bounds.y + $_.node.bounds.height) -gt $viewport.y
+                })
+                if ($visibleCards.Count -eq 0) { throw "No Settings card occupies the restored viewport in $name." }
+            }
             foreach ($pane in @($snapshot.nodes | Where-Object { $_.node.automationId -eq 'DashboardInspector' })) {
                 if ($pane.node.scrollInfo.horizontal.isScrollable) { throw "Horizontal inspector overflow in $name (including empty state)." }
             }
@@ -1256,6 +1295,14 @@ try {
                 Capture-Dashboard 'batch-import-parsed'
                 Invoke-NodeAction (Find-Node 'BatchAnalyze' $mainRoot) $mainRoot 'Invoke' | Out-Null
                 Wait-Node 'BatchPause' $mainRoot 'Enabled' | Out-Null
+                $metadataReadyWait = [System.Diagnostics.Stopwatch]::StartNew()
+                do {
+                    $metadataReady = @(Get-ChildItem -LiteralPath $batchMetadataGate -Filter '*.ready.json' -File)
+                    if ($metadataReady.Count -gt 0) { break }
+                    if ($metadataReadyWait.Elapsed.TotalSeconds -ge 30) { throw 'The owned fake metadata process never reached its QA gate.' }
+                    Start-Sleep -Milliseconds 25
+                } while ($true)
+                $heldMetadata = Get-Content -LiteralPath $metadataReady[0].FullName -Raw | ConvertFrom-Json
                 $analysisCapture = if ($BatchAnalysisVisualSmoke) { 'batch-import-analyzing' } else { 'batch-import-analysis-transition' }
                 Capture-Dashboard $analysisCapture
                 if ($BatchAnalysisVisualSmoke) {
@@ -1264,6 +1311,15 @@ try {
                     if ($pauseAtCapture.Count -ne 1 -or $pauseAtCapture[0].node.states -match 'Unavailable') { throw 'Analysis finished before the requested in-progress capture; no in-progress evidence was obtained.' }
                     if ((Find-Node 'BatchPause' $mainRoot).states -match 'Unavailable') { throw 'Analysis was no longer active immediately after the HWND capture.' }
                 }
+                # Release only after the screenshot and its active-state assertions.
+                # Failure cleanup cancels the app's owned process instead of faking completion.
+                $heldMetadataProcess = [System.Diagnostics.Process]::GetProcessById($heldMetadata.processId)
+                try {
+                    if ($heldMetadataProcess.HasExited -or $heldMetadataProcess.StartTime.ToUniversalTime().Ticks -ne $heldMetadata.startUtcTicks) {
+                        throw 'The observed QA metadata process did not remain held through the capture.'
+                    }
+                } finally { $heldMetadataProcess.Dispose() }
+                [System.IO.File]::WriteAllText((Join-Path $batchMetadataGate 'release'), 'captured')
                 Wait-Node 'BatchAnalyze' $mainRoot 'Enabled' | Out-Null
                 Capture-Dashboard 'batch-import-analyzed'
                 # Exercise the saved import through the same recent-operation UI used
@@ -1276,6 +1332,9 @@ try {
                 Capture-Dashboard 'other-recent-import'
             }
             elseif ($DashboardScreenSmoke -eq 'Settings') {
+                # The preceding shell roundtrip intentionally retains Personalization.
+                # Its independent capture must pass before selecting this named screen.
+                Invoke-NodeAction (Find-Node 'SettingsCategoryGeneral' $mainRoot) $mainRoot 'Invoke' | Out-Null
                 Capture-Dashboard 'settings-general'
                 Invoke-NodeAction (Find-Node 'SettingsCategoryDownloads' $mainRoot) $mainRoot 'Invoke' | Out-Null
                 Capture-Dashboard 'settings-downloads'
@@ -1285,8 +1344,14 @@ try {
                 Capture-Dashboard 'settings-cookie-consent'
                 Invoke-NodeAction (Find-Node 'CookieSyncRepair' $mainRoot) $mainRoot 'ScrollIntoView' | Out-Null
                 Capture-Dashboard 'settings-cookie-actions'
-                $settingsQuery = if ($Language -eq 'pl') { 'Pliki tymczasowe' } else { 'Temporary files' }
+                $settingsLanguage = (Get-Content -LiteralPath (Join-Path $dataRoot 'settings.json') -Raw | ConvertFrom-Json).Language
+                $settingsLabels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$settingsLanguage.json") -Raw | ConvertFrom-Json
+                $settingsQuery = $settingsLabels.'Settings.TemporaryDirectory'
+                if ([string]::IsNullOrWhiteSpace($settingsQuery)) { throw "Missing Settings.TemporaryDirectory for selected locale $settingsLanguage." }
                 Invoke-NodeAction (Find-Node 'SettingsCategorySearch' $mainRoot) $mainRoot 'SetValue' $settingsQuery | Out-Null
+                # Preserve the actual search field/category state before lookup
+                # so an encoding or filtering regression cannot lose its witness.
+                Capture-Dashboard 'settings-search-entered'
                 Invoke-NodeAction (Find-Node 'SettingsCategoryDownloads' $mainRoot) $mainRoot 'Invoke' | Out-Null
                 Capture-Dashboard 'settings-search-downloads'
             }
@@ -2702,6 +2767,42 @@ try {
     $analyze = Wait-Node 'AnalyzeButton' $mainRoot 'Enabled'
     Invoke-NodeAction $analyze.snapshot $mainRoot 'Invoke' | Out-Null
     if ($InterfaceMode -eq 'ModernDashboard' -and -not $ClassicUiRecovery) { Invoke-OwnedAnalyzeMenu }
+    if ($RealVodSmoke) {
+        Wait-Node 'AddToQueueButton' $mainRoot 'Enabled' | Out-Null
+        Capture-SmokeMain $mainRoot 'real-vod-analyzed'
+        Invoke-NodeAction (Find-Node 'AddToQueueButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        Invoke-NodeAction (Find-Node 'QueuePauseButton' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        $realClock = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            if ($script:automationProcess.HasExited) { throw 'Real VOD app exited before completion.' }
+            try { $realQueue = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json) } catch { $realQueue = @() }
+            if ($realQueue.Count -eq 1 -and $realQueue[0].status -eq 6) { break }
+            if ($realQueue.Count -eq 1 -and $realQueue[0].status -in @(7,8)) { throw ('Real VOD terminal failure: ' + ($realQueue[0] | ConvertTo-Json -Depth 8)) }
+            Start-Sleep -Milliseconds 100
+        } while ($realClock.Elapsed.TotalSeconds -lt 90)
+        if ($realQueue.Count -ne 1 -or $realQueue[0].status -ne 6 -or -not (Test-Path -LiteralPath $realQueue[0].finalFile)) { throw 'Real public VOD did not finish within90s.' }
+        $realFile = $realQueue[0].finalFile
+        $probeOutput = & $FfprobePath -v error -show_entries 'format=duration,size,format_name:stream=codec_type,codec_name' -of json $realFile
+        if ($LASTEXITCODE -ne 0) { throw 'Real ffprobe rejected the downloaded file.' }
+        $probeOutput | Set-Content -LiteralPath (Join-Path $dataRoot 'real-vod-ffprobe.json') -Encoding utf8
+        $realProbe = $probeOutput | ConvertFrom-Json
+        if ([double]$realProbe.format.duration -le 0 -or 'video' -notin $realProbe.streams.codec_type -or 'audio' -notin $realProbe.streams.codec_type) { throw 'Real VOD lacks positive duration/audio/video.' }
+        & $FfmpegPath -v error -i $realFile -t 2 -f null - *> (Join-Path $dataRoot 'real-vod-decode.log')
+        if ($LASTEXITCODE -ne 0) { throw 'Real FFmpeg two-second decode failed.' }
+        $realHistory = @(Get-Content -LiteralPath (Join-Path $dataRoot 'history.json') -Raw | ConvertFrom-Json)
+        if ($realHistory.Count -ne 1 -or $realHistory[0].queueItemId -ne $realQueue[0].id -or $realHistory[0].finalPath -ne $realFile) { throw 'Real VOD History lost canonical identity/path.' }
+        Capture-SmokeMain $mainRoot 'real-vod-completed'
+        Invoke-NodeAction (Find-Node 'NavHistory' $mainRoot) $mainRoot 'Invoke' | Out-Null
+        Wait-Node 'HistorySearch' $mainRoot | Out-Null
+        Capture-SmokeMain $mainRoot 'real-vod-history'
+        @{source=$SampleUrl;file=$realFile;sha256=(Get-FileHash -LiteralPath $realFile).Hash;bytes=(Get-Item -LiteralPath $realFile).Length;
+          duration=$realProbe.format.duration;queueId=$realQueue[0].id;elapsedSeconds=$realClock.Elapsed.TotalSeconds;
+          evidence='Real public source, installed yt-dlp/FFmpeg/ffprobe, native HWND and Debug semantic bridge; two-second decode'} |
+          ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'real-vod-result.json') -Encoding utf8
+        if (-not $script:automationProcess.CloseMainWindow() -or -not $script:automationProcess.WaitForExit(15000) -or $script:automationProcess.ExitCode -ne 0) { throw 'Real VOD app did not close cleanly.' }
+        Write-Output "Real public VOD native smoke PASS: analysis, download, probe, two-second decode, History; profile=$dataRoot"
+        return
+    }
     if ($PlaylistSmoke -and $PreviewOnly) {
         Wait-Node 'PlaylistPreview' $mainRoot | Out-Null
         if ($CaptureVisual) {
@@ -3148,6 +3249,15 @@ try {
     Write-Output "Automation smoke PASS (profile: $dataRoot)"
     }
 }
+catch {
+    if ($RealVodSmoke) {
+        $failure = $_
+        $failure | Format-List * -Force | Out-String | Set-Content -LiteralPath (Join-Path $dataRoot 'real-vod-failure.txt') -Encoding utf8
+        try { if ($mainRoot -and $script:automationProcess -and -not $script:automationProcess.HasExited) { Capture-SmokeMain $mainRoot 'real-vod-failure' } }
+        catch { $_ | Out-String | Add-Content -LiteralPath (Join-Path $dataRoot 'real-vod-failure.txt') }
+    }
+    throw
+}
 finally {
     $env:MTD_FAKE_DOWNLOAD_DELAY_MS = $previousFakeDownloadDelay
     $env:MODERNTUBEDOWNLOADER_QA_ALL_SETTINGS = $previousAllSettings
@@ -3157,6 +3267,7 @@ finally {
     $env:MTD_FAKE_PLAYLIST_VISUAL = $previousPlaylistVisual
     $env:MTD_FAKE_METADATA_THUMBNAIL = $previousFakeThumbnail
     $env:MTD_FAKE_METADATA_DELAY_MS = $previousFakeMetadataDelay
+    $env:MTD_QA_FAKE_METADATA_GATE = $previousFakeMetadataGate
     foreach ($process in @($normalProcess, $script:automationProcess)) {
         if ($null -ne $process -and -not $process.HasExited) {
             if ($UpdateStatesSmoke) {

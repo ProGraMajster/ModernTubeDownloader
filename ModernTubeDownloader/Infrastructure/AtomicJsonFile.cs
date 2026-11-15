@@ -9,11 +9,15 @@ internal static class AtomicJsonFile
 
     public static async Task<T?> ReadAsync<T>(string path, CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(path))
-            return default;
-
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
-        return await JsonSerializer.DeserializeAsync<T>(stream, JsonDefaults.Options, cancellationToken).ConfigureAwait(false);
+        // File.Exists hides access errors and directories behind `false`. Only a
+        // genuinely absent path is a new store; consumers must see I/O failures
+        // so their recovery latches can protect the original profile.
+        FileStream stream;
+        try { stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true); }
+        catch (FileNotFoundException) { return default; }
+        catch (DirectoryNotFoundException) { return default; }
+        await using (stream)
+            return await JsonSerializer.DeserializeAsync<T>(stream, JsonDefaults.Options, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task WriteAsync<T>(string path, T value, CancellationToken cancellationToken = default)

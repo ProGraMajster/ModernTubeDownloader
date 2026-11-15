@@ -275,6 +275,86 @@ public sealed class UserExperienceServiceTests
     }
 
     [Theory]
+    [InlineData("begin")] [InlineData("draft")] [InlineData("skip")] [InlineData("upgrade-skip")]
+    [InlineData("complete")] [InlineData("upgrade-complete")] [InlineData("acknowledge")]
+    public async Task LockedMarkerCannotPublishAnUncommittedJourneyDecision(string operation)
+    {
+        using var fixture = new Fixture(); var service = await fixture.Open();
+        await service.BeginAsync(new SetupDraft { Step = 2, Language = "pl" });
+        var before = await File.ReadAllBytesAsync(fixture.Marker);
+        var beforeState = JsonSerializer.Serialize(service.State, JsonDefaults.Options);
+        Task Change() => operation switch
+        {
+            "begin" => service.BeginAsync(new SetupDraft { Step = 0 }),
+            "draft" => service.SaveDraftAsync(new SetupDraft { Step = 5 }),
+            "skip" => service.SkipAsync(false),
+            "upgrade-skip" => service.SkipAsync(true),
+            "complete" => service.CompleteAsync(false),
+            "upgrade-complete" => service.CompleteAsync(true),
+            _ => service.AcknowledgeWhatsNewAsync()
+        };
+        await using (var held = new FileStream(fixture.Marker, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var failure = await Record.ExceptionAsync(Change);
+            Assert.True(failure is IOException or UnauthorizedAccessException, failure?.ToString() ?? "The locked marker unexpectedly accepted replacement.");
+            Assert.Equal(beforeState, JsonSerializer.Serialize(service.State, JsonDefaults.Options));
+            Assert.Equal(StartupExperience.Welcome, Next(service));
+        }
+        Assert.Equal(before, await File.ReadAllBytesAsync(fixture.Marker));
+        Assert.Equal(beforeState, JsonSerializer.Serialize((await fixture.Open()).State, JsonDefaults.Options));
+        await Change();
+        Assert.Equal(JsonSerializer.Serialize(service.State, JsonDefaults.Options),
+            JsonSerializer.Serialize((await fixture.Open()).State, JsonDefaults.Options));
+    }
+
+    [Fact]
+    public async Task EditingWizardDraftOrReturnedSnapshotCannotMutateCommittedProgress()
+    {
+        using var fixture = new Fixture(); var service = await fixture.Open();
+        var draft = new SetupDraft { Step = 1, Language = "pl" };
+        await service.BeginAsync(draft);
+        draft.Step = 5; draft.Language = "ja";
+        Assert.Equal(1, service.State.Draft!.Step); Assert.Equal("pl", service.State.Draft.Language);
+        var snapshot = service.State;
+        snapshot.Setup = SetupProgress.Completed; snapshot.Draft!.Step = 4;
+        Assert.Equal(SetupProgress.InProgress, service.State.Setup); Assert.Equal(1, service.State.Draft!.Step);
+        await service.SaveDraftAsync(draft); draft.Step = 3;
+        Assert.Equal(5, service.State.Draft!.Step);
+        Assert.Equal(5, (await fixture.Open()).State.Draft!.Step);
+    }
+
+    [Fact]
+    public async Task ConcurrentJourneyCommandsCommitInOrderWithoutResurrectingCompletedDraft()
+    {
+        using var fixture = new Fixture(); var service = await fixture.Open();
+        await service.BeginAsync(new SetupDraft());
+        await Task.WhenAll(service.SaveDraftAsync(new SetupDraft { Step = 5 }),
+            service.CompleteAsync(false), service.AcknowledgeWhatsNewAsync());
+        Assert.Equal(SetupProgress.Completed, service.State.Setup); Assert.Null(service.State.Draft);
+        Assert.Equal(StartupExperience.None, Next(service));
+        Assert.Equal(StartupExperience.None, Next(await fixture.Open()));
+    }
+
+    [Fact]
+    public async Task FailedManualMarkerRecoveryRemainsUnavailableAndRetainsOriginalEvidence()
+    {
+        using var fixture = new Fixture(); const string original = "{interrupted synthetic marker";
+        await File.WriteAllTextAsync(fixture.Marker, original); var service = await fixture.Open();
+        await using (var held = new FileStream(fixture.Marker, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var failure = await Record.ExceptionAsync(() => service.BeginAsync(new SetupDraft { Step = 2 }));
+            Assert.True(failure is IOException or UnauthorizedAccessException, failure?.ToString() ?? "The locked malformed marker unexpectedly accepted replacement.");
+            Assert.False(service.Available); Assert.Equal(StartupExperience.None, Next(service));
+        }
+        Assert.Equal(original, await File.ReadAllTextAsync(fixture.Marker));
+        var preserved = Assert.Single(Directory.EnumerateFiles(fixture.Root, "experience.json.preserved-*"));
+        Assert.Equal(original, await File.ReadAllTextAsync(preserved));
+        await service.BeginAsync(new SetupDraft { Step = 2 });
+        Assert.True(service.Available); Assert.Equal(2, (await fixture.Open()).State.Draft!.Step);
+        Assert.Equal(original, await File.ReadAllTextAsync(preserved));
+    }
+
+    [Theory]
     [InlineData("1.3.0-candidate.1", "1.3.0-candidate.1+different", false)]
     [InlineData("1.3.0-candidate.1", "1.3.0-candidate.2", true)]
     [InlineData("1.3.0-candidate.2", "1.3.0-candidate.1", false)]

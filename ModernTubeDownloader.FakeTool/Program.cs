@@ -3,6 +3,13 @@ using System.Text;
 using System.Text.Json.Nodes;
 
 var arguments = args.ToList();
+if (args is ["--qa-automation-utf8-echo"])
+{
+    if (Environment.GetEnvironmentVariable("MTD_QA_AUTOMATION_UTF8") != "1")
+    { Console.Error.WriteLine("Explicit QA UTF-8 opt-in required."); return 76; }
+    Console.Write(await Console.In.ReadToEndAsync());
+    return 0;
+}
 if (arguments.Contains("--list-extractors"))
 {
     Console.WriteLine("youtube\nyoutube:tab\nyoutube:playlist\ntwitch:stream\ntwitch:vod\nvimeo\nTikTok\ngeneric\nBrokenSite (CURRENTLY BROKEN)");
@@ -95,6 +102,30 @@ if (arguments.Contains("--dump-single-json"))
     }
     if (int.TryParse(Environment.GetEnvironmentVariable("MTD_FAKE_METADATA_DELAY_MS"), out var metadataDelay) && metadataDelay > 0)
         await Task.Delay(Math.Min(metadataDelay, 10000));
+    // Explicit opt-in for native QA: the harness owns this unique directory and
+    // releases metadata only after observing/capturing the real analysis state.
+    // Production cancellation still terminates this tool through its process owner.
+    if (Environment.GetEnvironmentVariable("MTD_QA_FAKE_METADATA_GATE") is { Length: > 0 } metadataGate)
+    {
+        if (!Path.IsPathFullyQualified(metadataGate) || !Directory.Exists(metadataGate))
+        { Console.Error.WriteLine("ERROR: Invalid owned QA metadata gate."); return 75; }
+        using var self = Process.GetCurrentProcess();
+        var marker = Path.Combine(metadataGate, self.Id + ".ready.json");
+        await File.WriteAllTextAsync(marker + ".tmp", new JsonObject
+        {
+            ["processId"] = self.Id,
+            ["startUtcTicks"] = self.StartTime.ToUniversalTime().Ticks
+        }.ToJsonString());
+        File.Move(marker + ".tmp", marker);
+        var waiting = Stopwatch.StartNew();
+        var release = Path.Combine(metadataGate, "release");
+        while (!File.Exists(release))
+        {
+            if (waiting.Elapsed >= TimeSpan.FromSeconds(30))
+            { Console.Error.WriteLine("ERROR: Owned QA metadata gate was not released within 30 seconds."); return 75; }
+            await Task.Delay(25);
+        }
+    }
     var sourceUrl = ValueAfter(arguments, "--") ?? arguments.LastOrDefault() ?? string.Empty;
     if (sourceUrl.Contains("/playlist?", StringComparison.OrdinalIgnoreCase) ||
         sourceUrl.Contains("/playlist/", StringComparison.OrdinalIgnoreCase))

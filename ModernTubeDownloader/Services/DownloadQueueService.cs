@@ -10,6 +10,7 @@ public sealed class DownloadQueueService
     private readonly IQueuePersistence persistence;
     private readonly IAppLogger logger;
     private readonly SettingsService? settings;
+    private readonly Func<bool>? dependencyAvailability;
     private readonly object sync = new();
     private readonly List<DownloadQueueItem> items = [];
     private bool isPaused;
@@ -17,12 +18,15 @@ public sealed class DownloadQueueService
     private readonly SemaphoreSlim recoveryGate = new(1, 1);
     private long revision, savedRevision;
     public QueueStorageSafety Storage { get; }
+    public bool LoadFailed { get; private set; }
+    public bool IsReadOnly => LoadFailed || persistence.LoadFailed || dependencyAvailability?.Invoke() == false;
     public bool HasUnsavedChanges { get { lock (sync) return revision != savedRevision; } }
 
     public DownloadQueueService(IQueuePersistence persistence, IAppLogger logger, SettingsService? settings = null,
-        QueueStorageSafety? storage = null)
+        QueueStorageSafety? storage = null, Func<bool>? dependencyAvailability = null)
     {
         this.persistence = persistence; this.logger = logger; this.settings = settings;
+        this.dependencyAvailability = dependencyAvailability;
         isPaused = settings?.Current.QueuePaused ?? false;
         Storage = storage ?? new();
         Storage.Changed += (_, _) =>
@@ -45,7 +49,7 @@ public sealed class DownloadQueueService
 
     public bool IsPaused
     {
-        get { lock (sync) return isPaused || Storage.State.IsBlocked; }
+        get { lock (sync) return IsReadOnly || isPaused || Storage.State.IsBlocked; }
     }
 
     public IReadOnlyList<DownloadQueueItem> Snapshot()
@@ -92,16 +96,33 @@ public sealed class DownloadQueueService
 
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        var loaded = await persistence.LoadAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<DownloadQueueItem> loaded;
+        try { loaded = await persistence.LoadAsync(cancellationToken).ConfigureAwait(false); }
+        catch (Exception error)
+        {
+            LoadFailed = true;
+            ReportPersistenceFailure(error);
+            throw;
+        }
+        if (persistence.LoadFailed)
+        {
+            LoadFailed = true;
+            ReportPersistenceFailure(new IOException("Saved queue could not be loaded; original data is retained."));
+            return;
+        }
+        if (!IsReadOnly && loaded.Any(item => item.LiveSession is not null))
+        {
+            LoadFailed = true;
+            ReportPersistenceFailure(new IOException("Legacy LIVE migration is incomplete; original queue is retained until both stores can be recovered."));
+            return;
+        }
         lock (sync)
         {
             items.Clear();
             foreach (var item in loaded)
             {
-                if (item.LiveSession is not null)
-                    throw new InvalidOperationException("Migrate legacy LIVE persistence before loading the VOD queue.");
-                if (IsActive(item.Status) ||
-                    (item.Status == DownloadStatus.Interrupted && settings?.Current.AutoResumeAfterRestart == true))
+                if (!IsReadOnly && (IsActive(item.Status) ||
+                    (item.Status == DownloadStatus.Interrupted && settings?.Current.AutoResumeAfterRestart == true)))
                 {
                     item.Status = settings?.Current.AutoResumeAfterRestart == true
                         ? DownloadStatus.Queued : DownloadStatus.Interrupted;
@@ -126,6 +147,7 @@ public sealed class DownloadQueueService
 
     public void Add(DownloadQueueItem item)
     {
+        ThrowIfLoadFailed();
         ArgumentNullException.ThrowIfNull(item);
         EnsureVod(item);
         DownloadOptionCompatibilityValidator.EnsureSupported(item.RequestedRange, item.SubtitleOptions,
@@ -138,6 +160,7 @@ public sealed class DownloadQueueService
 
     public QueueBatchAddResult AddRangeSkippingDuplicates(IReadOnlyList<DownloadQueueItem> candidates)
     {
+        ThrowIfLoadFailed();
         ArgumentNullException.ThrowIfNull(candidates);
         foreach (var candidate in candidates)
         {
@@ -183,6 +206,7 @@ public sealed class DownloadQueueService
 
     public bool Remove(Guid id)
     {
+        if (IsReadOnly) return false;
         bool removed;
         lock (sync)
         {
@@ -201,6 +225,7 @@ public sealed class DownloadQueueService
 
     public int RemoveAllPending()
     {
+        if (IsReadOnly) return 0;
         int count;
         lock (sync) { count = items.RemoveAll(item => item.Status is DownloadStatus.Queued or DownloadStatus.Waiting); if (count > 0) revision++; }
         if (count > 0)
@@ -213,6 +238,7 @@ public sealed class DownloadQueueService
 
     public bool Move(Guid id, int targetIndex)
     {
+        if (IsReadOnly) return false;
         lock (sync)
         {
             var index = items.FindIndex(item => item.Id == id);
@@ -243,6 +269,7 @@ public sealed class DownloadQueueService
 
     public bool Retry(Guid id)
     {
+        if (IsReadOnly) return false;
         lock (sync)
         {
             var item = items.FirstOrDefault(candidate => candidate.Id == id);
@@ -271,7 +298,7 @@ public sealed class DownloadQueueService
             revision++;
         }
 
-        Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Item, id));
+        Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Item, id, DownloadStatus.Queued));
         _ = SaveSafelyAsync();
         return true;
     }
@@ -279,6 +306,7 @@ public sealed class DownloadQueueService
 
     public void SetPaused(bool paused)
     {
+        if (IsReadOnly) return;
         if (!paused && Storage.State.IsBlocked) { _ = ResumeAsync(); return; }
         lock (sync)
         {
@@ -300,7 +328,7 @@ public sealed class DownloadQueueService
         DownloadQueueItem? item;
         lock (sync)
         {
-            if (isPaused || Storage.State.IsBlocked)
+            if (IsReadOnly || isPaused || Storage.State.IsBlocked)
                 return null;
             item = items.FirstOrDefault(candidate => candidate.Status == DownloadStatus.Queued);
             if (item is not null)
@@ -313,20 +341,22 @@ public sealed class DownloadQueueService
             }
         }
         if (item is not null)
-            Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Item, item.Id));
+            Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Item, item.Id, DownloadStatus.Waiting));
         return item;
     }
 
     internal void Update(Guid id, Action<DownloadQueueItem> update, bool persist = false)
     {
+        DownloadStatus status;
         lock (sync)
         {
             var item = items.FirstOrDefault(candidate => candidate.Id == id)
                 ?? throw new InvalidOperationException("The queue item no longer exists.");
             update(item);
+            status = item.Status;
             if (persist) revision++;
         }
-        Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Item, id));
+        Changed?.Invoke(this, new QueueChangedEventArgs(QueueChangeKind.Item, id, status));
         if (persist)
             _ = SaveSafelyAsync();
     }
@@ -336,6 +366,7 @@ public sealed class DownloadQueueService
     /// <summary>Updates completed media references without replacing queue identities or statuses.</summary>
     public async Task RelocateCompletedPathsAsync(IReadOnlyDictionary<string, string> replacements, CancellationToken token = default)
     {
+        ThrowIfLoadFailed();
         await checkpointGate.WaitAsync(token).ConfigureAwait(false);
         try
         {
@@ -367,9 +398,11 @@ public sealed class DownloadQueueService
 
     private async Task SaveCheckpointAsync(bool retryDegraded, CancellationToken cancellationToken = default)
     {
+        ThrowIfLoadFailed();
         await checkpointGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ThrowIfLoadFailed();
             if (!retryDegraded && Storage.State.PersistenceDegraded) return;
             lock (sync) { if (!retryDegraded && savedRevision == revision) return; }
             try
@@ -388,6 +421,9 @@ public sealed class DownloadQueueService
     /// <summary>Explicit recovery only: probe, durable runtime checkpoint, then reopen admission.</summary>
     public async Task<bool> ResumeAsync(CancellationToken token = default)
     {
+        // A write probe cannot recover data that was never read. Recovery requires
+        // repairing/restoring the original file and reopening the profile.
+        if (IsReadOnly) return false;
         await recoveryGate.WaitAsync(token).ConfigureAwait(false);
         var resumed = false;
         try
@@ -418,7 +454,7 @@ public sealed class DownloadQueueService
                 }
                 lock (sync)
                 {
-                    if (revision != savedRevision || Storage.State.FailureVersion != failureVersion) return false;
+                    if (IsReadOnly || revision != savedRevision || Storage.State.FailureVersion != failureVersion) return false;
                     if (!Storage.Recover(failureVersion)) return false;
                     isPaused = false;
                 }
@@ -472,7 +508,7 @@ public sealed class DownloadQueueService
     {
         // No per-progress/per-job retry storm on a known failing disk. Resume is
         // the bounded explicit retry boundary; dirty runtime state remains owned.
-        if (Storage.State.PersistenceDegraded) return;
+        if (IsReadOnly || Storage.State.PersistenceDegraded) return;
         try { await SaveCheckpointAsync(false).ConfigureAwait(false); }
         catch (Exception) { /* SaveAsync recorded and latched the actual failure. */ }
     }
@@ -486,6 +522,12 @@ public sealed class DownloadQueueService
     private static bool IsActive(DownloadStatus status) => status is
         DownloadStatus.Waiting or DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or
         DownloadStatus.Merging or DownloadStatus.Finalizing;
+
+    private void ThrowIfLoadFailed()
+    {
+        if (IsReadOnly)
+            throw new IOException("Queue or its canonical dependencies could not be loaded; preserve original files and restart after recovery.");
+    }
 
     private static void EnsureVod(DownloadQueueItem item)
     {

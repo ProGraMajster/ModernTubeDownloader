@@ -34,15 +34,21 @@ internal sealed class WindowsFileDrop : IDisposable
         if (message != DropFiles) return DefSubclassProc(hwnd, message, wParam, lParam);
         try
         {
-            // Never allocate an unbounded list of shell paths. The importer accepts exactly one file.
+            // Decode the complete bounded selection, or reject it without importing a prefix.
             var drop = (nint)wParam;
             if (!enabled) return 0;
-            if (DragQueryFile(drop, uint.MaxValue, null, 0) != 1) { receive([]); return 0; }
-            var length = DragQueryFile(drop, 0, null, 0);
-            if (length is 0 or > 32767) { receive([]); return 0; }
-            var path = new StringBuilder((int)length + 1);
-            if (DragQueryFile(drop, 0, path, (uint)path.Capacity) != length) { receive([]); return 0; }
-            receive([path.ToString()]);
+            var count = DragQueryFile(drop, uint.MaxValue, null, 0);
+            if (count is < 1 or > Batch.BatchFileSelection.MaximumFiles) { receive([]); return 0; }
+            var files = new string[count];
+            for (uint index = 0; index < count; index++)
+            {
+                var length = DragQueryFile(drop, index, null, 0);
+                if (length is 0 or > 32767) { receive([]); return 0; }
+                var path = new StringBuilder((int)length + 1);
+                if (DragQueryFile(drop, index, path, (uint)path.Capacity) != length) { receive([]); return 0; }
+                files[index] = path.ToString();
+            }
+            receive(files);
         }
         catch (Exception error) { logger.Error("Native file drop failed.", error); }
         finally { DragFinish((nint)wParam); }

@@ -771,9 +771,18 @@ public sealed partial class MainForm : Form
 #endif
         try
         {
-            await SuspendExperienceAsync();
+            var experienceSuspended = false;
+            try
+            {
+                await SuspendExperienceAsync();
+                experienceSuspended = true;
+            }
+            catch (Exception error)
+            {
+                services.Logger.Error("Suspending the startup journey failed; services will still be stopped and exit installation is blocked.", error);
+            }
             await services.ShutdownAsync();
-            if (!startupInstallerLaunched && services.Updates.Ready && (updateInstallRequested || services.Updates.ShouldInstallOnExit))
+            if (experienceSuspended && !startupInstallerLaunched && services.Updates.Ready && (updateInstallRequested || services.Updates.ShouldInstallOnExit))
             {
                 try { await services.Updates.LaunchInstallerAsync(restart: updateInstallRequested, startup: startupInstallRequested); }
                 catch (Exception error) { services.Logger.Error("The staged updater could not be started; the installation was left unchanged.", error); }

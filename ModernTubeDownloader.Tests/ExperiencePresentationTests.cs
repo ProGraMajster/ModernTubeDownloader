@@ -16,6 +16,120 @@ namespace ModernTubeDownloader.Tests;
 public sealed class ExperiencePresentationTests
 {
     [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task SettingsLanguageWriteFailureIsContainedAndCanBeRetriedWithoutLosingPreferences(bool modern)
+    {
+        using var fixture = new Fixture(); using var services = await fixture.Services(AppThemeMode.Dark);
+        using (var host = ModernFormsTestHost.Create())
+        {
+            services.Appearance.Initialize();
+            using var view = new SettingsView(services); AppTypography.SetDashboardPresentation(view, modern); view.SetDashboard(modern);
+            host.Show(view, 1320, 1000); host.ProcessPendingWork();
+            var selector = Find<LocalePickerButton>(view, "LanguageSelector");
+            var feedback = Find<Label>(view, "SettingsFeedback");
+            var original = File.ReadAllBytes(services.Paths.SettingsFile);
+            var output = services.Settings.Current.FinalOutputDirectory;
+            using (var held = new FileStream(services.Paths.SettingsFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Ui(host, () => selector.SelectLanguage("en", true));
+                Pump(host, () => selector.Enabled && feedback.Text == services.Localization["Error.Generic"]);
+                host.Dispatcher.ThrowUnhandledExceptions();
+                Assert.Equal("pl", selector.SelectedLanguage); Assert.Equal("pl", services.Localization.Language);
+                Assert.Equal("pl", services.Settings.Current.Language); Assert.Equal(output, services.Settings.Current.FinalOutputDirectory);
+            }
+            Assert.Equal(original, File.ReadAllBytes(services.Paths.SettingsFile));
+            Ui(host, () => selector.SelectLanguage("en", true));
+            Pump(host, () => selector.Enabled && services.Localization.Language == "en");
+            Assert.Equal(services.Localization["Settings.Saved"], feedback.Text);
+            var restored = new SettingsService(services.Paths, new NullAppLogger()); var reload = restored.LoadAsync();
+            Pump(host, () => reload.IsCompleted); await reload;
+            Assert.Equal("en", restored.Current.Language); Assert.Equal(output, restored.Current.FinalOutputDirectory);
+        }
+        await services.ShutdownAsync();
+    }
+
+    [Fact]
+    public async Task OtherRecentMetadataRelocalizesInPlaceWithoutReopeningOrReplacingActions()
+    {
+        using var fixture = new Fixture(); using var services = await fixture.Services(AppThemeMode.Dark);
+        var session = await services.Batch.ImportTextAsync("https://example.invalid/synthetic-video");
+        using (var host = ModernFormsTestHost.Create())
+        {
+            services.Appearance.Initialize();
+            using var view = new OtherView(services); view.RegisterTool("Batch", () => { });
+            AppTypography.SetDashboardPresentation(view, true); view.SetDashboard(true); host.Show(view, 1320, 1000);
+            var refresh = view.RefreshToolsAsync(); Pump(host, () => refresh.IsCompleted); await refresh;
+            var recent = Find<Button>(view, "BatchRecent" + session.Id.ToString("N"));
+            var title = recent.Parent!.Controls.OfType<Label>().First();
+            Assert.Equal(services.Localization["Other.RecentTools"], title.Text);
+            Ui(host, () => services.Localization.SetLanguage("en"));
+            Assert.Same(recent, Find<Button>(view, "BatchRecent" + session.Id.ToString("N")));
+            Assert.Equal(services.Localization["Other.RecentTools"], title.Text);
+            Assert.Contains(session.CreatedAt.ToLocalTime().ToString("g", services.Localization.Culture), recent.AccessibleName);
+            Assert.Empty(services.Queue.Snapshot());
+        }
+        await services.ShutdownAsync();
+    }
+
+    [Theory]
+    [InlineData(true)] [InlineData(false)]
+    public async Task FailedWizardNavigationKeepsTheVisibleAndDurableStepUntilRetry(bool forward)
+    {
+        using var fixture = new Fixture(); using var services = await fixture.Services(AppThemeMode.Dark);
+        var draft = SetupDraft.From(services, true); draft.Step = 1;
+        await services.Experience.BeginAsync(draft);
+        using (var host = ModernFormsTestHost.Create())
+        {
+            services.Appearance.Initialize();
+            using var wizard = new SetupWizardForm(services, false, draft);
+            var window = host.Show(wizard, 1040, 820); host.ProcessPendingWork();
+            var root = Root(wizard); var button = forward ? "SetupNext" : "SetupBack";
+            var heading = Find<Label>(root, "SetupHeading").Text;
+            using (var held = new FileStream(Path.Combine(fixture.Root, "experience.json"), FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Click(host, root, button);
+                Pump(host, () => Find<Button>(root, button).Enabled && Find<Label>(root, "SetupError").Text.Length > 0);
+                Assert.Equal(1, draft.Step); Assert.Equal(1, services.Experience.State.Draft!.Step);
+                Assert.Equal(heading, Find<Label>(root, "SetupHeading").Text);
+                Assert.Equal(2, Find<ProgressBar>(root, "SetupStepProgress").Value);
+            }
+            Click(host, root, button);
+            var expected = forward ? 2 : 0;
+            Pump(host, () => draft.Step == expected && Find<Button>(root, "SetupNext").Enabled);
+            AssertNoSetupError(root, fixture.Root);
+            Assert.Equal(expected, services.Experience.State.Draft!.Step);
+            Assert.Equal(expected + 1, Find<ProgressBar>(root, "SetupStepProgress").Value);
+            Ui(host, wizard.Close); Pump(host, () => window.IsClosed);
+        }
+        await services.ShutdownAsync();
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task FailedAutosaveDoesNotPoisonSkipOrUpgradeCompletionAfterStorageRecovers(bool upgrade)
+    {
+        using var fixture = new Fixture(); using var services = await fixture.Services(AppThemeMode.Dark);
+        var draft = SetupDraft.From(services, true); await services.Experience.BeginAsync(draft);
+        using (var host = ModernFormsTestHost.Create())
+        {
+            services.Appearance.Initialize();
+            using var wizard = new SetupWizardForm(services, upgrade, draft);
+            var window = host.Show(wizard, 1040, 820); host.ProcessPendingWork(); var root = Root(wizard);
+            using (var held = new FileStream(Path.Combine(fixture.Root, "experience.json"), FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                if (upgrade) Ui(host, () => Find<CheckBox>(root, "SetupAutomaticUpdates").Checked = !draft.AutomaticUpdates);
+                else Ui(host, () => Find<LocalePickerButton>(root, "SetupLanguage").SelectLanguage("en", true));
+                Pump(host, () => Find<Label>(root, "SetupError").Text.Length > 0);
+            }
+            Click(host, root, upgrade ? "SetupNext" : "SetupSkip"); Pump(host, () => window.IsClosed);
+            Assert.Equal(upgrade, wizard.Accepted);
+            if (upgrade) Assert.Equal(UserExperienceService.ChoiceFamily, services.Experience.State.InterfaceChoiceFamily);
+            else Assert.Equal(SetupProgress.Skipped, services.Experience.State.Setup);
+        }
+        await services.ShutdownAsync();
+    }
+
+    [Theory]
     [InlineData("pl", 100, true)] [InlineData("en", 150, false)]
     [InlineData("de-DE", 200, true)] [InlineData("ja-JP", 200, false)]
     public async Task StartupPreparationDialogCancelsWithoutInstallingAndKeepsContinueReachable(string language, int scale, bool userContinue)

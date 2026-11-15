@@ -14,6 +14,7 @@ internal sealed partial class OtherView : UserControl
     private readonly Panel recent = new() { Height = 310 };
     private bool disposed;
     private int recentRefreshVersion;
+    private readonly List<Action> recentTextUpdates = [];
     public event EventHandler<ModernTubeDownloader.Batch.BatchImportSession>? ResumeBatch;
 
     public OtherView(AppServices services)
@@ -46,8 +47,10 @@ internal sealed partial class OtherView : UserControl
             await ModernFormsNext.WindowKit.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (disposed || refreshVersion != Volatile.Read(ref recentRefreshVersion)) return;
+                recentTextUpdates.Clear();
                 foreach (var child in recent.Controls.ToArray()) { recent.Controls.Remove(child); child.Dispose(); }
                 var label = AppUi.Heading(services.Localization["Other.RecentTools"], dashboard ? 12 : 16); label.SetBounds(24, 16, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(36)); recent.Controls.Add(label);
+                recentTextUpdates.Add(() => label.Text = services.Localization["Other.RecentTools"]);
                 var y = 56;
                 foreach (var export in exports.Take(3))
                 {
@@ -55,6 +58,9 @@ internal sealed partial class OtherView : UserControl
                     var button = dashboard ? RecentToolButton(caption, $"{export.Width} × {export.Height} · {export.CompletedAt.ToLocalTime().ToString("g", services.Localization.Culture)}", AppIconKind.Media)
                         : new DashboardButton { Text = caption };
                     button.Enabled = File.Exists(export.OutputPath); button.AccessibleAutomationId = "OtherThumbnailExport" + y;
+                    recentTextUpdates.Add(() => UpdateRecentToolText(button,
+                        services.Localization["Other.ThumbnailExport"] + " • " + System.IO.Path.GetFileName(export.OutputPath),
+                        $"{export.Width} × {export.Height} · {export.CompletedAt.ToLocalTime().ToString("g", services.Localization.Culture)}"));
                     AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
                     button.Click += (_, _) => Utilities.ShellService.OpenFile(export.OutputPath); recent.Controls.Add(button);
                 }
@@ -63,11 +69,14 @@ internal sealed partial class OtherView : UserControl
                     var button = dashboard ? RecentToolButton(session.FileName, $"{session.ImportedCount} URL · {session.CreatedAt.ToLocalTime().ToString("g", services.Localization.Culture)}", AppIconKind.Clipboard)
                         : new DashboardButton { Text = $"{session.FileName} • {session.ImportedCount}" };
                     button.AccessibleAutomationId = "BatchRecent" + session.Id.ToString("N");
+                    recentTextUpdates.Add(() => UpdateRecentToolText(button, session.FileName,
+                        $"{session.ImportedCount} URL · {session.CreatedAt.ToLocalTime().ToString("g", services.Localization.Culture)}",
+                        $"{session.FileName} • {session.ImportedCount}"));
                     AppUi.Secondary(button); button.SetBounds(24, y, Math.Max(180, recent.Width - 48), 38); y += 44;
                     button.Click += async (_, _) => { try { ResumeBatch?.Invoke(this, await services.Batch.OpenAsync(session.Id)); } catch (Exception ex) { services.Logger.Error("Batch session could not be reopened.", ex); } };
                     recent.Controls.Add(button);
                 }
-                if (dashboard && sessions.Count == 0 && exports.Count == 0) { var hint = AppUi.Muted(services.Localization["Dashboard.NoRecent"]); hint.Multiline = true; hint.SetBounds(24, y, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(64)); recent.Controls.Add(hint); y = hint.Bottom; }
+                if (dashboard && sessions.Count == 0 && exports.Count == 0) { var hint = AppUi.Muted(services.Localization["Dashboard.NoRecent"]); hint.Multiline = true; hint.SetBounds(24, y, Math.Max(180, recent.Width - 48), AppTypography.TextHeight(64)); recent.Controls.Add(hint); recentTextUpdates.Add(() => hint.Text = services.Localization["Dashboard.NoRecent"]); y = hint.Bottom; }
                 recent.Height = Math.Max(100, y + 16); LayoutPage();
                 });
         }
@@ -116,10 +125,22 @@ internal sealed partial class OtherView : UserControl
             } else { AppTypography.ReflowRows(card); card.Height = card.Controls.Select(c => c.Bottom + 16).DefaultIfEmpty(100).Max(); }
         }
     }
-    private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() => { ApplyLocalization(); LayoutPage(); });
+    private static void UpdateRecentToolText(Button button, string title, string subtitle, string? classicTitle = null)
+    {
+        if (button.Tag is RecentToolRow row)
+        { row.Title.Text = title; row.Subtitle.Text = subtitle; button.AccessibleName = title + " · " + subtitle; }
+        else button.Text = classicTitle ?? title;
+    }
+    private void LanguageChanged(object? sender, EventArgs e) => Application.RunOnUIThread(() =>
+    {
+        if (disposed) return;
+        ApplyLocalization();
+        foreach (var update in recentTextUpdates) update();
+        LayoutPage();
+    });
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { disposed = true; services.Localization.LanguageChanged -= LanguageChanged; }
+        if (disposing) { disposed = true; recentTextUpdates.Clear(); services.Localization.LanguageChanged -= LanguageChanged; }
         base.Dispose(disposing);
     }
 }

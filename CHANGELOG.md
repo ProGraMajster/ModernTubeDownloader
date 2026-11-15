@@ -33,6 +33,18 @@
 
 ### Fixed
 
+- Queue, History and LIVE load failures retain the original stores and block unsafe
+  writes and work admission, including interrupted legacy LIVE migration. Persisted
+  identities are validated without inventing replacements for damaged records.
+- Batch completion reconciles without an open page, preserves task identities after
+  restart, retries failed jobs explicitly, and recovers a torn final journal record.
+  Multi-file import validates the entire selection before admitting a list.
+- Organizer recovery and undo reject blocked stores, conflicting identities,
+  active output paths and changed evidence without discarding the last verified copy.
+- Failed onboarding/update/language saves do not publish uncommitted state; shutdown
+  drains remaining process owners even when a service checkpoint fails.
+- Settings retain usable category/card geometry after Classic/Modern reattachment.
+
 - Startup update settings commit their measured height once; alternating intermediate
   heights had caused a native stack overflow through recursive SizeChanged layout.
 - Failed History loads cannot subsequently overwrite unreadable user data with an empty list.

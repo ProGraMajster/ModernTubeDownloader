@@ -287,7 +287,64 @@ public sealed partial class ApplicationUpdateTests
         service.Changed += (_, _) => { if (service.StatusKey == "Updates.Checking") clock.Advance(TimeSpan.FromMilliseconds(100)); };
         await service.CheckAsync().WaitAsync(TimeSpan.FromSeconds(3));
         Assert.Equal("Updates.Failed", service.StatusKey);
+        Assert.Null(service.State.LastCheck); Assert.Null(service.State.Available);
         Assert.False(File.Exists(Path.Combine(paths.RootDirectory, "Updates", "state.json")));
+    }
+
+    [Fact]
+    public async Task LockedCheckStatePreservesPriorReleaseAndStagingUntilRetryCommits()
+    {
+        using var fixture = new Fixture(); using var http = new HttpClient();
+        var paths = AppPaths.Create(Path.Combine(fixture.Root, "data"));
+        var updateRoot = Path.Combine(paths.RootDirectory, "Updates"); Directory.CreateDirectory(updateRoot);
+        var stateFile = Path.Combine(updateRoot, "state.json");
+        var oldArchive = Path.Combine(updateRoot, "ModernTubeDownloader-1.2.0-win-x64.zip");
+        File.Copy(fixture.Zip(("ModernTubeDownloader.exe", "synthetic old verified package")), oldArchive);
+        var prior = new ApplicationUpdateState
+        {
+            Available = Release(), LastCheck = DateTimeOffset.UtcNow.AddDays(-2),
+            StagedArchive = oldArchive, StagedHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(oldArchive))),
+            InstallOnExit = true
+        };
+        await AtomicJsonFile.WriteAsync(stateFile, prior);
+        using var service = new ApplicationUpdateService(paths, new SettingsService(paths, new NullAppLogger()), http,
+            new NullAppLogger(), new Source(Release("1.3.0")), "1.1.0");
+        await service.InitializeAsync();
+        var before = await File.ReadAllBytesAsync(stateFile);
+        await using (var held = new FileStream(stateFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await service.CheckAsync();
+            Assert.Equal("Updates.Failed", service.StatusKey);
+            Assert.Equal(prior.LastCheck, service.State.LastCheck);
+            Assert.Equal("1.2.0", service.State.Available?.Version);
+            Assert.Equal(oldArchive, service.State.StagedArchive);
+            Assert.True(service.Ready); Assert.True(service.ShouldInstallOnExit);
+        }
+        Assert.Equal(before, await File.ReadAllBytesAsync(stateFile));
+        await service.CheckAsync();
+        Assert.Equal("Updates.Available", service.StatusKey); Assert.Equal("1.3.0", service.State.Available?.Version);
+        Assert.Null(service.State.StagedArchive); Assert.False(service.Ready); Assert.False(service.ShouldInstallOnExit);
+        Assert.True(File.Exists(oldArchive)); // Checking never deletes the previously verified package.
+        var persisted = await AtomicJsonFile.ReadAsync<ApplicationUpdateState>(stateFile);
+        Assert.Equal("1.3.0", persisted!.Available?.Version); Assert.Equal(service.State.LastCheck, persisted.LastCheck);
+    }
+
+    [Fact]
+    public async Task CallerCancellationAfterReleaseReplyDoesNotPublishUncommittedState()
+    {
+        using var fixture = new Fixture(); using var http = new HttpClient(); using var cancellation = new CancellationTokenSource();
+        var paths = AppPaths.Create(Path.Combine(fixture.Root, "data"));
+        using var service = new ApplicationUpdateService(paths, new SettingsService(paths, new NullAppLogger()), http,
+            new NullAppLogger(), new ReplyThenCancelSource(cancellation), "1.1.0");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckAsync(cancellation.Token));
+        Assert.Null(service.State.LastCheck); Assert.Null(service.State.Available); Assert.False(service.Ready);
+        Assert.False(File.Exists(Path.Combine(paths.RootDirectory, "Updates", "state.json")));
+    }
+
+    private sealed class ReplyThenCancelSource(CancellationTokenSource cancellation) : IApplicationReleaseSource
+    {
+        public Task<ApplicationRelease?> GetLatestAsync(CancellationToken token)
+        { cancellation.Cancel(); return Task.FromResult<ApplicationRelease?>(Release()); }
     }
 
     [Fact]

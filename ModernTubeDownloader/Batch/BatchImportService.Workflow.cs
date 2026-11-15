@@ -50,11 +50,13 @@ public sealed partial class BatchImportService
         {
             if (!automatic.IsCompleted)
             {
-                if (selected.Length == 1 && automaticSession == selected[0].Id) return automatic;
+                if (automaticSelection.SequenceEqual(selected.Select(value => value.Id)) ||
+                    selected.Length == 1 && automaticSession == selected[0].Id) return automatic;
                 throw new InvalidOperationException("Batch.Error.Busy");
             }
             if (!analysis.IsCompleted) throw new InvalidOperationException("Batch.Error.Busy");
             automaticCancellation?.Dispose(); automaticCancellation = new(); automaticSession = selected[0].Id;
+            automaticSelection = selected.Select(value => value.Id).ToArray();
             var token = automaticCancellation.Token;
             automatic = Task.Run(async () =>
             {
@@ -88,7 +90,8 @@ public sealed partial class BatchImportService
                     }
             if (recovered.Count > 0) await store.SaveEntriesAsync(session, recovered, token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
-            var pending = StartAsync(session);
+            await RetryFailedAsync(session, token: token).ConfigureAwait(false);
+            var pending = StartAnalysisAsync(session, null, true);
             using (token.Register(() => { lock (sync) analysisCancellation?.Cancel(); }))
                 await pending.ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
@@ -112,8 +115,12 @@ public sealed partial class BatchImportService
         }
     }
 
-    private Task PersistPhaseAsync(BatchImportSession session, BatchWorkflowPhase phase)
-    { lock (session.Sync) session.WorkflowPhase = phase; return store.SaveSessionAsync(session); }
+    private async Task PersistPhaseAsync(BatchImportSession session, BatchWorkflowPhase phase)
+    {
+        lock (session.Sync) { session.WorkflowPhase = phase; session.PendingPhaseCommit = true; }
+        await store.SaveSessionAsync(session).ConfigureAwait(false);
+        lock (session.Sync) if (session.WorkflowPhase == phase) session.PendingPhaseCommit = false;
+    }
 
     public BatchWorkflowPhase CurrentWorkflowPhase(BatchImportSession session)
     {
@@ -135,5 +142,54 @@ public sealed partial class BatchImportService
             ? BatchWorkflowPhase.Completed : BatchWorkflowPhase.Prepared;
     }
 
-    public Task<bool> HasUnfinishedSessionsAsync(CancellationToken token = default) => store.HasUnfinishedSessionsAsync(token);
+    public async Task<bool> HasUnfinishedSessionsAsync(CancellationToken token = default)
+    {
+        if (queue.LoadFailed || IsOperating) return true;
+        // Reconcile persisted links even when no Batch window has ever been opened.
+        // Metadata alone may describe a download that completed after that window closed.
+        try
+        {
+            await foreach (var summary in store.UnfinishedSessionsAsync(token).ConfigureAwait(false))
+            {
+                var session = await OpenAsync(summary.Id, token).ConfigureAwait(false);
+                await RefreshQueueAsync(session, token).ConfigureAwait(false);
+                if (session.WorkflowPhase != BatchWorkflowPhase.Completed) return true;
+            }
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        { logger.Error("Batch startup admission remains blocked by an unreadable session.", error); return true; }
+        return queue.LoadFailed || IsOperating;
+    }
+
+    /// <summary>Explicit retry uses the same canonical job, destination and pause state.</summary>
+    public async Task<int> RetryFailedAsync(BatchImportSession session, IReadOnlySet<Guid>? selected = null,
+        CancellationToken token = default)
+    {
+        await destinationGate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            var retryIds = session.Snapshot().Where(entry => entry.QueueItemId is not null &&
+                (selected is null || selected.Contains(entry.Id))).Select(entry => entry.QueueItemId!.Value).Distinct().ToArray();
+            var retried = 0;
+            try
+            {
+            foreach (var id in retryIds)
+            {
+                token.ThrowIfCancellationRequested();
+                if (queue.Retry(id)) retried++;
+            }
+            }
+            finally
+            {
+            if (retried > 0)
+            {
+                // Canonical admission already happened; cancellation cannot discard its checkpoint.
+                await queue.CheckpointBeforeStartAsync(CancellationToken.None).ConfigureAwait(false);
+                await RefreshQueueAsync(session, CancellationToken.None).ConfigureAwait(false);
+            }
+            }
+            return retried;
+        }
+        finally { destinationGate.Release(); }
+    }
 }

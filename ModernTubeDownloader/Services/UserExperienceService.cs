@@ -27,6 +27,8 @@ internal sealed class SetupDraft
     public bool Tray { get; set; } = true;
     public int Step { get; set; }
 
+    internal SetupDraft Copy() => (SetupDraft)MemberwiseClone();
+
     internal static SetupDraft From(AppServices services, bool recommendModern) => new()
     {
         Language = services.Settings.Current.Language,
@@ -55,6 +57,14 @@ internal sealed class UserExperienceState
     public string? DeferredWhatsNewVersion { get; set; }
     [System.Text.Json.Serialization.JsonExtensionData]
     public Dictionary<string, JsonElement>? AdditionalState { get; set; }
+
+    internal UserExperienceState Copy()
+    {
+        var copy = (UserExperienceState)MemberwiseClone();
+        copy.Draft = Draft?.Copy();
+        copy.AdditionalState = AdditionalState?.ToDictionary(pair => pair.Key, pair => pair.Value.Clone());
+        return copy;
+    }
 }
 
 /// <summary>Small atomic journey ledger. It never reads or rewrites queue/history/cookie contents.</summary>
@@ -66,7 +76,9 @@ internal sealed class UserExperienceService
     private bool damaged;
     private bool unsupportedSchema;
     private bool storageUnavailable;
-    public UserExperienceState State { get; private set; } = new();
+    private UserExperienceState state = new();
+    // Callers edit a wizard draft, never the last durably committed ledger.
+    public UserExperienceState State => state.Copy();
     public string Version { get; }
     public bool Available { get; private set; } = true;
     public bool SettingsExisted { get; }
@@ -85,19 +97,19 @@ internal sealed class UserExperienceService
             {
                 if ((attributes & FileAttributes.Directory) != 0) throw new IOException("The experience marker is occupied by a directory.");
                 var json = await File.ReadAllTextAsync(service.file);
-                service.State = JsonSerializer.Deserialize<UserExperienceState>(json, JsonDefaults.Options) ?? throw new InvalidDataException("Empty experience state.");
-                service.unsupportedSchema = service.State.SchemaVersion > 1;
+                service.state = JsonSerializer.Deserialize<UserExperienceState>(json, JsonDefaults.Options) ?? throw new InvalidDataException("Empty experience state.");
+                service.unsupportedSchema = service.state.SchemaVersion > 1;
                 using var document = JsonDocument.Parse(json);
                 var fields = document.RootElement.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 if (!fields.Contains("schemaVersion") || !fields.Contains("existingProfile") || !fields.Contains("setup"))
                     throw new InvalidDataException("Incomplete experience state; profile provenance cannot be inferred from defaults.");
-                if (service.State.SchemaVersion != 1 || !Enum.IsDefined(service.State.Setup))
+                if (service.state.SchemaVersion != 1 || !Enum.IsDefined(service.state.Setup))
                     throw new InvalidDataException("Unsupported experience state.");
-                if (service.State.Draft is { } draft)
+                if (service.state.Draft is { } draft)
                 {
                     draft.Step = Math.Clamp(draft.Step, 0, 5);
                     if (!Enum.IsDefined(draft.Interface) || !Enum.IsDefined(draft.UpdateMode) || !Enum.IsDefined(draft.Container) ||
-                        !Enum.IsDefined(draft.Conflict) || !Enum.IsDefined(draft.Frequency)) service.State.Draft = null;
+                        !Enum.IsDefined(draft.Conflict) || !Enum.IsDefined(draft.Frequency)) service.state.Draft = null;
                     else
                     {
                         draft.Language = ModernTubeDownloader.Localization.LocaleRegistry.Normalize(draft.Language);
@@ -111,9 +123,9 @@ internal sealed class UserExperienceService
                 // Probe before services/tool setup can save their first settings or empty stores.
                 // Unlike File.Exists, metadata access does not disguise an ACL failure as absence.
                 var known = new[] { paths.SettingsFile, paths.QueueFile, paths.HistoryFile, paths.LiveSessionsFile, Path.Combine(paths.RootDirectory, "appearance.json") };
-                service.State.ExistingProfile = known.Any(path => TryGetAttributes(path) is not null) || HasFiles(paths.AuthenticationDirectory) || HasFiles(Path.Combine(paths.RootDirectory, "Batch"));
-                service.State.LastObservedVersion = service.State.ExistingProfile ? null : service.Version;
-                await service.SaveAsync();
+                service.state.ExistingProfile = known.Any(path => TryGetAttributes(path) is not null) || HasFiles(paths.AuthenticationDirectory) || HasFiles(Path.Combine(paths.RootDirectory, "Batch"));
+                service.state.LastObservedVersion = service.state.ExistingProfile ? null : service.Version;
+                await service.CommitAsync(_ => { });
             }
         }
         catch (Exception error)
@@ -122,7 +134,7 @@ internal sealed class UserExperienceService
             service.Available = false;
             service.damaged = error is JsonException or InvalidDataException;
             service.storageUnavailable = !service.damaged;
-            service.State = new() { ExistingProfile = true };
+            service.state = new() { ExistingProfile = true };
         }
         return service;
         static bool HasFiles(string directory) => TryGetAttributes(directory) is { } attributes &&
@@ -139,46 +151,59 @@ internal sealed class UserExperienceService
     internal StartupExperience Next(bool classicRecovery, bool backgroundStart, bool externalActivation, AppInterfaceMode selected, bool policyConsent)
     {
         if (!Available || classicRecovery || backgroundStart || externalActivation) return StartupExperience.None;
-        if (!State.ExistingProfile && State.Setup is SetupProgress.NotStarted or SetupProgress.InProgress) return StartupExperience.Welcome;
-        if (State.ExistingProfile && State.InterfaceChoiceFamily != ChoiceFamily && (selected == AppInterfaceMode.Classic || policyConsent))
+        var current = state;
+        if (!current.ExistingProfile && current.Setup is SetupProgress.NotStarted or SetupProgress.InProgress) return StartupExperience.Welcome;
+        if (current.ExistingProfile && current.InterfaceChoiceFamily != ChoiceFamily && (selected == AppInterfaceMode.Classic || policyConsent))
             return StartupExperience.UpgradeChoice;
-        return State.DeferredWhatsNewVersion != Version && ReleaseNotesCatalog.Supports(Version) &&
-            ReleaseNotesCatalog.ShouldShow(Version, State.LastWhatsNewAcknowledgedVersion, State.LastObservedVersion)
+        return current.DeferredWhatsNewVersion != Version && ReleaseNotesCatalog.Supports(Version) &&
+            ReleaseNotesCatalog.ShouldShow(Version, current.LastWhatsNewAcknowledgedVersion, current.LastObservedVersion)
             ? StartupExperience.WhatsNew : StartupExperience.None;
     }
 
-    public async Task BeginAsync(SetupDraft draft)
+    public Task BeginAsync(SetupDraft draft)
     {
-        if (unsupportedSchema || storageUnavailable) throw new InvalidDataException("Experience.UnsupportedState");
-        if (damaged)
+        var snapshot = draft.Copy();
+        return CommitAsync(next => { next.Setup = SetupProgress.InProgress; next.Draft = snapshot; }, recover: true);
+    }
+    public Task SaveDraftAsync(SetupDraft draft)
+    {
+        var snapshot = draft.Copy();
+        return CommitAsync(next => next.Draft = snapshot);
+    }
+    public Task SkipAsync(bool upgrade) => CommitAsync(next =>
+    {
+        if (upgrade) { next.InterfaceChoiceFamily = ChoiceFamily; next.InterfaceChoiceSkipped = true; }
+        else next.Setup = SetupProgress.Skipped;
+        next.Draft = null; next.DeferredWhatsNewVersion = Version;
+    });
+    public Task CompleteAsync(bool upgrade) => CommitAsync(next =>
+    {
+        if (upgrade) { next.InterfaceChoiceFamily = ChoiceFamily; next.InterfaceChoiceSkipped = false; }
+        else { next.Setup = SetupProgress.Completed; next.InterfaceChoiceFamily = ChoiceFamily; next.InterfaceChoiceSkipped = false; }
+        next.Draft = null; next.LastObservedVersion = Version;
+    });
+    public Task AcknowledgeWhatsNewAsync() => CommitAsync(next =>
+    { next.LastWhatsNewAcknowledgedVersion = Version; next.LastObservedVersion = Version; });
+
+    private async Task CommitAsync(Action<UserExperienceState> change, bool recover = false)
+    {
+        await gate.WaitAsync();
+        try
         {
-            // Explicit reopening may recover the marker; keep the exact original bytes.
-            File.Copy(file, file + ".preserved-" + Guid.NewGuid().ToString("N"));
+            if (unsupportedSchema || storageUnavailable || !Available && !(recover && damaged))
+                throw new InvalidDataException("Experience.UnsupportedState");
+            var next = state.Copy();
+            change(next);
+            if (damaged)
+            {
+                // Explicit reopening may recover the marker; retain its exact bytes
+                // and leave recovery disabled if the replacement cannot be saved.
+                File.Copy(file, file + ".preserved-" + Guid.NewGuid().ToString("N"));
+            }
+            await AtomicJsonFile.WriteRawJsonAsync(file, JsonSerializer.Serialize(next, JsonDefaults.Options));
+            state = next;
             damaged = false; Available = true;
         }
-        State.Setup = SetupProgress.InProgress; State.Draft = draft; await SaveAsync();
-    }
-    public async Task SaveDraftAsync(SetupDraft draft) { State.Draft = draft; await SaveAsync(); }
-    public async Task SkipAsync(bool upgrade)
-    {
-        if (upgrade) { State.InterfaceChoiceFamily = ChoiceFamily; State.InterfaceChoiceSkipped = true; }
-        else State.Setup = SetupProgress.Skipped;
-        State.Draft = null; State.DeferredWhatsNewVersion = Version; await SaveAsync();
-    }
-    public async Task CompleteAsync(bool upgrade)
-    {
-        if (upgrade) { State.InterfaceChoiceFamily = ChoiceFamily; State.InterfaceChoiceSkipped = false; }
-        else { State.Setup = SetupProgress.Completed; State.InterfaceChoiceFamily = ChoiceFamily; State.InterfaceChoiceSkipped = false; }
-        State.Draft = null; State.LastObservedVersion = Version; await SaveAsync();
-    }
-    public async Task AcknowledgeWhatsNewAsync()
-    { State.LastWhatsNewAcknowledgedVersion = Version; State.LastObservedVersion = Version; await SaveAsync(); }
-
-    private async Task SaveAsync()
-    {
-        if (!Available) throw new InvalidDataException("Experience.UnsupportedState");
-        await gate.WaitAsync();
-        try { await AtomicJsonFile.WriteRawJsonAsync(file, JsonSerializer.Serialize(State, JsonDefaults.Options)); }
         finally { gate.Release(); }
     }
 

@@ -7,7 +7,7 @@ namespace ModernTubeDownloader.Tests;
 public sealed class WindowsFileDropTests
 {
     [Fact]
-    public void NativeShellDropDecodesUnicodeRejectsMultipleAndDetaches()
+    public void NativeShellDropDecodesBoundedUnicodeSelectionRejectsOversizeAndDetaches()
     {
         if (!OperatingSystem.IsWindows()) return;
         var hwnd = CreateWindowEx(0, "STATIC", "MTD owned drop test", 0, 0, 0, 1, 1, new nint(-3), 0, 0, 0);
@@ -21,9 +21,12 @@ public sealed class WindowsFileDropTests
                 Drop(hwnd, [@"C:\QA\Łódź 日本語.csv"]);
                 Assert.Equal(new[] { @"C:\QA\Łódź 日本語.csv" }, Assert.Single(received));
                 Drop(hwnd, [@"C:\QA\one.csv", @"C:\QA\two.csv"]);
-                Assert.Empty(received[1]);
+                Assert.Equal(new[] { @"C:\QA\one.csv", @"C:\QA\two.csv" }, received[1]);
+                var maximum = Enumerable.Range(0, 32).Select(index => $@"C:\QA\list-{index}.txt").ToArray();
+                Drop(hwnd, maximum); Assert.Equal(maximum, received[2]);
+                Drop(hwnd, [.. maximum, @"C:\QA\too-many.txt"]); Assert.Empty(received[3]);
                 adapter.Enabled = false; Drop(hwnd, [@"C:\QA\ignored.csv"]);
-                Assert.Equal(2, received.Count);
+                Assert.Equal(4, received.Count);
             }
             Assert.Equal(0, GetWindowLongPtr(hwnd, -20).ToInt64() & 0x10); // WS_EX_ACCEPTFILES restored.
         }

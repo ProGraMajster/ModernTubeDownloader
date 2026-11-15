@@ -32,6 +32,10 @@ only then arms installation under the confirmed policy. A failed settings write 
 leave that package automatically armed.
 Metadata checks have a 30-second deadline. Network/timeout failures are logged and
 shown as Failed; they do not terminate the recurring monitor or block manual retry.
+Check results, the last-successful-check timestamp and replacement of prior staging
+are published only after the atomic state write succeeds. A locked state file or
+cancellation retains the previous release/package and does not throttle retry as
+though an uncommitted check had succeeded.
 State and staging live in AppData/ModernTubeDownloader/Updates, never the tool store.
 State initialization happens once under the same serialization gate used by update
 actions. Every action awaits it, including actions invoked before the background

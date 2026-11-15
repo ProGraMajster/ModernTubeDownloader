@@ -1,4 +1,5 @@
 {
+  "Batch.Error.FileSelection": "Wählen Sie 1 bis 32 vorhandene TXT-, JSON- oder CSV-Dateien aus. Es wurden keine Dateien importiert.",
   "History.PageSummary": "Seite {0} von {1} • Ergebnisse: {2} / {3}",
   "Appearance.TextTitle": "Personalisierung • Textgröße",
   "Appearance.TextHint": "Logische Textgröße unabhängig von der Windows-DPI-Skalierung. Klein 90 %, Standard 100 %, Groß 125 %, Sehr groß 150 %; Benutzerdefiniert 80–200 %. Symbole behalten ihre eigene Größe.",

@@ -6,14 +6,22 @@ namespace ModernTubeDownloader.Services;
 
 public sealed class LiveSessionPersistenceService(AppPaths paths, IAppLogger logger)
 {
+    public bool LoadFailed { get; private set; }
     public async Task<IReadOnlyList<LiveSession>> LoadAsync(CancellationToken token = default)
     {
         JsonElement[] records;
-        try { records = await AtomicJsonFile.ReadAsync<JsonElement[]>(paths.LiveSessionsFile, token) ?? []; }
-        catch (JsonException ex)
+        try
         {
-            logger.Error("LIVE persistence is invalid; retaining a recovery copy.", ex);
-            File.Copy(paths.LiveSessionsFile, paths.LiveSessionsFile + ".corrupt-" + Guid.NewGuid().ToString("N"));
+            await using var stream = new FileStream(paths.LiveSessionsFile, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            records = await JsonSerializer.DeserializeAsync<JsonElement[]>(stream, JsonDefaults.Options, token).ConfigureAwait(false)
+                ?? throw new JsonException("LIVE storage is null, not a session collection.");
+        }
+        catch (FileNotFoundException) { return []; }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { LoadFailed = true; throw; }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            LoadFailed = true;
+            logger.Error("LIVE persistence could not be read; writes and recording admission are blocked, original data retained.", ex);
             return [];
         }
         var sessions = new List<LiveSession>();
@@ -22,13 +30,22 @@ public sealed class LiveSessionPersistenceService(AppPaths paths, IAppLogger log
         {
             try
             {
+                if (record.ValueKind != JsonValueKind.Object)
+                    throw new JsonException("LIVE record is not an object.");
+                var identity = record.EnumerateObject().Where(property =>
+                    property.Name.Equals("sessionId", StringComparison.OrdinalIgnoreCase)).ToArray();
+                // The model initializer is for newly admitted sessions, never a
+                // replacement identity for damaged saved data.
+                if (identity.Length != 1 || identity[0].Value.ValueKind != JsonValueKind.String ||
+                    !identity[0].Value.TryGetGuid(out var savedId) || savedId == Guid.Empty)
+                    throw new JsonException("Missing or ambiguous saved LIVE identity.");
                 var session = record.Deserialize<LiveSession>(JsonDefaults.Options)
                     ?? throw new JsonException("Empty LIVE record.");
-                if (session.Id == Guid.Empty || !Enum.IsDefined(session.State) ||
+                if (session.Id != savedId || !Enum.IsDefined(session.State) ||
                     !Enum.IsDefined(session.StartPolicy) ||
                     !YtDlpMetadataService.TryValidateSourceUrl(session.SourceUrl, out var url, out _))
                     throw new JsonException("Invalid LIVE identity, state or source.");
-                if (!ids.Add(session.Id)) continue;
+                if (!ids.Add(session.Id)) throw new JsonException("Duplicate LIVE identity.");
                 session.SourceUrl = url;
                 session.Parts ??= [];
                 session.PartIndex = Math.Max(1, session.PartIndex);
@@ -36,13 +53,19 @@ public sealed class LiveSessionPersistenceService(AppPaths paths, IAppLogger log
                 sessions.Add(session);
             }
             catch (Exception ex) when (ex is JsonException or ArgumentException or NotSupportedException)
-            { logger.Warning($"Ignored invalid LIVE persistence record Error={ex.GetType().Name}"); }
+            {
+                LoadFailed = true;
+                logger.Warning($"Invalid LIVE record retained in original storage; recording admission and writes blocked. Error={ex.GetType().Name}");
+            }
         }
         return sessions;
     }
 
-    public Task SaveAsync(IReadOnlyList<LiveSession> sessions, CancellationToken token = default) =>
-        AtomicJsonFile.WriteAsync(paths.LiveSessionsFile, sessions, token);
+    public Task SaveAsync(IReadOnlyList<LiveSession> sessions, CancellationToken token = default)
+    {
+        if (LoadFailed) throw new IOException("LIVE storage could not be loaded; restore the original file and reopen the profile.");
+        return AtomicJsonFile.WriteAsync(paths.LiveSessionsFile, sessions, token);
+    }
 
     // Save the destination before removing source entries. Retrying after any
     // interruption is idempotent by the durable original SessionId.
@@ -51,6 +74,9 @@ public sealed class LiveSessionPersistenceService(AppPaths paths, IAppLogger log
         var queue = await new QueuePersistenceService(paths, logger).LoadAsync(token).ConfigureAwait(false);
         if (!queue.Any(item => item.LiveSession is not null)) return;
         var sessions = (await LoadAsync(token)).ToList();
+        // Keep both source and destination intact and permit a diagnostic UI.
+        // Queue.LoadAsync independently blocks any unmigrated LIVE source rows.
+        if (LoadFailed) return;
         foreach (var item in queue.Where(item => item.LiveSession is not null))
         {
             var live = item.LiveSession!;

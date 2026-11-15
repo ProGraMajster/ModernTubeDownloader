@@ -1,4 +1,5 @@
 {
+  "Batch.Error.FileSelection": "既存のTXT、JSON、CSVファイルを1～32個選択してください。ファイルはインポートされませんでした。",
   "History.PageSummary": "{1} ページ中 {0} ページ • 結果: {2} / {3}",
   "Appearance.TextTitle": "個人設定 • 文字サイズ",
   "Appearance.TextHint": "Windows の DPI とは独立した文字サイズです。小 90%、標準 100%、大 125%、特大 150%、カスタム 80～200%。アイコンのサイズは変わりません。",
@@ -475,7 +476,7 @@
   "History.NoResultsBody": "別の検索フレーズを試してください。",
   "History.CompletedAt": "完了 {0}",
   "History.Path": "保存 へ {0}",
-  "Settings.Title": "コンテンツ",
+  "Settings.Title": "設定",
   "Settings.Subtitle": "ダウンロード、外観、および管理されたツールをパーソナライズします。",
   "Settings.General": "ダウンロード",
   "Settings.GeneralDescription": "ファイルがどこにあるかを選択し、新しいジョブの準備方法を選択します。",

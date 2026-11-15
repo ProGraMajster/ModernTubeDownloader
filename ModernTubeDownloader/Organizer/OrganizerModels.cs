@@ -30,6 +30,7 @@ public sealed class OrganizerMatch
     public string ListName { get; set; } = "";
     public string Url { get; set; } = "";
     public string Identity { get; set; } = "";
+    public string? VerifiedVideoId { get; set; }
     public MediaTimeRange RequestedRange { get; set; } = MediaTimeRange.Full;
     public string RequestedQuality { get; set; } = "best";
     public string? MediaPath { get; set; }

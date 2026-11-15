@@ -187,6 +187,7 @@ internal sealed partial class SettingsView : UserControl
     private readonly Label feedback;
     private bool applyingValues;
     private bool operationInProgress;
+    private bool languageChangeInProgress;
 
     public SettingsView(AppServices services)
     {
@@ -448,6 +449,7 @@ internal sealed partial class SettingsView : UserControl
         save.AccessibleAutomationId = "SettingsSaveButton";
         logs = CreateButton(actionsCard, "Settings.OpenLogs", primary: false);
         feedback = AppUi.Muted();
+        feedback.AccessibleAutomationId = "SettingsFeedback";
         actionsCard.Controls.Add(feedback);
         InitializeJourneyActions();
         save.Click += SaveClicked;
@@ -484,6 +486,7 @@ internal sealed partial class SettingsView : UserControl
         categoryEmpty.AccessibleAutomationId = "SettingsSearchEmpty";
         AppUi.BindBackground(categories); Controls.AddRange([header, categories, scroll, categorySearch, categoryEmpty]);
         SizeChanged += ViewSizeChanged;
+        VisibleChanged += ViewSizeChanged;
         scroll.SizeChanged += ScrollSizeChanged;
         scroll.ViewportWidthChanged += ScrollSizeChanged;
         services.Tools.Changed += ToolsChanged;
@@ -615,7 +618,10 @@ internal sealed partial class SettingsView : UserControl
     private bool layoutInProgress;
     private void UpdateLayout()
     {
-        if (layoutInProgress) return;
+        // Shell transitions temporarily detach this shared page. Effective child
+        // visibility is false then; laying out from it would erase every card and
+        // category's bounds. Reflow on VisibleChanged after the same page returns.
+        if (layoutInProgress || !Visible) return;
         layoutInProgress = true;
         try
         {
@@ -1266,11 +1272,36 @@ internal sealed partial class SettingsView : UserControl
 
     private async void LanguageSelected(object? sender, EventArgs e)
     {
-        if (applyingValues)
+        if (applyingValues || languageChangeInProgress)
             return;
-        services.Settings.Current.Language = language.SelectedLanguage;
-        text.SetLanguage(language.SelectedLanguage);
-        await services.Settings.SaveAsync();
+        var previous = services.Settings.Current.Language;
+        var selected = language.SelectedLanguage;
+        var committed = false;
+        languageChangeInProgress = true;
+        language.Enabled = false;
+        try
+        {
+            services.Settings.Current.Language = selected;
+            await services.Settings.SaveAsync();
+            committed = true;
+            text.SetLanguage(selected);
+            if (!remoteDisposed) feedback.Text = text["Settings.Saved"];
+        }
+        catch (Exception error)
+        {
+            if (!committed) services.Settings.Current.Language = previous;
+            services.Logger.Error("Changing the application language could not be saved.", error);
+            if (!remoteDisposed)
+            {
+                language.SelectLanguage(services.Settings.Current.Language);
+                feedback.Text = text["Error.Generic"];
+            }
+        }
+        finally
+        {
+            languageChangeInProgress = false;
+            if (!remoteDisposed) { language.Enabled = true; UpdateLayout(); }
+        }
     }
 
     private async void SaveClicked(object? sender, EventArgs e)
@@ -1667,6 +1698,7 @@ internal sealed partial class SettingsView : UserControl
             remoteQrImage?.Dispose();
             text.LanguageChanged -= LanguageChanged;
             SizeChanged -= ViewSizeChanged;
+            VisibleChanged -= ViewSizeChanged;
             scroll.SizeChanged -= ScrollSizeChanged;
             scroll.ViewportWidthChanged -= ScrollSizeChanged;
         }

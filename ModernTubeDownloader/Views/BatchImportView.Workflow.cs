@@ -95,12 +95,13 @@ internal sealed partial class BatchImportView
 
     private async Task ImportFilesAsync(IReadOnlyList<string> files)
     {
-        var imported = new List<BatchImportSession>();
-        foreach (var file in files.Distinct(StringComparer.OrdinalIgnoreCase))
+        var imported = await services.Batch.ImportFilesAsync(files, QualityPreset.All[quality.SelectedIndex].Id,
+            (PreferredVideoContainer)container.SelectedIndex, (int)workers.Value, OperationToken, OperationProgress());
+        foreach (var value in imported)
         {
-            OperationToken.ThrowIfCancellationRequested(); path.Text = file; await ImportAsync();
-            imported.Add(session!);
+            session = value; RememberSession(value);
         }
+        path.Text = files.Last(); selection.Clear(); page = 0;
         if (workflowMode.SelectedIndex == 1) BeginAutomatic(imported);
     }
 

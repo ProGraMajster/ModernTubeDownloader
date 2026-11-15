@@ -71,6 +71,11 @@ availability still constrains download quality/container choices.
 choice marker, version observations and What's New acknowledgement/deferral. Setup
 states are `NotStarted`, `InProgress`, `Completed`, and explicit `Skipped` (serialized
 enum values 0–3). Draft edits and navigation use the existing atomic JSON writer.
+The ledger publishes detached snapshots only after a successful write. Editing a
+wizard draft cannot mutate committed progress, and a failed Skip, Finish or What's
+New acknowledgement retains both the previous in-memory decision and marker bytes.
+Failed Next/Back saves leave the visible and saved step unchanged; retry advances one
+step. Skip and explicit completion remain usable after a transient autosave failure.
 
 Closing or interrupting the wizard does not mark it completed. A successful draft save
 allows a later start to resume; if a write fails, the last durable marker remains the
@@ -93,6 +98,8 @@ quality, cookies or other legacy choices.
 
 Malformed journey state is preserved. Explicitly reopening setup can recover it only
 after copying its exact original bytes to `experience.json.preserved-<unique id>`.
+A failed replacement keeps automatic prompts suppressed until explicit recovery
+succeeds; it does not treat a backup alone as completed recovery.
 A marker with a newer schema is not rewritten, including on manual setup. Unknown
 schema-1 marker properties round-trip through JSON extension data.
 The required `schemaVersion`, `existingProfile` and `setup` fields must actually exist

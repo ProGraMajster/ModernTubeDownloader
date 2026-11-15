@@ -39,7 +39,7 @@ public sealed class LiveRecordingScheduler : IDisposable, ILiveSessionCommands
         live.Changed += Changed; settings.Changed += Changed;
     }
     public IReadOnlyCollection<Guid> ActiveIds { get { lock (sync) return recordings.Keys.ToArray(); } }
-    public void Start() { loop ??= Task.Run(LoopAsync); Wake(); }
+    public void Start() { if (live.IsReadOnly) return; loop ??= Task.Run(LoopAsync); Wake(); }
 
     public bool StopAndSave(Guid id) => CancelWorker(id, save: true);
     public bool Cancel(Guid id)
@@ -72,7 +72,7 @@ public sealed class LiveRecordingScheduler : IDisposable, ILiveSessionCommands
         }
         Wake();
         if (loop is not null) await loop.ConfigureAwait(false);
-        await live.SaveAsync().ConfigureAwait(false);
+        if (!live.IsReadOnly) await live.SaveAsync().ConfigureAwait(false);
     }
 
     private async Task LoopAsync()
@@ -94,7 +94,7 @@ public sealed class LiveRecordingScheduler : IDisposable, ILiveSessionCommands
                     }
                     // Monitoring is independent of capture slots, bounded to one
                     // short metadata extraction at a time rather than an hours-long process.
-                    if (monitors.Count == 0)
+                    if (!live.IsReadOnly && monitors.Count == 0)
                     {
                         var due = live.Snapshot().Where(item => item.State == LiveSessionState.WaitingForLive &&
                                 (item.NextCheckAt is null || item.NextCheckAt <= timing.UtcNow))

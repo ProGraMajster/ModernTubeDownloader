@@ -100,7 +100,7 @@ public sealed partial class DownloadOrganizerService
         RunOwnedAsync(async ct =>
         {
             token = ct;
-            if (history.LoadFailed || queue.Storage.State.IsBlocked) throw new IOException("Organizer.Error.Journal");
+            EnsureStoresAvailable();
             if (await HasPendingRecoveryAsync(token).ConfigureAwait(false))
                 throw new IOException("Organizer.Error.RecoveryRequired");
             var selected = plan.Matches.Where(match => selection.Contains(match.Id)).ToArray();
@@ -113,7 +113,7 @@ public sealed partial class DownloadOrganizerService
             ValidateJournal(journal);
             foreach (var match in journal.Matches)
             {
-                EnsureInactive(match.MediaPath!);
+                EnsureCurrentReferences(match);
                 foreach (var file in match.Files)
                 {
                     token.ThrowIfCancellationRequested(); ValidateFile(journal, match, file);
@@ -130,6 +130,8 @@ public sealed partial class DownloadOrganizerService
         token = ct;
         var journal = await ReadJournalAsync(id, token).ConfigureAwait(false);
         if (journal.State is OrganizerJournalState.Completed or OrganizerJournalState.Undone) return journal;
+        EnsureStoresAvailable();
+        await RestoreLegacyIdentityEvidenceAsync(journal, token).ConfigureAwait(false);
         return journal.UndoRequested ? await UndoJournalAsync(journal, token).ConfigureAwait(false) : await TransferJournalAsync(journal, token).ConfigureAwait(false);
     }, token);
 
@@ -139,11 +141,15 @@ public sealed partial class DownloadOrganizerService
         var journal = await ReadJournalAsync(id, token).ConfigureAwait(false);
         if (journal.State == OrganizerJournalState.Undone) return journal;
         if (journal.State != OrganizerJournalState.Completed) throw new IOException("Organizer.Error.RecoveryRequired");
+        EnsureStoresAvailable();
+        if (await HasPendingRecoveryAsync(token).ConfigureAwait(false)) throw new IOException("Organizer.Error.RecoveryRequired");
+        await RestoreLegacyIdentityEvidenceAsync(journal, token).ConfigureAwait(false);
         // Validate every member before the first reverse mutation. Changed media, JSON,
         // central originals or occupied old paths stop the whole undo without deleting.
         foreach (var match in journal.Matches)
         foreach (var file in match.Files)
         {
+            EnsureCurrentReferences(match);
             ValidateFile(journal, match, file); EnsureInactive(file.Destination);
             await VerifyAsync(file.Destination, file, token).ConfigureAwait(false);
             if (file.CopyOnly) await VerifyAsync(file.Source, file, token).ConfigureAwait(false);
@@ -164,10 +170,10 @@ public sealed partial class DownloadOrganizerService
             movingTotalFiles = all.Length; movingTotalBytes = all.Sum(value => value.Length); movingFileCount = 0; movingCompletedBytes = 0;
             foreach (var match in journal.Matches)
             {
-                EnsureInactive(match.MediaPath!);
+                EnsureStoresAvailable(); EnsureCurrentReferences(match);
                 foreach (var file in match.Files)
                 {
-                    await PauseBoundary(token).ConfigureAwait(false); ValidateFile(journal, match, file);
+                    await PauseBoundary(token).ConfigureAwait(false); EnsureStoresAvailable(); EnsureCurrentReferences(match); ValidateFile(journal, match, file);
                     if (!file.TransferStarted)
                     {
                         if (File.Exists(file.Destination) || Directory.Exists(file.Destination)) throw new IOException("Organizer.Reason.Collision");
@@ -199,11 +205,13 @@ public sealed partial class DownloadOrganizerService
             observer?.Checkpoint("BeforeReferences", count);
             // Revalidate all destination members before changing any stored reference.
             foreach (var match in journal.Matches)
-            foreach (var file in match.Files) { ValidateFile(journal, match, file); await VerifyAsync(file.Destination, file, token).ConfigureAwait(false); }
+            foreach (var file in match.Files) { EnsureCurrentReferences(match); ValidateFile(journal, match, file); await VerifyAsync(file.Destination, file, token).ConfigureAwait(false); }
+            EnsureStoresAvailable();
             var changes = journal.Matches.ToDictionary(match => match.MediaPath!, match => match.Files[0].Destination, OrganizerPathSafety.Comparer);
             await history.RelocatePathsAsync(changes, token).ConfigureAwait(false);
             observer?.Checkpoint("AfterHistory", count);
             await queue.RelocateCompletedPathsAsync(changes, token).ConfigureAwait(false);
+            observer?.Checkpoint("AfterQueue", count);
             journal.State = OrganizerJournalState.Completed; await SaveJournalAsync(journal).ConfigureAwait(false);
             Report("Organizer.Phase.Completed", count, all.Length, bytes, bytes);
             logger.Info($"Organizer operation {journal.Id:N} completed with {count} files.");
@@ -227,8 +235,8 @@ public sealed partial class DownloadOrganizerService
             foreach (var match in journal.Matches.AsEnumerable().Reverse())
             foreach (var file in match.Files.AsEnumerable().Reverse())
             {
-                await PauseBoundary(token).ConfigureAwait(false); ValidateFile(journal, match, file); EnsureInactive(file.Destination);
-                if (file.UndoCompleted) continue;
+                await PauseBoundary(token).ConfigureAwait(false); EnsureStoresAvailable(); EnsureCurrentReferences(match); ValidateFile(journal, match, file); EnsureInactive(file.Destination);
+                if (file.UndoCompleted) { completed++; movingFileCount = completed; movingCompletedBytes += file.Length; continue; }
                 if (file.CopyOnly)
                 {
                     await VerifyAsync(file.Source, file, token).ConfigureAwait(false);
@@ -246,10 +254,13 @@ public sealed partial class DownloadOrganizerService
                 Report("Organizer.Phase.Moving", completed, movingTotalFiles, movingCompletedBytes, movingTotalBytes, Path.GetFileName(file.Source));
             }
             foreach (var match in journal.Matches)
-            foreach (var file in match.Files) { ValidateFile(journal, match, file); await VerifyAsync(file.Source, file, token).ConfigureAwait(false); }
+            foreach (var file in match.Files) { EnsureCurrentReferences(match); ValidateFile(journal, match, file); await VerifyAsync(file.Source, file, token).ConfigureAwait(false); }
+            EnsureStoresAvailable(); observer?.Checkpoint("BeforeUndoReferences", completed);
             var changes = journal.Matches.ToDictionary(match => match.Files[0].Destination, match => match.MediaPath!, OrganizerPathSafety.Comparer);
             await history.RelocatePathsAsync(changes, token).ConfigureAwait(false);
+            observer?.Checkpoint("AfterUndoHistory", completed);
             await queue.RelocateCompletedPathsAsync(changes, token).ConfigureAwait(false);
+            observer?.Checkpoint("AfterUndoQueue", completed);
             journal.State = OrganizerJournalState.Undone; journal.ErrorCode = null; await SaveJournalAsync(journal).ConfigureAwait(false);
             Report("Organizer.Phase.Undone", completed, completed, 0, 0); return journal;
         }
@@ -269,7 +280,7 @@ public sealed partial class DownloadOrganizerService
         {
             // No replacement; repeat containment/reparse validation directly at the mutation boundary.
             OrganizerPathSafety.CheckAncestors(source); OrganizerPathSafety.CheckAncestors(destination);
-            File.Move(source, destination); return;
+            File.Move(source, destination); observer?.Checkpoint("AfterRenamePublished", movingFileCount); return;
         }
         var temporary = Path.Combine(directory, "." + Path.GetFileName(destination) + "." + journal.Id.ToString("N") + ".organizing");
         if (File.Exists(temporary))
@@ -310,18 +321,66 @@ public sealed partial class DownloadOrganizerService
         if (stream.Length != expected.Length || Convert.ToHexString(await SHA256.HashDataAsync(stream, token).ConfigureAwait(false)) != expected.Sha256)
             throw new IOException("Organizer.Error.Changed");
     }
-    private void EnsureInactive(string path)
+    private void EnsureStoresAvailable()
+    {
+        if (history.LoadFailed || queue.Storage.State.IsBlocked) throw new IOException("Organizer.Error.Journal");
+    }
+    private static async Task RestoreLegacyIdentityEvidenceAsync(OrganizerJournal journal, CancellationToken token)
+    {
+        // Version-1 manifests created before VerifiedVideoId remain readable. Bind
+        // their identity from the recorded, hash-verified JSON, not a changed store.
+        foreach (var match in journal.Matches.Where(match => match.VerifiedVideoId is null))
+        foreach (var file in match.Files.Where(file => file.Source.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
+        {
+            var path = File.Exists(file.Source) ? file.Source : file.Destination;
+            await VerifyAsync(path, file, token).ConfigureAwait(false);
+            var evidence = await MetadataEvidenceAsync(path, token, match.VerifiedVideoId).ConfigureAwait(false);
+            if (evidence is null || evidence.Identity != match.Identity) throw new IOException("Organizer.Error.JsonIdentity");
+            match.VerifiedVideoId = evidence.VideoId;
+        }
+    }
+    private void RefreshReferenceIndex()
     {
         var version = Interlocked.Read(ref referenceVersion);
         if (indexedReferenceVersion != version)
         {
-            protectedReferences = queue.Snapshot().Where(item => (item.Status != DownloadStatus.Completed || item.LiveSession is not null) && item.FinalFile is not null)
-                .Select(item => item.FinalFile!).Concat(history.Snapshot().Where(entry => entry.WasLiveRecording || entry.WasPartial).Select(entry => entry.FinalPath))
-                .ToHashSet(OrganizerPathSafety.Comparer);
+            var queueRows = queue.Snapshot();
+            canonicalReferences = queueRows.Where(item => item.FinalFile is not null)
+                .Select(item => (Path: item.FinalFile!, Value: Reference(item)))
+                .Concat(history.Snapshot().Select(entry => (Path: entry.FinalPath, Value: Reference(entry))))
+                .GroupBy(item => item.Path, OrganizerPathSafety.Comparer)
+                .ToDictionary(group => group.Key, group => group.Select(item => item.Value).ToArray(), OrganizerPathSafety.Comparer);
+            protectedReferences = canonicalReferences.Where(item => item.Value.Any(value => value.Protected))
+                .Select(item => item.Key).ToHashSet(OrganizerPathSafety.Comparer);
+            // Finalizing jobs can publish media/JSON before FinalFile is committed.
+            // A path-only guard cannot identify those in-flight recordings safely.
+            protectedIdentities = queueRows.Where(item => item.Status != DownloadStatus.Completed || item.LiveSession is not null)
+                .Select(item => TryIdentity(item.SourceUrl, out var identity) ? identity : null)
+                .OfType<string>().ToHashSet(StringComparer.Ordinal);
             indexedReferenceVersion = version;
         }
-        if (protectedReferences.Contains(path))
-            throw new IOException("Organizer.Error.Active");
+    }
+    private void EnsureInactive(string path)
+    {
+        RefreshReferenceIndex();
+        if (protectedReferences.Contains(path)) throw new IOException("Organizer.Error.Active");
+    }
+    private void EnsureIdentityInactive(string identity)
+    {
+        RefreshReferenceIndex();
+        if (protectedIdentities.Contains(identity)) throw new IOException("Organizer.Error.Active");
+    }
+    private void EnsureCurrentReferences(OrganizerMatch match)
+    {
+        // During crash recovery History and Queue may legitimately refer to opposite
+        // sides of the same relocation. Both must still identify this exact recording.
+        RefreshReferenceIndex();
+        EnsureIdentityInactive(match.Identity);
+        foreach (var path in new[] { match.MediaPath!, match.Files[0].Destination }.Distinct(OrganizerPathSafety.Comparer))
+        {
+            EnsureInactive(path);
+            VerifyCanonicalEvidence(match, canonicalReferences.GetValueOrDefault(path) ?? []);
+        }
     }
     private void ValidateJournal(OrganizerJournal journal)
     {

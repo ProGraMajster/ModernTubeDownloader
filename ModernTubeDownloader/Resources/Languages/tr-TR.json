@@ -1,4 +1,5 @@
 {
+  "Batch.Error.FileSelection": "Mevcut TXT, JSON veya CSV dosyalarından 1 ile 32 arasında dosya seçin. Hiçbir dosya içe aktarılmadı.",
   "History.PageSummary": "Sayfa {0} {1} • Sonuçlar: {2} / {3}",
   "Appearance.TextTitle": "Kişiselleştirme • Text büyüklüğü",
   "Appearance.TextHint": "Mantıksal metin büyüklüğü, Windows DPI'dan bağımsız. Küçük% 90, Varsayılan% 100, Büyük 125%, Ekstra% 150; Özel 80-20%. Icons kendi boyutlarını koruyor.",

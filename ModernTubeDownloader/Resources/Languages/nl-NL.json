@@ -1,4 +1,5 @@
 {
+  "Batch.Error.FileSelection": "Selecteer 1 tot 32 bestaande TXT-, JSON- of CSV-bestanden. Er zijn geen bestanden geïmporteerd.",
   "History.PageSummary": "Pagina {0} van {1} • Resultaten: {2} / {3}",
   "Appearance.TextTitle": " Persoonlijkheid • Tekstgrootte",
   "Appearance.TextHint": "Logische tekstgrootte, onafhankelijk van Windows dpi.  Klein 90%, Standaard 100%, Groot 125%, Extra groot 150%; Aangepast 80 Iconen houden hun eigen grootte.",

@@ -28,6 +28,10 @@ public sealed partial class DownloadOrganizerService : IDisposable
     private int activeCount, disposed;
     private long referenceVersion, indexedReferenceVersion = -1;
     private HashSet<string> protectedReferences = new(OrganizerPathSafety.Comparer);
+    private HashSet<string> protectedIdentities = new(StringComparer.Ordinal);
+    private Dictionary<string, CanonicalReference[]> canonicalReferences = new(OrganizerPathSafety.Comparer);
+    private sealed record CanonicalReference(string SourceUrl, string VideoId, MediaTimeRange Range, string? Quality, bool Protected);
+    private sealed record MetadataEvidence(string Identity, string VideoId);
     private sealed record PlanLookup(Dictionary<string, DownloadHistoryEntry[]> History,
         Dictionary<string, DownloadQueueItem[]> Queue, Dictionary<string, string[]> CompanionsByStem,
         Dictionary<string, OrganizerFile> Fingerprints);
@@ -245,13 +249,18 @@ public sealed partial class DownloadOrganizerService : IDisposable
         if (byStem[stem].Length > 1) { match.Status = OrganizerMatchStatus.Ambiguous; match.ReasonKey = "Organizer.Reason.SharedBasename"; return; }
         try
         {
+            EnsureIdentityInactive(match.Identity);
             var ids = historyRecords.Select(entry => entry.VideoId).Concat(queueRecords.Select(item => item.VideoId)).Where(id => id.Length > 0).Distinct().ToArray();
+            VerifyCanonicalEvidence(match, historyRecords.Select(Reference).Concat(queueRecords.Select(Reference)));
+            match.VerifiedVideoId = ids.SingleOrDefault();
             match.Files.Add(await DescribeForPlanAsync(media, Path.Combine(match.DestinationDirectory, Path.GetFileName(media)), false, lookup, token).ConfigureAwait(false));
             var hasJson = false;
             foreach (var json in new[] { stem + ".json", stem + ".info.json" }.Where(files.Contains))
             {
-                if (await MetadataIdentityAsync(json, token, ids.Length == 1 ? ids[0] : null).ConfigureAwait(false) != match.Identity)
+                var evidence = await MetadataEvidenceAsync(json, token, match.VerifiedVideoId).ConfigureAwait(false);
+                if (evidence is null || evidence.Identity != match.Identity)
                     throw new IOException("Organizer.Error.JsonIdentity");
+                match.VerifiedVideoId ??= evidence.VideoId;
                 match.Files.Add(await DescribeForPlanAsync(json, Path.Combine(match.DestinationDirectory, Path.GetFileName(json)), false, lookup, token).ConfigureAwait(false)); hasJson = true;
             }
             if (!hasJson)
@@ -296,6 +305,8 @@ public sealed partial class DownloadOrganizerService : IDisposable
         identity = BatchImportParser.Identity(normalized); return true;
     }
     private static async Task<string?> MetadataIdentityAsync(string file, CancellationToken token, string? expectedId = null)
+        => (await MetadataEvidenceAsync(file, token, expectedId).ConfigureAwait(false))?.Identity;
+    private static async Task<MetadataEvidence?> MetadataEvidenceAsync(string file, CancellationToken token, string? expectedId = null)
     {
         try
         {
@@ -311,10 +322,31 @@ public sealed partial class DownloadOrganizerService : IDisposable
             if (expectedId is not null && id != expectedId) return null;
             foreach (var key in new[] { "webpage_url", "original_url" })
                 if (json.RootElement.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String && TryIdentity(value.GetString(), out var identity))
-                    return identity.StartsWith("youtube:video:", StringComparison.Ordinal) && identity[14..] != id ? null : identity;
+                    return identity.StartsWith("youtube:video:", StringComparison.Ordinal) && identity[14..] != id ? null : new(identity, id!);
             return null; // An unqualified ID or title is not sufficient cross-provider evidence.
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+    private static CanonicalReference Reference(DownloadHistoryEntry entry) => new(entry.SourceUrl, entry.VideoId,
+        entry.RequestedRange ?? MediaTimeRange.Full, entry.QualityPresetId, entry.WasLiveRecording || entry.WasPartial);
+    private static CanonicalReference Reference(DownloadQueueItem entry) => new(entry.SourceUrl, entry.VideoId,
+        entry.RequestedRange ?? MediaTimeRange.Full, entry.QualityPresetId, entry.Status != DownloadStatus.Completed || entry.LiveSession is not null);
+    private static void VerifyCanonicalEvidence(OrganizerMatch match, IEnumerable<CanonicalReference> records)
+    {
+        string? id = match.VerifiedVideoId;
+        foreach (var record in records)
+        {
+            if (!TryIdentity(record.SourceUrl, out var identity) || identity != match.Identity)
+                throw new IOException("Organizer.Error.JsonIdentity");
+            if (!string.IsNullOrEmpty(record.VideoId))
+            {
+                if (id is not null && id != record.VideoId) throw new IOException("Organizer.Error.JsonIdentity");
+                id = record.VideoId;
+            }
+            if (record.Range != match.RequestedRange || match.RequestedQuality != "best" &&
+                !string.Equals(record.Quality, match.RequestedQuality, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Organizer.Reason.Variant");
+        }
     }
     private static async Task<OrganizerFile> DescribeAsync(string source, string destination, bool copyOnly, CancellationToken token)
     {

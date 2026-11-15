@@ -13,7 +13,7 @@ namespace ModernTubeDownloader.Tests;
 
 public sealed class OrganizerTests(ITestOutputHelper output)
 {
-    private sealed class Fixture : IAsyncDisposable
+    internal sealed class Fixture : IAsyncDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "mtd-organizer-" + Guid.NewGuid().ToString("N"));
         public string Source => Path.Combine(Root, "downloads");

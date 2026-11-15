@@ -165,13 +165,14 @@ internal sealed partial class BatchImportView : UserControl
         RememberSession(session);
         if (workflowMode.SelectedIndex == 1) BeginAutomatic([session]);
     }
-    private Task AnalyzeAsync()
+    private async Task AnalyzeAsync()
     {
-        if (session is not { } s) return Task.CompletedTask;
+        if (session is not { } s) return;
         s.AnalysisWorkers = (int)workers.Value;
+        var selected = ActionSelection(s);
+        await services.Batch.RetryFailedAsync(s, selected, OperationToken);
         // Service owns this task after the window closes; observe every failure.
-        _ = ObserveAnalysis(services.Batch.StartAsync(s, ActionSelection(s)));
-        return Task.CompletedTask;
+        _ = ObserveAnalysis(services.Batch.StartAsync(s, selected));
     }
     private async Task ObserveAnalysis(Task task)
     { try { await task; } catch (Exception ex) { services.Logger.Error("Batch preparation stopped.", ex); } }
@@ -238,12 +239,19 @@ internal sealed partial class BatchImportView : UserControl
             var url = AppUi.Muted(entry.Url); url.Visible = appearance.ShowUrl;
             var state = AppUi.Muted(services.Localization["Batch.Status." + entry.Status] + (appearance.ShowQuality ? " • " + entry.Quality : "") + (appearance.ShowContainer ? " • " + entry.Container : "") + " " + entry.Range.DisplayText + (appearance.StatusDetails && entry.ErrorKey is { } errorKey ? " • " + services.Localization[errorKey] : ""));
             state.AccessibleAutomationId = "BatchEntryStatus" + entry.Ordinal;
-            var analyze = new DashboardButton { Text = services.Localization["Batch.Analyze"], Enabled = !services.Batch.IsAnalyzing && entry.QueueItemId is null };
+            var retry = entry.QueueItemId is not null && entry.Status == BatchEntryStatus.Failed;
+            var analyze = new DashboardButton { Text = services.Localization[retry ? "Common.Retry" : "Batch.Analyze"],
+                Enabled = !services.Batch.IsOperating && (entry.QueueItemId is null || retry) };
             var add = new DashboardButton { Text = services.Localization["Batch.Add"], Enabled = entry.Status == BatchEntryStatus.Ready };
             var details = new DashboardButton { Text = services.Localization["Common.Details"], Enabled = entry.HasMetadata };
             var remove = new DashboardButton { Text = services.Localization["Batch.Remove"], Enabled = entry.QueueItemId is null && entry.Status != BatchEntryStatus.Analyzing };
             foreach (var button in new[] { analyze, add, details, remove }) AppUi.Secondary(button);
-            analyze.Click += (_, _) => _ = RunAsync(() => { _ = ObserveAnalysis(services.Batch.StartAsync(s, new HashSet<Guid> { entry.Id })); return Task.CompletedTask; });
+            analyze.Click += (_, _) => _ = RunAsync(async () =>
+            {
+                var selected = new HashSet<Guid> { entry.Id };
+                await services.Batch.RetryFailedAsync(s, selected, OperationToken);
+                _ = ObserveAnalysis(services.Batch.StartAsync(s, selected));
+            });
             add.Click += (_, _) => _ = RunAsync(async () => await services.Batch.AddReadyAsync(s, new HashSet<Guid> { entry.Id }));
             remove.Click += (_, _) => _ = RunAsync(() => services.Batch.EditAsync(s, new HashSet<Guid> { entry.Id }, remove: true));
             details.Click += (_, _) => _ = RunAsync(async () => { if (await services.Batch.MetadataAsync(s, entry.Id, lifetime.Token) is { } metadata) { using var window = new VideoDetailsForm(metadata, services.Localization, services.Thumbnails); using var registration = RegisterDialog?.Invoke(window); await window.ShowDialog(FindForm()!); } });

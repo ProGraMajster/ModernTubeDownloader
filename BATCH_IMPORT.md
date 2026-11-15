@@ -10,6 +10,14 @@ Each selected file creates an independent session. The list selector switches th
 destination editor and progress to that session. Classic retains its existing actions
 and adds the one-click action; no second runtime or download scheduler is created.
 
+The native Windows drop adapter and file picker accept **1–32 TXT/JSON/CSV files**.
+The entire selection is checked for supported extensions, existence and per-file size
+before its first import; oversized/truncated native selections are rejected as a whole.
+Duplicate paths are imported once. Files are prepared sequentially, retain separate
+session IDs and folders, and use the same shared automatic operation. A file changing
+or failing during parsing stops that operation; earlier persisted sessions remain
+available and are not automatically submitted as a partial selection.
+
 New sessions propose `<current downloads folder>/<list filename without extension>`.
 Clipboard sessions use `Import YYYY-MM-DD`. The destination card exposes a root,
 editable list name and enabled-by-default list subfolder option. Save applies a strict
@@ -39,6 +47,29 @@ existing QueueProcessor, concurrency, storage latch and LIVE admission rules rem
 authoritative. Analysis Pause/Resume/Cancel is separate from queue pause/cancellation.
 Closing the view leaves the service-owned automatic preparation running; application
 shutdown cancels and saves it. Restart never restarts analysis automatically.
+
+Canonical queue status events now persist Batch completion even when its view is closed.
+Startup indexes unfinished sessions after loading the queue and before admitting workers;
+no raw video metadata is loaded for this reconciliation. Repeated progress ticks with an
+unchanged status do not scan the queue or write the journal. A completed row retains its
+stable job ID after clearing completed queue jobs; after a crash, completed canonical
+History records provide the durable evidence for the same identity. Unreadable stores
+block automatic startup installation and are retained for recovery.
+
+Explicit retry (a failed row, filtered Analyze action, or Import & Download) reuses the
+canonical failed job rather than adding another one. Its ID and accepted folder remain
+unchanged, and retry never resumes global pause or changes jobs outside the selection.
+The service serializes reconciliation and metadata commits, and drains admitted work
+on shutdown. An interrupted final journal append is backed up byte-for-byte before its
+valid prefix is recovered; this also happens before the next append without a restart.
+Corruption inside the journal fails closed instead of discarding committed records.
+
+An explicitly cancelled or parser-rejected initial import records a bounded terminal
+marker before returning its error. It states the exact session ID, schema and lack of
+queue admission; partial `entries.tmp` bytes remain available for diagnostics. Such an
+attempt no longer blocks startup updates forever. Unknown crash folders, malformed or
+oversized markers, ID/schema mismatches, and failed marker writes still block automatic
+installation. The marker does not turn an imported/downloaded row into a success.
 
 Progress uses five named segments (load, metadata, queue handoff, download, finalize),
 real row counts, authentication/error counts and the current analyzed/downloading title.

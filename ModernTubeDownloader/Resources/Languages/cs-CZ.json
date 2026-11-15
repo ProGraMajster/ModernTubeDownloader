@@ -1,4 +1,5 @@
 {
+  "Batch.Error.FileSelection": "Vyberte 1 až 32 existujících souborů TXT, JSON nebo CSV. Nebyly importovány žádné soubory.",
   "History.PageSummary": "Strana {0} z {1} • Výsledky: {2} / {3}",
   "Appearance.TextTitle": "Personalizace • Velikost textu",
   "Appearance.TextHint": "Logická velikost textu, nezávislá na Windows DPI. Malé 90%, Výchozí 100%, Velké 125%, Extra velké 150%; Vlastní 80- 200%. Ikony si nechávají svou vlastní velikost.",

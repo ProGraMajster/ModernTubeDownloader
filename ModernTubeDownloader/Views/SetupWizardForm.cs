@@ -26,7 +26,6 @@ internal sealed class SetupWizardForm : Form
     private readonly List<(Control Control, int Height)> rows = [];
     private readonly List<IDisposable> ownedImages = [];
     private bool building, busy, closeAllowed, closeWhenIdle, arrangingRows;
-    private Task pendingSave = Task.CompletedTask;
     public bool Accepted { get; private set; }
     public Func<Form, IDisposable?>? RegisterDialog { get; set; }
 
@@ -42,9 +41,9 @@ internal sealed class SetupWizardForm : Form
         heading.AccessibleAutomationId = "SetupHeading"; progress.AccessibleAutomationId = "SetupProgress";
         error.AccessibleAutomationId = "SetupError";
         surface.Controls.AddRange([body, footer]); body.Controls.Add(pageHeader); pageHeader.Controls.AddRange([stepIcon, heading, subtitle, progress, stepProgress]); footer.Controls.AddRange([error, back, skip, next]);
-        back.Click += async (_, _) => await RunAsync(async () => { draft.Step = Math.Max(0, draft.Step - 1); await SaveAsync(); BuildStep(); });
+        back.Click += async (_, _) => await RunAsync(() => MoveToStepAsync(Math.Max(0, draft.Step - 1)));
         next.Click += async (_, _) => await RunAsync(NextAsync);
-        skip.Click += async (_, _) => await RunAsync(async () => { await pendingSave; await services.Experience.SkipAsync(upgrade); closeAllowed = true; Close(); });
+        skip.Click += async (_, _) => await RunAsync(async () => { await services.Experience.SkipAsync(upgrade); closeAllowed = true; Close(); });
         Closing += async (_, e) =>
         {
             if (closeAllowed) return;
@@ -72,7 +71,15 @@ internal sealed class SetupWizardForm : Form
         }
         finally { busy = false; body.Enabled = next.Enabled = skip.Enabled = true; back.Enabled = !upgrade && draft.Step > 0; LayoutPage(); if (closeWhenIdle && !closeAllowed) { closeWhenIdle = false; Close(); } }
     }
-    private Task SaveAsync() => pendingSave = services.Experience.SaveDraftAsync(draft);
+    private Task SaveAsync() => services.Experience.SaveDraftAsync(draft);
+    private async Task MoveToStepAsync(int step)
+    {
+        var previous = draft.Step;
+        draft.Step = step;
+        try { await SaveAsync(); }
+        catch { draft.Step = previous; throw; }
+        BuildStep();
+    }
     private async void Changed()
     {
         if (building) return;
@@ -83,9 +90,11 @@ internal sealed class SetupWizardForm : Form
     private async Task NextAsync()
     {
         if (!upgrade && draft.Step == 2) await Task.Run(() => UserExperienceService.ValidateFolders(draft));
-        if (!upgrade && draft.Step < 5) { draft.Step++; await SaveAsync(); BuildStep(); return; }
+        if (!upgrade && draft.Step < 5) { await MoveToStepAsync(draft.Step + 1); return; }
         if (!upgrade) await Task.Run(() => UserExperienceService.ValidateFolders(draft));
-        await pendingSave;
+        // Retry the current draft after a transient autosave failure. The service
+        // serializes earlier edits; a faulted old task must not poison Finish/Skip.
+        await SaveAsync();
         var settings = services.Settings.Current;
         if (!upgrade)
         {

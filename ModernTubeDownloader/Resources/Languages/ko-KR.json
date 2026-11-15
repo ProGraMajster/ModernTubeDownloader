@@ -1,4 +1,5 @@
 {
+  "Batch.Error.FileSelection": "기존 TXT, JSON 또는 CSV 파일을 1~32개 선택하세요. 가져온 파일이 없습니다.",
   "History.PageSummary": "{1}의 페이지 {0} • 결과 : {2} / {3}",
   "Appearance.TextTitle": "개인화 • 텍스트 크기",
   "Appearance.TextHint": "Windows DPI의 독립적 인 논리 텍스트 크기. 작은 90%, 과태 100%년, 큰 125%의 여분 큰 150%년; 관례 80-200%. 아이콘은 자신의 크기를 유지합니다.",

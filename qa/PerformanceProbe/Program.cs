@@ -54,7 +54,7 @@ foreach(var name in new[]{"yt-dlp.exe","ffmpeg.exe","ffprobe.exe","deno.exe"}) F
 var settings=new AppSettings { Language="pl",ThemeMode=AppThemeMode.Dark,QueuePaused=true,EnableWebRemote=false,BrowserIntegrationEnabled=false,
     UseCustomYtDlp=true,CustomYtDlpPath=Path.Combine(tools,"yt-dlp.exe"),UseCustomFfmpeg=true,CustomFfmpegPath=Path.Combine(tools,"ffmpeg.exe"),CustomFfprobePath=Path.Combine(tools,"ffprobe.exe"),UseCustomDeno=true,CustomDenoPath=Path.Combine(tools,"deno.exe"),
     TemporaryDirectory=Path.Combine(root,"temp"),FinalOutputDirectory=Path.Combine(root,"output"),
-    Updates=new(){AutomaticChecks=false},Notifications=new(){Enabled=false},Startup=new(){CloseBehavior=TrayCloseBehavior.Exit,ShowTrayIcon=false} };
+    Updates=new(){AutomaticChecks=false,PolicyVersion=1},Notifications=new(){Enabled=false},Startup=new(){CloseBehavior=TrayCloseBehavior.Exit,ShowTrayIcon=false} };
 Directory.CreateDirectory(settings.FinalOutputDirectory);Directory.CreateDirectory(settings.TemporaryDirectory);
 var queue=new List<DownloadQueueItem>();var history=new List<DownloadHistoryEntry>();
 var stamp=new DateTimeOffset(2026,1,1,0,0,0,TimeSpan.Zero);
@@ -85,6 +85,10 @@ async Task Write<T>(string path,T value)
 await Write(paths.SettingsFile,settings);await Write(paths.HistoryFile,history);await new QueuePersistenceService(paths,new NullAppLogger()).SaveAsync(queue);
 await Write(paths.LiveSessionsFile,Array.Empty<LiveSession>());
 await Write(paths.ToolStateFile,new ToolManagerState{LastToolUpdateCheck=DateTimeOffset.UtcNow});
+// Performance fixtures represent an existing user who has finished onboarding.
+// This is fixture data, not a production bypass; journey tests use fresh markers.
+var version = typeof(AppPaths).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
+await Write(Path.Combine(root,"experience.json"),new {schemaVersion=1,existingProfile=true,setup=2,interfaceChoiceFamily="1.3",lastObservedVersion=version,lastWhatsNewAcknowledgedVersion=version});
 Console.WriteLine(JsonSerializer.Serialize(new{root,history=count,queue=queueCount,uniqueImages=imageCount,width=640,height=360,hashHistory=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(paths.HistoryFile))),hashQueue=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(paths.QueueFile)))}));
 
 static async IAsyncEnumerable<BatchImportEntry> BatchRows()

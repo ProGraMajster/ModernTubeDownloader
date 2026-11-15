@@ -93,7 +93,7 @@ internal sealed class CookieSyncSettingsPanel : Panel
             var bridge=NativeBridgeRegistration.ReadBindings(services.Paths.AuthenticationDirectory);
             summary.Text=services.Localization[bridge.Count>0?"CookieSync.BridgeInstalled":"CookieSync.BridgeMissing"]+"\n"+
                 (profiles.Count==0?services.Localization["CookieSync.NotSynced"]:string.Join("\n",profiles.Select(p=>
-                $"{p.Browser} • {string.Join(", ",p.Domains)} • {p.CookieCount} cookies • {p.LastSyncUtc.ToLocalTime():g} • " +
+                $"{p.Browser} • {string.Join(", ",p.Domains)} • {p.CookieCount} cookies • {p.LastSyncUtc.ToLocalTime().ToString("g", services.Localization.Culture)} • " +
                 services.Localization[p.Revoked?"CookieSync.Revoked":DateTimeOffset.UtcNow-p.LastSyncUtc<TimeSpan.FromMinutes(30)?"CookieSync.Fresh":"CookieSync.Stale"] +
                 $" • v{p.SnapshotVersion} • {p.ExcludedPartitioned} partitioned")));
         } catch { summary.Text=services.Localization["CookieSync.Unavailable"]; }
