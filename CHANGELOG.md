@@ -44,6 +44,10 @@
 - Failed onboarding/update/language saves do not publish uncommitted state; shutdown
   drains remaining process owners even when a service checkpoint fails.
 - Settings retain usable category/card geometry after Classic/Modern reattachment.
+- Small JSON store reads and atomic publication share the existing I/O gate,
+  avoiding overlapping open-file replacement by the Batch completion observer on Windows.
+- Empty queues and Batch lists still awaiting analysis/admission no longer present a
+  zero transfer ETA as an estimate for unfinished work.
 
 - Startup update settings commit their measured height once; alternating intermediate
   heights had caused a native stack overflow through recursive SizeChanged layout.

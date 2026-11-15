@@ -223,7 +223,7 @@ internal sealed partial class BatchImportView : UserControl
         downloadProgress.Value = (int)summary.Percent;
         overall.Text = services.Localization.Get("Batch.Overall", summary.Settled, summary.Total, summary.Completed, summary.Failed,
             (knownBytes / 1073741824d).ToString("N2", services.Localization.Culture), unknown,
-            summary.TransferRemaining is { } eta ? eta.ToString(@"d\.hh\:mm\:ss") : "—");
+            BatchImportService.TransferRemaining(s, summary) is { } eta ? eta.ToString(@"d\.hh\:mm\:ss") : "—");
         buttons["Pause"].Text = services.Localization[s.Paused ? "Batch.Resume" : "Batch.Pause"];
         RefreshDashboardStatus();
         var nextSignature = string.Join(';', data.Entries.Select(entry => $"{entry.Id}/{entry.Status}/{entry.Quality}/{entry.Container}/{entry.Title}/{entry.Range}"));

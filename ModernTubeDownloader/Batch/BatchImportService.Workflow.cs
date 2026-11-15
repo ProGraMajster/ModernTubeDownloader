@@ -142,6 +142,17 @@ public sealed partial class BatchImportService
             ? BatchWorkflowPhase.Completed : BatchWorkflowPhase.Prepared;
     }
 
+    /// <summary>A linked subset cannot estimate transfer for work still awaiting admission.</summary>
+    internal static TimeSpan? TransferRemaining(BatchImportSession session, ModernTubeDownloader.Services.QueueProgressSummary linkedQueueSummary)
+    {
+        // Inspect the entire canonical session, not the currently visible/filter-matched page.
+        // The projection does not load metadata or copy the large row collection.
+        lock (session.Sync)
+            return session.Entries.Any(entry => !entry.Removed && entry.QueueItemId is null &&
+                entry.Status is BatchEntryStatus.Pending or BatchEntryStatus.Validating or BatchEntryStatus.Analyzing or BatchEntryStatus.Ready)
+                ? null : linkedQueueSummary.TransferRemaining;
+    }
+
     public async Task<bool> HasUnfinishedSessionsAsync(CancellationToken token = default)
     {
         if (queue.LoadFailed || IsOperating) return true;
