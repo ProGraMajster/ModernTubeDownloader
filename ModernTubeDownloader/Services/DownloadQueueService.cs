@@ -69,6 +69,15 @@ public sealed class DownloadQueueService
             item.EstimatedSizeBytes, item.TotalBytes, item.DownloadedBytes, item.SpeedBytesPerSecond)).ToArray();
     }
 
+    /// <summary>Copies only selected jobs. The canonical list is scanned once under its existing lock.</summary>
+    public IReadOnlyList<QueueProgressItem> ProgressSnapshot(IReadOnlySet<Guid> selectedIds)
+    {
+        if (selectedIds.Count == 0) return [];
+        lock (sync) return items.Where(item => selectedIds.Contains(item.Id)).Select(item =>
+            new QueueProgressItem(item.Id, item.Status, item.ProgressPercent, item.EstimatedSizeBytes,
+                item.TotalBytes, item.DownloadedBytes, item.SpeedBytesPerSecond)).ToArray();
+    }
+
     public DownloadQueueItem? Find(Guid id)
     {
         lock (sync)

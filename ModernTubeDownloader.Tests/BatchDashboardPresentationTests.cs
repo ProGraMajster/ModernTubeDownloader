@@ -118,7 +118,13 @@ public sealed partial class BatchDashboardPresentationTests
                 Assert.Contains(services.Localization["Batch.Error.Analysis"], states[2].AccessibleName);
                 if (scale == 100)
                 {
-                    var header = Find<Panel>(view, "BatchTableHeader"); Assert.True(header.Top < 470);
+                    var header = Find<Panel>(view, "BatchTableHeader");
+                    // The labelled destination fields and complete workflow message
+                    // now precede the table. Their measured height replaces the old
+                    // fixed 470px top limit, which required clipping the message.
+                    Assert.True(header.Top >= Find<Panel>(view, "BatchDestinationCard").Bottom);
+                    Assert.True(header.Top >= Find<Panel>(view, "BatchWorkflowProgress").Bottom);
+                    Assert.True(list.Height >= 5 * 32, "Keep a useful independently scrollable page below the complete setup cards.");
                     foreach (var column in new[] { "Url", "Title", "Status", "Quality" })
                         Assert.Equal(Find<Label>(view, "BatchColumn" + column).Left, Find<Label>(view, "BatchEntry" + column + "1").Left);
                     Assert.All(list.Controls, row =>

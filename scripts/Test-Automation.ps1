@@ -34,6 +34,9 @@ param(
     [ValidateSet('Live', 'History', 'Batch', 'Other', 'Settings')][string]$DashboardScreenSmoke,
     [switch]$BatchAnalysisVisualSmoke,
     [switch]$BatchComboBoxRefreshSmoke,
+    [switch]$BatchIdleStabilitySmoke,
+    [switch]$BatchActiveStabilitySmoke,
+    [ValidateSet(122, 2750, 10000)][int]$BatchStabilityCount = 122,
     [switch]$DashboardScreenRoundTrip,
     [switch]$DashboardLayoutSmoke,
     [switch]$DashboardTransferSmoke,
@@ -101,6 +104,8 @@ if ($UpdateStatesSmoke) {
 }
 if ($DashboardScreenSmoke) { $DashboardPopulatedFixture = $true; $DashboardFixtureCount = 5; $CaptureVisual = $true }
 if ($BatchComboBoxRefreshSmoke) { $BatchAnalysisVisualSmoke = $true }
+if ($BatchActiveStabilitySmoke) { $BatchIdleStabilitySmoke = $true }
+if ($BatchIdleStabilitySmoke -and $DashboardScreenSmoke -ne 'Batch') { throw 'BatchIdleStabilitySmoke requires DashboardScreenSmoke Batch.' }
 if ($BatchAnalysisVisualSmoke -and $DashboardScreenSmoke -ne 'Batch') { throw 'BatchAnalysisVisualSmoke requires DashboardScreenSmoke Batch.' }
 if ($DashboardScreenRoundTrip -and -not $DashboardScreenSmoke) { throw 'DashboardScreenRoundTrip requires DashboardScreenSmoke.' }
 if ($PlaylistTransferSmoke -or $PlaylistGroupsSmoke -or $PlaylistShellSwitchCycles -gt 0) { $PlaylistVisualSmoke = $true }
@@ -119,6 +124,8 @@ $previousFakeDownloadDelay = $env:MTD_FAKE_DOWNLOAD_DELAY_MS
 $previousFakeThumbnail = $env:MTD_FAKE_METADATA_THUMBNAIL
 $previousFakeMetadataDelay = $env:MTD_FAKE_METADATA_DELAY_MS
 $previousFakeMetadataGate = $env:MTD_QA_FAKE_METADATA_GATE
+$previousBatchTrace = $env:MTD_QA_BATCH_TRACE
+if ($BatchActiveStabilitySmoke) { $env:MTD_FAKE_DOWNLOAD_DELAY_MS = '0' }
 if ($DashboardPopulatedFixture) { $env:MTD_FAKE_METADATA_THUMBNAIL = 'https://example.test/dashboard/fixture-0.png' }
 if ($DashboardTransferSmoke) { $DashboardSmoke = $true; $env:MTD_FAKE_DOWNLOAD_DELAY_MS = '10000' }
 if ($DashboardSmoke) { $InterfaceMode = 'ModernDashboard' }
@@ -631,6 +638,46 @@ public static class MtdAutomationWindowCloser {
         }
         return target;
     }
+    private static bool TryOwnPopupRect(int processId, IntPtr mainWindow, IntPtr hwnd, out NativeRect rect) {
+        rect = new NativeRect();
+        if (hwnd == IntPtr.Zero || hwnd == mainWindow || !IsWindowVisible(hwnd)) return false;
+        GetWindowThreadProcessId(hwnd, out uint process);
+        if (process != processId || (GetWindowLongPtr(hwnd, -20).ToInt64() & 0x80) == 0) return false;
+        var owner = GetWindowLongPtr(hwnd, -8);
+        for (int depth = 0; owner != mainWindow && owner != IntPtr.Zero && depth < 8; depth++)
+            owner = GetWindowLongPtr(owner, -8);
+        if (owner != mainWindow) return false;
+        var title = new StringBuilder(512); GetWindowText(hwnd, title, title.Capacity);
+        return title.Length == 0 && GetWindowRect(hwnd, out rect) && rect.Right > rect.Left && rect.Bottom > rect.Top;
+    }
+    public static IntPtr FindOwnComboPopup(int processId, IntPtr mainWindow, IntPtr expectedPopup,
+        int anchorX, int anchorY, int anchorWidth, int anchorHeight, out int width, out int height) {
+        var result = InPhysicalCoordinates(() => {
+            // Once identified, never substitute another window for the exact popup.
+            // Tooltips are also untitled WS_EX_TOOLWINDOWs and can precede it in EnumWindows.
+            if (expectedPopup != IntPtr.Zero) {
+                if (!TryOwnPopupRect(processId, mainWindow, expectedPopup, out NativeRect expected)) return new long[3];
+                return new[] { expectedPopup.ToInt64(), (long)(expected.Right - expected.Left), (long)(expected.Bottom - expected.Top) };
+            }
+            if (anchorWidth <= 0 || anchorHeight <= 0) throw new ArgumentException("ComboBox requires positive screen bounds.");
+            int tolerance = Math.Max(4, (int)Math.Ceiling(4 * GetDpiForWindow(mainWindow) / 96.0));
+            var matches = new List<long[]>();
+            EnumWindows((hwnd, unused) => {
+                if (!TryOwnPopupRect(processId, mainWindow, hwnd, out NativeRect rect)) return true;
+                int w = rect.Right - rect.Left, h = rect.Bottom - rect.Top;
+                bool widthMatches = Math.Abs(w - anchorWidth) <= tolerance;
+                bool horizontalAnchor = Math.Abs(rect.Left - anchorX) <= tolerance ||
+                    Math.Abs(rect.Right - (anchorX + anchorWidth)) <= tolerance;
+                bool verticalAnchor = Math.Abs(rect.Top - (anchorY + anchorHeight)) <= tolerance ||
+                    Math.Abs(rect.Bottom - anchorY) <= tolerance;
+                if (widthMatches && horizontalAnchor && verticalAnchor) matches.Add(new[] { hwnd.ToInt64(), (long)w, (long)h });
+                return true;
+            }, IntPtr.Zero);
+            if (matches.Count > 1) throw new InvalidOperationException("More than one owned popup matches the ComboBox; identity is ambiguous.");
+            return matches.Count == 1 ? matches[0] : new long[3];
+        });
+        width = (int)result[1]; height = (int)result[2]; return new IntPtr(result[0]);
+    }
     public static bool CaptureOwnPopup(int processId, IntPtr popup, IntPtr dc) {
         GetWindowThreadProcessId(popup, out uint owner);
         return owner == processId && IsWindowVisible(popup) && PrintWindow(popup, dc, 2);
@@ -777,6 +824,7 @@ public static class MtdAutomationWindowCloser {
 $dataRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('mtd-automation-smoke-' + [guid]::NewGuid().ToString('N'))
 $toolRoot = Join-Path $dataRoot 'fake-tools'
 New-Item -ItemType Directory -Path $toolRoot -Force | Out-Null
+if ($BatchIdleStabilitySmoke) { $env:MTD_QA_BATCH_TRACE = $null }
 New-Item -ItemType Directory -Path (Join-Path $dataRoot 'Tools') -Force | Out-Null
 foreach ($extension in @('exe', 'dll', 'deps.json', 'runtimeconfig.json')) {
     Copy-Item -LiteralPath (Join-Path $fake "ModernTubeDownloader.FakeTool.$extension") -Destination $toolRoot
@@ -799,6 +847,7 @@ if ($BatchWorkflowSmoke) {
     $settings.StoreMetadataJson = $true
     $settings.SaveMetadataJsonSidecar = $true
 }
+if ($BatchActiveStabilitySmoke) { $settings.QueuePaused = $false }
 if ($ExperienceSmoke) {
     $settings.Startup = @{ ShowTrayIcon = $false; CloseBehavior = 0; FirstHideNotice = $false }
     # Only the external-activation variant accepts the owned secondary process.
@@ -1064,6 +1113,7 @@ try {
     if ($PublishStartupSmoke) { Write-Output "Published startup smoke PASS (isolated profile=$dataRoot; custom QA tools, not real provisioning/download)."; return }
     }
 
+    if ($BatchIdleStabilitySmoke) { $env:MTD_QA_BATCH_TRACE = Join-Path $dataRoot 'batch-ui-trace.jsonl' }
     if ($DashboardVisualFixture) {
         # Normal startup uses completed entries, so its no-work shutdown is still qualified.
         # Pending/error presentation cases are installed only for the owned Automation process.
@@ -1294,6 +1344,12 @@ try {
                 Capture-Dashboard 'history-empty-search'
             }
             elseif ($DashboardScreenSmoke -eq 'Batch') {
+                if ($BatchIdleStabilitySmoke) {
+                    . (Join-Path $PSScriptRoot 'Test-BatchIdleStability.ps1')
+                    Close-DashboardProcess
+                    Write-Output "Batch idle stability PASS (profile: $dataRoot)"
+                    return
+                }
                 Wait-Node 'BatchPaste' $mainRoot 'Enabled' | Out-Null
                 Capture-Dashboard 'batch-import-empty'
                 $batchFixture = Join-Path $dataRoot 'screen-batch.csv'
@@ -1333,14 +1389,19 @@ try {
                     }
                 } finally { $heldMetadataProcess.Dispose() }
                 if ($BatchComboBoxRefreshSmoke) {
-                    function Read-BatchPopupWitness([string]$stage) {
+                    function Read-BatchPopupWitness([string]$stage, [IntPtr]$expectedPopup = [IntPtr]::Zero) {
                         $node = Find-Node 'BatchFilter' $mainRoot
                         $detail = (Invoke-AutomationCli -CliArguments @('inspect','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,
                             '--session',$node.handle.sessionId,'--node',$node.handle.runtimeId)).value
-                        $popupWidth = 0; $popupHeight = 0
-                        $popup = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id,$script:automationMainWindow,[ref]$popupWidth,[ref]$popupHeight)
+                        if ($detail.bounds.coordinateSpace -ne 'Screen') { throw 'Batch popup identity requires physical screen bounds.' }
+                        $popupWidth = 0; $popupHeight = 0; $anyWidth = 0; $anyHeight = 0
+                        $popup = [MtdAutomationWindowCloser]::FindOwnComboPopup($script:automationProcess.Id, $script:automationMainWindow,
+                            $expectedPopup, [int]$detail.bounds.x, [int]$detail.bounds.y, [int]$detail.bounds.width, [int]$detail.bounds.height,
+                            [ref]$popupWidth, [ref]$popupHeight)
+                        $anyPopup = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id, $script:automationMainWindow, [ref]$anyWidth, [ref]$anyHeight)
                         $focus = [MtdAutomationWindowCloser]::NativeFocusSnapshot($script:automationMainWindow)
                         @{ utc=[DateTime]::UtcNow.ToString('O'); stage=$stage; node=$detail; popup=$popup.ToInt64(); width=$popupWidth; height=$popupHeight;
+                            expectedPopup=$expectedPopup.ToInt64(); exactPopupValid=($popup -ne [IntPtr]::Zero); firstAnyPopup=$anyPopup.ToInt64(); firstAnyWidth=$anyWidth; firstAnyHeight=$anyHeight;
                             foreground=$focus[0]; active=$focus[1]; focus=$focus[2] } | ConvertTo-Json -Depth 12 -Compress |
                             Add-Content -LiteralPath (Join-Path $dataRoot 'batch-popup-refresh.jsonl') -Encoding utf8
                         return @{ node=$detail; popup=$popup; width=$popupWidth; height=$popupHeight }
@@ -1357,7 +1418,7 @@ try {
                 Wait-Node 'BatchAnalyze' $mainRoot 'Enabled' | Out-Null
                 Capture-Dashboard 'batch-import-analyzed'
                 if ($BatchComboBoxRefreshSmoke) {
-                    $batchPopupAfter = Read-BatchPopupWitness 'analysis-completed-refreshed'
+                    $batchPopupAfter = Read-BatchPopupWitness 'analysis-completed-refreshed' $batchPopupBefore.popup
                     if ($batchPopupAfter.node.states -notmatch '\bExpanded\b' -or $batchPopupAfter.popup -ne $batchPopupBefore.popup -or
                         $batchPopupAfter.node.handle.runtimeId -ne $batchPopupBefore.node.handle.runtimeId -or
                         $batchPopupAfter.node.handle.sessionId -ne $batchPopupBefore.node.handle.sessionId -or $batchPopupAfter.node.value -ne $batchPopupBefore.node.value) {
@@ -1398,7 +1459,7 @@ try {
                         $popupImage.Save((Join-Path $dataRoot 'batch-filter-open-after-refresh.png'))
                     } finally { $popupDrawing.Dispose(); $popupImage.Dispose() }
                     Invoke-NodeAction (Find-Node 'BatchFilter' $mainRoot) $mainRoot 'Collapse' | Out-Null
-                    if ((Read-BatchPopupWitness 'explicit-collapse').node.states -notmatch '\bCollapsed\b') { throw 'Batch filter did not collapse explicitly.' }
+                    if ((Read-BatchPopupWitness 'explicit-collapse' $batchPopupBefore.popup).node.states -notmatch '\bCollapsed\b') { throw 'Batch filter did not collapse explicitly.' }
                     Write-Output 'Batch native popup refresh PASS: same expanded filter, selection and HWND across real gated analysis completion; explicit Collapse.'
                 }
                 # Exercise the saved import through the same recent-operation UI used
@@ -3349,6 +3410,7 @@ finally {
     $env:MTD_FAKE_METADATA_THUMBNAIL = $previousFakeThumbnail
     $env:MTD_FAKE_METADATA_DELAY_MS = $previousFakeMetadataDelay
     $env:MTD_QA_FAKE_METADATA_GATE = $previousFakeMetadataGate
+    $env:MTD_QA_BATCH_TRACE = $previousBatchTrace
     foreach ($process in @($normalProcess, $script:automationProcess)) {
         if ($null -ne $process -and -not $process.HasExited) {
             if ($UpdateStatesSmoke) {

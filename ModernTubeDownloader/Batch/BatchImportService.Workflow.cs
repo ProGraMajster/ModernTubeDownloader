@@ -36,6 +36,7 @@ public sealed partial class BatchImportService
         }
         }
         finally { destinationGate.Release(); }
+        NotifySession(session, BatchPresentationChange.State);
     }
 
     /// <summary>One shared preparation operation. Never resumes the global queue or owns a download worker.</summary>
@@ -51,7 +52,7 @@ public sealed partial class BatchImportService
             if (!automatic.IsCompleted)
             {
                 if (automaticSelection.SequenceEqual(selected.Select(value => value.Id)) ||
-                    selected.Length == 1 && automaticSession == selected[0].Id) return automatic;
+                    selected.Length == 1 && automaticSession == selected[0].Id) return automaticCompletion;
                 throw new InvalidOperationException("Batch.Error.Busy");
             }
             if (!analysis.IsCompleted) throw new InvalidOperationException("Batch.Error.Busy");
@@ -67,7 +68,8 @@ public sealed partial class BatchImportService
                     await RunAutomaticCoreAsync(value, token).ConfigureAwait(false);
                 }
             });
-            return automatic;
+            automaticCompletion = NotifyWhenFinishedAsync(automatic, selected);
+            return automaticCompletion;
         }
     }
 
@@ -88,7 +90,7 @@ public sealed partial class BatchImportService
                         entry.QueueItemId = existing.Id; entry.Status = BatchEntryStatus.AddedToQueue;
                         entry.Revision++; recovered.Add(entry.Copy());
                     }
-            if (recovered.Count > 0) await store.SaveEntriesAsync(session, recovered, token).ConfigureAwait(false);
+            if (recovered.Count > 0) { await store.SaveEntriesAsync(session, recovered, token).ConfigureAwait(false); NotifySession(session); }
             token.ThrowIfCancellationRequested();
             await RetryFailedAsync(session, token: token).ConfigureAwait(false);
             var pending = StartAnalysisAsync(session, null, true);
@@ -120,6 +122,7 @@ public sealed partial class BatchImportService
         lock (session.Sync) { session.WorkflowPhase = phase; session.PendingPhaseCommit = true; }
         await store.SaveSessionAsync(session).ConfigureAwait(false);
         lock (session.Sync) if (session.WorkflowPhase == phase) session.PendingPhaseCommit = false;
+        NotifySession(session, BatchPresentationChange.State);
     }
 
     public BatchWorkflowPhase CurrentWorkflowPhase(BatchImportSession session)

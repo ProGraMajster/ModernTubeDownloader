@@ -50,6 +50,7 @@ public sealed class BatchImportSession
     [JsonIgnore] internal SemaphoreSlim ReconciliationGate { get; } = new(1, 1);
     [JsonIgnore] internal SemaphoreSlim MetadataWriteGate { get; } = new(1, 1);
     [JsonIgnore] internal bool PendingPhaseCommit { get; set; }
+    [JsonIgnore] internal long PresentationRevision;
     internal BatchImportSession MetadataSnapshot() { lock (Sync) return (BatchImportSession)MemberwiseClone(); }
     [JsonIgnore] internal List<BatchImportEntry> Entries { get; } = [];
     [JsonIgnore] internal Dictionary<Guid, BatchImportEntry> ById { get; } = [];

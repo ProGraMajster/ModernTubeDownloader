@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "导入",
+  "Batch.Workflow.Caption2": "分析",
+  "Batch.Workflow.Caption3": "队列",
+  "Batch.Workflow.Caption4": "下载",
+  "Batch.Workflow.Caption5": "完成处理",
+  "Batch.RootFolder": "根文件夹",
+  "Batch.SubfolderName": "子文件夹名称",
   "Batch.Error.FileSelection": "请选择 1 至 32 个现有的 TXT、JSON 或 CSV 文件。未导入任何文件。",
   "History.PageSummary": "{1}的第{0}页 成果:{2} / {3}",
   "Appearance.TextTitle": "个性化 • 文本大小",

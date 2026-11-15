@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "Import",
+  "Batch.Workflow.Caption2": "Analýza",
+  "Batch.Workflow.Caption3": "Fronta",
+  "Batch.Workflow.Caption4": "Stahování",
+  "Batch.Workflow.Caption5": "Dokončení",
+  "Batch.RootFolder": "Kořenová složka",
+  "Batch.SubfolderName": "Název podsložky",
   "Batch.Error.FileSelection": "Vyberte 1 až 32 existujících souborů TXT, JSON nebo CSV. Nebyly importovány žádné soubory.",
   "History.PageSummary": "Strana {0} z {1} • Výsledky: {2} / {3}",
   "Appearance.TextTitle": "Personalizace • Velikost textu",

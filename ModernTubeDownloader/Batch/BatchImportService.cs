@@ -24,6 +24,7 @@ public sealed partial class BatchImportService : IDisposable
     private readonly SemaphoreSlim importGate = new(1, 1);
     private readonly SemaphoreSlim destinationGate = new(1, 1);
     private Task automatic = Task.CompletedTask;
+    private Task automaticCompletion = Task.CompletedTask;
     private Guid? automaticSession;
     private Guid[] automaticSelection = [];
     private CancellationTokenSource? automaticCancellation;
@@ -135,13 +136,14 @@ public sealed partial class BatchImportService : IDisposable
                 (entry.Status is BatchEntryStatus.Pending or BatchEntryStatus.Failed or BatchEntryStatus.Cancelled or BatchEntryStatus.AuthRequired) &&
                 (selected is null || selected.Contains(entry.Id))).Select(entry => entry.Id).ToArray();
             analysis = Task.Run(() => AnalyzeAsync(session, ids, analysisCancellation.Token));
-            return analysis;
+            return NotifyWhenFinishedAsync(analysis, session);
         }
     }
     public async Task SetPausedAsync(BatchImportSession session, bool paused)
     {
         lock (sync) { if (session.Paused != paused) { session.Paused = paused; if (paused) resume = NewSignal(); else resume.TrySetResult(); } }
         await store.SaveSessionAsync(session);
+        NotifySession(session, BatchPresentationChange.State);
     }
     public async Task CancelAsync()
     {
@@ -152,9 +154,9 @@ public sealed partial class BatchImportService : IDisposable
     }
     private async Task AnalyzeAsync(BatchImportSession session, Guid[] ids, CancellationToken token)
     {
-        var cursor = -1;
-        try { await Task.WhenAll(Enumerable.Range(0, Math.Clamp(session.AnalysisWorkers, 1, 8)).Select(_ => Worker())); }
-        finally { session.Paused = true; session.WorkflowPhase = token.IsCancellationRequested ? BatchWorkflowPhase.Cancelled : BatchWorkflowPhase.Prepared; await store.SaveSessionAsync(session); if (!token.IsCancellationRequested) AnalysisCompleted?.Invoke(this, (ids.Length, session.ImportedCount)); }
+        var cursor = -1; var workersCompleted = false;
+        try { await Task.WhenAll(Enumerable.Range(0, Math.Clamp(session.AnalysisWorkers, 1, 8)).Select(_ => Worker())); workersCompleted = true; }
+        finally { session.Paused = true; session.WorkflowPhase = token.IsCancellationRequested ? BatchWorkflowPhase.Cancelled : BatchWorkflowPhase.Prepared; await store.SaveSessionAsync(session); if (workersCompleted && !token.IsCancellationRequested) AnalysisCompleted?.Invoke(this, (ids.Length, session.ImportedCount)); }
         async Task Worker()
         {
             while (!token.IsCancellationRequested)
@@ -162,11 +164,19 @@ public sealed partial class BatchImportService : IDisposable
                 Task wait; lock (sync) wait = session.Paused ? resume.Task : Task.CompletedTask;
                 try { await wait.WaitAsync(token); } catch (OperationCanceledException) { return; }
                 var index = Interlocked.Increment(ref cursor); if (index >= ids.Length) return;
-                BatchImportEntry entry;
+                BatchImportEntry entry, original, owner;
                 lock (session.Sync)
-                { var row = session.ById[ids[index]]; if (row.Removed) continue; row.Status = BatchEntryStatus.Analyzing; row.Revision++; entry = row.Copy(); }
+                { var row = session.ById[ids[index]]; if (row.Removed) continue; original = row.Copy(); owner = row; row.Status = BatchEntryStatus.Analyzing; row.Revision++; entry = row.Copy(); }
                 if (entry.Removed) continue;
-                await store.SaveEntryAsync(session, entry.Copy());
+                try { await store.SaveEntryAsync(session, entry.Copy()).ConfigureAwait(false); }
+                catch
+                {
+                    // No metadata worker has started. Restore this owned transition
+                    // so an explicit retry can select the row after storage recovers.
+                    RestoreEntryIfOwned(session, owner, entry.Revision, original);
+                    throw;
+                }
+                NotifySession(session);
                 try
                 {
                     using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(TimeSpan.FromMinutes(2));
@@ -197,6 +207,7 @@ public sealed partial class BatchImportService : IDisposable
                 lock (session.Sync)
                 { entry.Revision = session.ById[entry.Id].Revision + 1; session.ById[entry.Id] = entry; session.Entries[entry.Ordinal - 1] = entry; entry = entry.Copy(); }
                 await store.SaveEntryAsync(session, entry);
+                NotifySession(session);
             }
         }
     }
@@ -241,16 +252,32 @@ public sealed partial class BatchImportService : IDisposable
             throw new ArgumentException("Batch.Error.Options");
         foreach (var id in ids)
         {
-            BatchImportEntry copy;
+            BatchImportEntry original, owner, copy;
             lock (session.Sync)
             {
                 if (!session.ById.TryGetValue(id, out var entry) || entry.Removed || entry.Status is BatchEntryStatus.Analyzing or BatchEntryStatus.Validating || entry.QueueItemId is not null) continue;
+                original = entry.Copy(); owner = entry;
                 if (remove) { entry.Removed = true; entry.Status = BatchEntryStatus.Skipped; }
                 else { if (quality is not null) entry.Quality = quality; if (container is not null) entry.Container = container.Value; if (range is not null) entry.Range = range; entry.EstimatedSizeBytes = null; }
                 entry.Revision++; copy = entry.Copy();
             }
-            await store.SaveEntryAsync(session, copy);
+            try { await store.SaveEntryAsync(session, copy).ConfigureAwait(false); }
+            catch
+            {
+                // A failed journal append must not silently change the effective
+                // options/removal while presentation and disk retain the old row.
+                // A newer edit/analysis owns its own state and must never be undone.
+                RestoreEntryIfOwned(session, owner, copy.Revision, original);
+                throw;
+            }
+            NotifySession(session);
         }
+    }
+    private static void RestoreEntryIfOwned(BatchImportSession session, BatchImportEntry owner, long revision, BatchImportEntry original)
+    {
+        lock (session.Sync)
+            if (session.ById.TryGetValue(original.Id, out var current) && ReferenceEquals(current, owner) && current.Revision == revision)
+            { session.ById[original.Id] = original; session.Entries[original.Ordinal - 1] = original; }
     }
     public Task<VideoMetadata?> MetadataAsync(BatchImportSession session, Guid id, CancellationToken token = default)
         => Task.Run(() => store.MetadataAsync(session.Id, id, token), token);
@@ -262,12 +289,14 @@ public sealed partial class BatchImportService : IDisposable
         // canonical queue observers must never execute on the window's context.
         var task = Task.Run(() => AddReadyCoreAsync(session, selection, token, progress), token);
         lock (sync) handoffs.Add(task);
-        return AwaitHandoffAsync(task);
+        NotifySession(session, BatchPresentationChange.State);
+        return AwaitHandoffAsync(task, session);
     }
-    private async Task<int> AwaitHandoffAsync(Task<int> task)
+    private async Task<int> AwaitHandoffAsync(Task<int> task, BatchImportSession session)
     {
         try { return await task.ConfigureAwait(false); }
-        finally { lock (sync) handoffs.Remove(task); }
+        catch { InvalidateFailedProjection(session); throw; }
+        finally { lock (sync) handoffs.Remove(task); NotifySession(session, BatchPresentationChange.State); }
     }
     private async Task<int> AddReadyCoreAsync(BatchImportSession session, IReadOnlySet<Guid>? selected, CancellationToken token,
         IProgress<BatchOperationProgress>? progress)
@@ -311,7 +340,7 @@ public sealed partial class BatchImportService : IDisposable
                     candidates.Add((entry, item));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
-                { BatchImportEntry failed; lock (session.Sync) { var row = session.ById[entry.Id]; row.Status = BatchEntryStatus.Failed; row.ErrorKey = "Batch.Error.Options"; row.Revision++; failed = row.Copy(); } logger.Error("Batch queue preparation failed for entry " + entry.Id, ex); await store.SaveEntryAsync(session, failed); }
+                { BatchImportEntry failed; lock (session.Sync) { var row = session.ById[entry.Id]; row.Status = BatchEntryStatus.Failed; row.ErrorKey = "Batch.Error.Options"; row.Revision++; failed = row.Copy(); } logger.Error("Batch queue preparation failed for entry " + entry.Id, ex); await store.SaveEntryAsync(session, failed); NotifySession(session); }
             }
             var result = queue.AddRangeSkippingDuplicates(candidates.Select(value => value.Item).ToArray()); added += result.Added;
             var queueIds = queue.Snapshot().Select(item => item.Id).ToHashSet();
@@ -329,6 +358,7 @@ public sealed partial class BatchImportService : IDisposable
             // this chunk's link journal/durable checkpoint. Shutdown awaits it too.
             await store.SaveEntriesAsync(session, updates, CancellationToken.None).ConfigureAwait(false);
             await queue.CheckpointBeforeStartAsync(CancellationToken.None).ConfigureAwait(false);
+            NotifySession(session);
             processed += chunk.Length; progress?.Report(new("Add", processed, entries.Length));
         }
         return added;
@@ -342,7 +372,7 @@ public sealed partial class BatchImportService : IDisposable
                 lock (session.Sync) { var row = session.ById[entry.Id]; if (row.Status == BatchEntryStatus.Validating) { row.Status = BatchEntryStatus.Ready; row.Revision++; reset = row.Copy(); } }
                 if (reset is not null) resets.Add(reset);
             }
-            if (resets.Count > 0) await store.SaveEntriesAsync(session, resets).ConfigureAwait(false);
+            if (resets.Count > 0) { await store.SaveEntriesAsync(session, resets).ConfigureAwait(false); NotifySession(session); }
         }
     }
     public Task RefreshQueueAsync(BatchImportSession session, CancellationToken token = default)
@@ -400,6 +430,7 @@ public sealed partial class BatchImportService : IDisposable
                 foreach (var updated in updates)
                     if (session.ById[updated.Id].Revision == updated.Revision)
                     { session.ById[updated.Id] = updated; session.Entries[updated.Ordinal - 1] = updated; }
+            NotifySession(session);
         }
         var phase = CurrentWorkflowPhase(session);
         if (phase != session.WorkflowPhase || session.PendingPhaseCommit) await PersistPhaseAsync(session, phase).ConfigureAwait(false);

@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "Importar",
+  "Batch.Workflow.Caption2": "Analizar",
+  "Batch.Workflow.Caption3": "Cola",
+  "Batch.Workflow.Caption4": "Descargar",
+  "Batch.Workflow.Caption5": "Finalizar",
+  "Batch.RootFolder": "Carpeta raíz",
+  "Batch.SubfolderName": "Nombre de subcarpeta",
   "Batch.Error.FileSelection": "Selecciona entre 1 y 32 archivos TXT, JSON o CSV existentes. No se ha importado ningún archivo.",
   "History.PageSummary": "Página {0} de {1} • Resultados: {2} / {3}",
   "Appearance.TextTitle": "Personalización • Tamaño de texto",

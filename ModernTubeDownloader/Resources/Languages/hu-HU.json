@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "Importálás",
+  "Batch.Workflow.Caption2": "Elemzés",
+  "Batch.Workflow.Caption3": "Várólista",
+  "Batch.Workflow.Caption4": "Letöltés",
+  "Batch.Workflow.Caption5": "Befejezés",
+  "Batch.RootFolder": "Gyökérmappa",
+  "Batch.SubfolderName": "Almappa neve",
   "Batch.Error.FileSelection": "Válasszon ki 1–32 létező TXT-, JSON- vagy CSV-fájlt. Egyetlen fájl sem lett importálva.",
   "History.PageSummary": "Oldal {0} of {1} • Eredmények: {2} / {3}",
   "Appearance.TextTitle": "Személyre szabás • Szöveg mérete",

@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "Import",
+  "Batch.Workflow.Caption2": "Analýza",
+  "Batch.Workflow.Caption3": "Rad",
+  "Batch.Workflow.Caption4": "Sťahovanie",
+  "Batch.Workflow.Caption5": "Dokončenie",
+  "Batch.RootFolder": "Koreňový priečinok",
+  "Batch.SubfolderName": "Názov podpriečinka",
   "Batch.Error.FileSelection": "Vyberte 1 až 32 existujúcich súborov TXT, JSON alebo CSV. Neboli importované žiadne súbory.",
   "History.PageSummary": "Strana {0} z {1} • Výsledky: {2} / {3}",
   "Appearance.TextTitle": "Personalizácia • Veľkosť textu",

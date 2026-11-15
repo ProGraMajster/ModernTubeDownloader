@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "インポート",
+  "Batch.Workflow.Caption2": "分析",
+  "Batch.Workflow.Caption3": "キュー",
+  "Batch.Workflow.Caption4": "ダウンロード",
+  "Batch.Workflow.Caption5": "仕上げ",
+  "Batch.RootFolder": "保存先の親フォルダー",
+  "Batch.SubfolderName": "サブフォルダー名",
   "Batch.Error.FileSelection": "既存のTXT、JSON、CSVファイルを1～32個選択してください。ファイルはインポートされませんでした。",
   "History.PageSummary": "{1} ページ中 {0} ページ • 結果: {2} / {3}",
   "Appearance.TextTitle": "個人設定 • 文字サイズ",

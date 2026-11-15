@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "Import",
+  "Batch.Workflow.Caption2": "Analyse",
+  "Batch.Workflow.Caption3": "Warteschlange",
+  "Batch.Workflow.Caption4": "Download",
+  "Batch.Workflow.Caption5": "Abschluss",
+  "Batch.RootFolder": "Basisordner",
+  "Batch.SubfolderName": "Name des Unterordners",
   "Batch.Error.FileSelection": "Wählen Sie 1 bis 32 vorhandene TXT-, JSON- oder CSV-Dateien aus. Es wurden keine Dateien importiert.",
   "History.PageSummary": "Seite {0} von {1} • Ergebnisse: {2} / {3}",
   "Appearance.TextTitle": "Personalisierung • Textgröße",

@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "İçe aktar",
+  "Batch.Workflow.Caption2": "Analiz",
+  "Batch.Workflow.Caption3": "Kuyruk",
+  "Batch.Workflow.Caption4": "İndir",
+  "Batch.Workflow.Caption5": "Tamamla",
+  "Batch.RootFolder": "Ana klasör",
+  "Batch.SubfolderName": "Alt klasör adı",
   "Batch.Error.FileSelection": "Mevcut TXT, JSON veya CSV dosyalarından 1 ile 32 arasında dosya seçin. Hiçbir dosya içe aktarılmadı.",
   "History.PageSummary": "Sayfa {0} {1} • Sonuçlar: {2} / {3}",
   "Appearance.TextTitle": "Kişiselleştirme • Text büyüklüğü",

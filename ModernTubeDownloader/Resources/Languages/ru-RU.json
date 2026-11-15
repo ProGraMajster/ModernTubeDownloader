@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "Импорт",
+  "Batch.Workflow.Caption2": "Анализ",
+  "Batch.Workflow.Caption3": "Очередь",
+  "Batch.Workflow.Caption4": "Загрузка",
+  "Batch.Workflow.Caption5": "Завершение",
+  "Batch.RootFolder": "Корневая папка",
+  "Batch.SubfolderName": "Имя подпапки",
   "Batch.Error.FileSelection": "Выберите от 1 до 32 существующих файлов TXT, JSON или CSV. Файлы не импортированы.",
   "History.PageSummary": "Страница {0} из {1} • Результаты: {2} / {3}",
   "Appearance.TextTitle": "Персонализация • Размер текста",

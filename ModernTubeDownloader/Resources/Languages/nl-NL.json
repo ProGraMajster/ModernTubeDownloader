@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "Importeren",
+  "Batch.Workflow.Caption2": "Analyseren",
+  "Batch.Workflow.Caption3": "Wachtrij",
+  "Batch.Workflow.Caption4": "Downloaden",
+  "Batch.Workflow.Caption5": "Afronden",
+  "Batch.RootFolder": "Hoofdmap",
+  "Batch.SubfolderName": "Naam van submap",
   "Batch.Error.FileSelection": "Selecteer 1 tot 32 bestaande TXT-, JSON- of CSV-bestanden. Er zijn geen bestanden geïmporteerd.",
   "History.PageSummary": "Pagina {0} van {1} • Resultaten: {2} / {3}",
   "Appearance.TextTitle": " Persoonlijkheid • Tekstgrootte",

@@ -1,4 +1,11 @@
 {
+  "Batch.Workflow.Caption1": "가져오기",
+  "Batch.Workflow.Caption2": "분석",
+  "Batch.Workflow.Caption3": "대기열",
+  "Batch.Workflow.Caption4": "다운로드",
+  "Batch.Workflow.Caption5": "완료 처리",
+  "Batch.RootFolder": "상위 폴더",
+  "Batch.SubfolderName": "하위 폴더 이름",
   "Batch.Error.FileSelection": "기존 TXT, JSON 또는 CSV 파일을 1~32개 선택하세요. 가져온 파일이 없습니다.",
   "History.PageSummary": "{1}의 페이지 {0} • 결과 : {2} / {3}",
   "Appearance.TextTitle": "개인화 • 텍스트 크기",

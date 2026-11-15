@@ -29,15 +29,20 @@ internal sealed partial class BatchImportView
     private AppVectorIcon? resultStatusIcon;
     private Label? summaryTitle, summaryFacts;
     private Action? restoreDashboardTypography, restoreDashboardLabels;
+    private string? dashboardStatusToken;
+    private AppIconKind? dashboardStatusKind;
+    private string dashboardSourceFile = "";
     private readonly ToolTip dashboardTips = new();
     private sealed record DashboardBatchRow(CheckBox Selection, Label Title, Label Url, Label Status,
-        Label Quality, Button[] Actions, PictureBox? Thumbnail, SourceVectorIcon SourceIcon, AppVectorIcon Placeholder);
+        Label Quality, Button[] Actions, AppVectorIcon[] ActionIcons, PictureBox? Thumbnail, SourceVectorIcon SourceIcon, AppVectorIcon Placeholder);
 
     public void SetDashboard(bool value)
     {
+        TraceBatchEvent(value ? "SetDashboard.modern" : "SetDashboard.classic");
         if (dashboard == value) return;
         if (value) { restoreDashboardTypography = AppTypography.CaptureRecipes(this); restoreDashboardLabels = DashboardVisual.CaptureLabels(this); }
         dashboard = value;
+        dashboardStatusToken = null; dashboardStatusKind = null;
         buttons["Paste"].Visible = value;
         range.ResponsiveLayout = value;
         AppTypography.SetDashboardPresentation(this, value);
@@ -88,6 +93,7 @@ internal sealed partial class BatchImportView
 
     private void CreateDashboardChrome()
     {
+        TraceBatchEvent("CreateDashboardChrome");
         sourceCard = new(); resultCard = new(); dashboardOptions = new(); dashboardHeader = new() { AccessibleAutomationId = "BatchTableHeader" };
         sourceTabs = new Panel(); AppUi.BindBackground(sourceTabs);
         dashboardSubtitle = AppUi.Muted(); dashboardSubtitle.AutoEllipsis = true;
@@ -102,7 +108,7 @@ internal sealed partial class BatchImportView
         foreach (var card in new[] { sourceCard, resultCard, dashboardOptions }) DashboardStyle.Card(card);
         AppUi.BindGradient(dashboardHeader, DownloadsVisual.ButtonTop, DownloadsVisual.ButtonEnd); DashboardVisual.Flat(dashboardHeader, true);
         sourceTitle = AppUi.Heading("", 12); sourceHint = AppUi.Muted(); sourceHint.Multiline = true;
-        resultTitle = AppUi.Heading("", 12); counters = AppUi.Muted(); counters.AutoEllipsis = true;
+        resultTitle = AppUi.Heading("", 12); counters = AppUi.Muted(); counters.AutoEllipsis = false;
         counters.AccessibleAutomationId = "BatchSourceFileName";
         parserDetails = AppUi.Muted(); parserDetails.AutoEllipsis = true; parserDetails.AccessibleAutomationId = "BatchParserDetails";
         dropZone.Controls.AddRange([sourceTitle, sourceHint, pickFile]); sourceCard.Controls.Add(dropZone); resultCard.Controls.AddRange([resultTitle, counters, parserDetails]);
@@ -169,7 +175,7 @@ internal sealed partial class BatchImportView
         foreach (var label in dashboardOptionLabels) label.Text = t[(string)label.Tag!];
         if (session is not { } s)
         {
-            counters.Text = t["Batch.NoFile"];
+            PresentDashboardSourceFile(t["Batch.NoFile"]);
             summaryFacts!.Text = t.Get("Dashboard.ImportSummaryFacts", 0, 0, 0, 0);
             parserDetails!.Text = $"{t["Batch.Status.Pending"]}: 0   ·   {t["Batch.Status.Analyzing"]}: 0   ·   {t["Batch.Status.Skipped"]}: 0";
             for (var i = 0; i < 4; i++) metrics[i].Present(t[i switch { 0 => "Dashboard.All", 1 => "Batch.ValidLinks", 2 => "Batch.Filter.Duplicates", _ => "Dashboard.Errors" }], 0);
@@ -181,13 +187,12 @@ internal sealed partial class BatchImportView
             metrics[1].Present(t["Batch.ValidLinks"], s.Entries.Count(e => !e.Removed && e.Status != BatchEntryStatus.Duplicate && !string.IsNullOrEmpty(e.Identity)));
             metrics[2].Present(t["Batch.Filter.Duplicates"], s.Entries.Count(e => !e.Removed && e.Status == BatchEntryStatus.Duplicate));
             metrics[3].Present(t["Dashboard.Errors"], s.Entries.Count(e => !e.Removed && e.Status is BatchEntryStatus.Failed or BatchEntryStatus.Unsupported));
-            counters.Text = s.FileName;
+            PresentDashboardSourceFile(s.FileName);
             parserDetails!.Text = $"{t["Batch.Status.Pending"]}: {s.Entries.Count(e => !e.Removed && e.Status == BatchEntryStatus.Pending)}   ·   {t["Batch.Status.Analyzing"]}: {s.Entries.Count(e => !e.Removed && e.Status == BatchEntryStatus.Analyzing)}   ·   {t["Batch.Status.Skipped"]}: {s.Entries.Count(e => !e.Removed && e.Status == BatchEntryStatus.Skipped)}";
             summaryFacts!.Text = t.Get("Dashboard.ImportSummaryFacts", selection.Count,
                 s.Entries.Count(e => !e.Removed && e.Status == BatchEntryStatus.Ready),
                 s.Entries.Count(e => !e.Removed && e.QueueItemId is not null),
                 s.Entries.Count(e => !e.Removed && e.Status == BatchEntryStatus.Completed));
-            dashboardTips.SetToolTip(counters, counters.Text);
         }
     }
 
@@ -211,15 +216,22 @@ internal sealed partial class BatchImportView
                 icon = ready > 0 ? AppIconKind.Check : AppIconKind.Info;
             }
         }
-        AppUi.BindForeground(status, token);
-        resultStatusIcon?.SetKind(icon); resultStatusIcon?.SetColorToken(token);
-        if (resultStatusFrame is not null) AppUi.BindBorder(resultStatusFrame, token == AppThemeTokens.TextSecondary ? DownloadsVisual.Border : token);
+        if (dashboardStatusToken != token)
+        {
+            dashboardStatusToken = token;
+            AppUi.BindForeground(status, token); resultStatusIcon?.SetColorToken(token);
+            if (resultStatusFrame is not null) AppUi.BindBorder(resultStatusFrame, token == AppThemeTokens.TextSecondary ? DownloadsVisual.Border : token);
+        }
+        if (dashboardStatusKind != icon) { dashboardStatusKind = icon; resultStatusIcon?.SetKind(icon); }
         dashboardTips.SetToolTip(status, status.Text);
         status.AutoEllipsis = true;
     }
 
     private void LayoutDashboard()
     {
+#if DEBUG
+        using var traceScope = TraceBatchScope("LayoutDashboard");
+#endif
         if (sourceCard is null) return;
         var origin = body.DisplayRectangle.Location; var width = Math.Max(1, body.DisplayRectangle.Width - 36);
         var line = AppTypography.TextHeight(36); var gap = 10;
@@ -238,7 +250,7 @@ internal sealed partial class BatchImportView
         sourceTitle!.TextAlign = sourceHint!.TextAlign = ContentAlignment.MiddleCenter;
         sourceTitle.SetBounds(16, sourceIcon.Bottom + 6, dropZone.Width - 32, AppTypography.TextHeight(24));
         sourceHint.SetBounds(16, sourceTitle.Bottom + 2, dropZone.Width - 32, DashboardVisual.LabelHeight(sourceHint, dropZone.Width - 32, 2));
-        DownloadsVisual.Button(pickFile!, true); pickFile!.Enabled = !busy;
+        DownloadsVisual.Button(pickFile!); pickFile!.Enabled = !busy;
         var pickWidth = Math.Min(dropZone.Width - 32, DashboardVisual.ActionWidth(pickFile));
         pickFile.SetBounds((dropZone.Width - pickWidth) / 2, sourceHint.Bottom + 8, pickWidth, line);
         if (compactOverview)
@@ -258,7 +270,9 @@ internal sealed partial class BatchImportView
         resultCard!.SetBounds(inline ? sourceCard.Right + 12 : sourceCard.Left, inline ? sourceCard.Top : sourceCard.Bottom + 12,
             inline ? width - left - 12 : width, sourceCard.Height);
         resultTitle!.SetBounds(16, 12, resultCard.Width - 32, AppTypography.TextHeight(28));
-        if (compactOverview) resultTitle.SetBounds(16, 8, (resultCard.Width - 44) / 2, AppTypography.TextHeight(24));
+        if (compactOverview) resultTitle.SetBounds(16, 8, resultCard.Width - 32, AppTypography.TextHeight(24));
+        counters!.SetBounds(16, resultTitle.Bottom + 2, resultCard.Width - 32, AppTypography.TextHeight(22));
+        PresentDashboardSourceFile(dashboardSourceFile);
         var metricColumns = resultCard.Width >= AppTypography.TextHeight(440) ? 4 : 2;
         var metricWidth = (resultCard.Width - 24 - (metricColumns - 1) * 8) / metricColumns;
         var metricHeight = metrics.Max(metric => metric.DesiredHeight(metricWidth));
@@ -266,15 +280,9 @@ internal sealed partial class BatchImportView
         {
             metrics[i].Style.Border.Radius = 8;
             metrics[i].SetBounds(12 + i % metricColumns * (metricWidth + 8),
-                resultTitle.Bottom + (compactOverview ? 6 : 10) + i / metricColumns * (metricHeight + 8), metricWidth, metricHeight);
+                counters.Bottom + 6 + i / metricColumns * (metricHeight + 8), metricWidth, metricHeight);
         }
-        counters!.SetBounds(16, metrics[^1].Bottom + 8, resultCard.Width - 32, AppTypography.TextHeight(24));
-        parserDetails!.SetBounds(16, counters.Bottom + 2, resultCard.Width - 32, AppTypography.TextHeight(24));
-        if (compactOverview)
-        {
-            counters.SetBounds(resultTitle.Right + 12, resultTitle.Top, resultCard.Width - resultTitle.Right - 28, resultTitle.Height);
-            parserDetails.SetBounds(16, metrics[^1].Bottom + 4, resultCard.Width - 32, AppTypography.TextHeight(22));
-        }
+        parserDetails!.SetBounds(16, metrics[^1].Bottom + 4, resultCard.Width - 32, AppTypography.TextHeight(24));
         dashboardTips.SetToolTip(parserDetails, parserDetails.Text);
         AppTypography.Bind(counters, 9);
         status.Multiline = true; AppTypography.Bind(status, 9);
@@ -285,7 +293,7 @@ internal sealed partial class BatchImportView
         // The workflow strip below shows the current phase. Retain this extra
         // result message when importing or reporting an error, without duplicating
         // a second status paragraph in every prepared-file overview.
-        resultStatusFrame.Visible = !compactOverview || busy || lastErrorKey is not null;
+        resultStatusFrame.Visible = !compactOverview || lastErrorKey is not null;
         resultCard.Height = Math.Max(inline ? sourceCard.Height : 0,
             resultStatusFrame.Visible ? resultStatusFrame.Bottom + 12 : parserDetails.Bottom + 6);
         if (!resultStatusFrame.Visible) resultStatusFrame.SetBounds(0, 0, 0, 0);
@@ -294,7 +302,7 @@ internal sealed partial class BatchImportView
         var top = Math.Max(sourceCard.Bottom, resultCard.Bottom) + 6;
         if (width >= AppTypography.TextHeight(1160))
         {
-            var destinationWidth = width * 72 / 100 - 4;
+            var destinationWidth = width * 55 / 100 - 4;
             LayoutDestination(sourceCard.Left, top, destinationWidth);
             LayoutWorkflow(destinationCard.Right + 8, top, width - destinationWidth - 8);
             top = Math.Max(destinationCard.Bottom, workflowCard.Bottom) + 6;
@@ -352,10 +360,11 @@ internal sealed partial class BatchImportView
 
     private int LayoutDashboardActions(IEnumerable<Button> actions, int width, int top, int left, int line)
     {
+        TraceBatchEvent("LayoutDashboardActions.styles");
         var x = left; var y = top;
         foreach (var button in actions.Where(button => button.Visible))
         {
-            DownloadsVisual.Button(button, button == buttons["Automatic"] || button == buttons["Browse"]);
+            DownloadsVisual.Button(button, button == buttons["Automatic"]);
             AppTypography.Bind(button, 9.5f);
             var icon = button == buttons["Add"] ? AppIconKind.Download : button == buttons["Analyze"] ? AppIconKind.Search :
                 button == buttons["Browse"] ? AppIconKind.Folder : button == buttons["Paste"] ? AppIconKind.Clipboard : (AppIconKind?)null;
@@ -389,6 +398,7 @@ internal sealed partial class BatchImportView
 
     private void PrepareDashboardRow(Panel panel, BatchImportEntry entry)
     {
+        TraceBatchEvent("PrepareDashboardRow.styles");
         var c = panel.Controls.ToArray(); var appearance = AppearancePresentation.Current.BatchImport;
         var title = (Label)c[1]; var url = (Label)c[2]; var state = (Label)c[3];
         title.Text = appearance.ShowTitle && !string.IsNullOrWhiteSpace(entry.Title) ? entry.Title : appearance.ShowSource ? entry.Source : "";
@@ -397,6 +407,9 @@ internal sealed partial class BatchImportView
         var qualityText = string.Join(" · ", new[] { appearance.ShowQuality ? services.Localization["Quality." + entry.Quality] : null,
             appearance.ShowContainer ? services.Localization["Container." + entry.Container] : null }.Where(v => !string.IsNullOrEmpty(v)));
         var qualityLabel = AppUi.Muted(qualityText); qualityLabel.Multiline = true; qualityLabel.AccessibleAutomationId = "BatchEntryQuality" + entry.Ordinal;
+        // Typography resolves the owning presentation through the parent chain.
+        // This late-created label needs the same attached Modern owner as its peers.
+        panel.Controls.Add(qualityLabel);
         state.Text = services.Localization["Batch.Status." + entry.Status];
         AppUi.BindForeground(state, BatchStatusToken(entry.Status)); AppUi.BindForeground(url, AppThemeTokens.Info);
         // Preserve full parser details without turning the status column into a paragraph.
@@ -411,11 +424,14 @@ internal sealed partial class BatchImportView
         {
             actions[i].AccessibleName = actions[i].Text; actions[i].AccessibleAutomationId = "BatchEntry" + new[] { "Analyze", "Add", "Details", "Remove" }[i] + entry.Ordinal;
             dashboardTips.SetToolTip(actions[i], actions[i].Text); actions[i].Text = "";
+            DashboardVisual.Button(actions[i]);
+            DashboardVisual.Icon(actions[i], i switch { 0 => AppIconKind.Search, 1 => AppIconKind.Download, 2 => AppIconKind.More, _ => AppIconKind.Close }, true);
         }
         var sourceIcon = new SourceVectorIcon(SourceBrandLookup.Resolve(entry.Url).Brand) { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
         var placeholder = new AppVectorIcon(AppIconKind.Media, 20, AppThemeTokens.TextSecondary) { AccessibilityView = ModernFormsNext.Accessibility.AccessibilityView.Hidden };
-        panel.Controls.AddRange([qualityLabel, sourceIcon, placeholder]);
-        panel.Tag = new DashboardBatchRow((CheckBox)c[0], title, url, state, qualityLabel, actions, c.OfType<PictureBox>().FirstOrDefault(), sourceIcon, placeholder);
+        panel.Controls.AddRange([sourceIcon, placeholder]);
+        var actionIcons = actions.Select(button => button.Controls.OfType<AppVectorIcon>().Single()).ToArray();
+        panel.Tag = new DashboardBatchRow((CheckBox)c[0], title, url, state, qualityLabel, actions, actionIcons, c.OfType<PictureBox>().FirstOrDefault(), sourceIcon, placeholder);
         DashboardVisual.Flat(panel, true);
         void UpdateSelection() => AppUi.BindGradient(panel, ((CheckBox)c[0]).Checked ? DownloadsVisual.Selected : DownloadsVisual.Panel,
             ((CheckBox)c[0]).Checked ? DownloadsVisual.SelectedEnd : DownloadsVisual.PanelEnd);
@@ -506,11 +522,45 @@ internal sealed partial class BatchImportView
             for (var i = 0; i < row.Actions.Length; i++) row.Actions[i].SetBounds(contentLeft + i * (action + 8), actionTop, action, action);
             height = actionTop + action + 10;
         }
-        for (var i = 0; i < row.Actions.Length; i++)
+        // Style and icon creation happen once after attachment. Only geometry
+        // follows the final action bounds; a 26px action must not retain the icon
+        // position calculated from the Button's initial, larger default size.
+        for (var index = 0; index < row.Actions.Length; index++)
         {
-            DashboardVisual.Button(row.Actions[i]);
-            DashboardVisual.Icon(row.Actions[i], i switch { 0 => AppIconKind.Search, 1 => AppIconKind.Download, 2 => AppIconKind.More, _ => AppIconKind.Close }, true);
+            var button = row.Actions[index]; var icon = row.ActionIcons[index];
+            icon.SetBounds((button.Width - icon.Width) / 2, (button.Height - icon.Height) / 2, icon.Width, icon.Height);
         }
         panel.Height = height;
+    }
+
+    private void PresentDashboardSourceFile(string fullName)
+    {
+        dashboardSourceFile = fullName;
+        if (counters is null) return;
+        counters.AccessibleName = fullName;
+        dashboardTips.SetToolTip(counters, fullName);
+        counters.Text = CompactSourceFileName(counters, fullName, counters.Width);
+    }
+
+    internal static string CompactSourceFileName(Label label, string fullName, int width)
+    {
+        if (width <= 0 || DashboardVisual.TextWidth(label, fullName) <= width) return fullName;
+        // Elide the middle, never the diagnostic suffix or file extension first.
+        // Text element boundaries also preserve surrogate pairs and combining marks.
+        var elements = System.Globalization.StringInfo.ParseCombiningCharacters(fullName);
+        var marker = fullName.LastIndexOf("INCOMPLETE", StringComparison.OrdinalIgnoreCase);
+        var preferredSuffix = marker < 0 ? 16 : elements.Length - Array.FindIndex(elements, index => index >= marker);
+        var low = 0; var high = Math.Max(0, elements.Length - 1); var best = "…";
+        while (low <= high)
+        {
+            var keep = (low + high) / 2;
+            var suffix = Math.Min(keep, Math.Max(preferredSuffix, keep / 2));
+            var prefix = keep - suffix;
+            var candidate = (prefix == 0 ? "" : fullName[..elements[prefix]]) + "…" +
+                (suffix == 0 ? "" : fullName[elements[elements.Length - suffix]..]);
+            if (DashboardVisual.TextWidth(label, candidate) <= width) { best = candidate; low = keep + 1; }
+            else high = keep - 1;
+        }
+        return best;
     }
 }
