@@ -33,6 +33,12 @@
 
 ### Fixed
 
+- Preserve unrecognized persisted queue, History, LIVE and Batch fields, including
+  nested download options, through normal saves and detached snapshots. Legacy LIVE
+  migration retains unknown wrapper evidence and rejects conflicting source data.
+- Keep Batch rows and open workflow/list dropdowns stable during passive observation
+  and actual metadata completion; refresh retained controls after failed journal writes
+  without inventing a successful commit or another queue admission.
 - Queue, History and LIVE load failures retain the original stores and block unsafe
   writes and work admission, including interrupted legacy LIVE migration. Persisted
   identities are validated without inventing replacements for damaged records.

@@ -79,7 +79,7 @@ Wait-Stability {
         $identity.valid, $identity.width, $identity.height, $identity.firstAny) -join '|'
     if ($state -ne $drainWitness.last) {
         @{ elapsedMs=$drainClock.Elapsed.TotalMilliseconds; sample=$drainWitness.samples;
-            foreground=$native[0]; active=$native[1]; focus=$native[2]; capture=$native[3];
+            foreground=$native[0]; foregroundPid=$native[4]; active=$native[1]; focus=$native[2]; capture=$native[3];
             expectedPopup=$transferPopup.popup; popup=$identity.pinnedHwnd; popupValid=$identity.valid;
             width=$identity.width; height=$identity.height; firstAny=$identity.firstAny } |
             ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $dataRoot 'batch-transfer-drain.jsonl') -Encoding utf8
@@ -102,7 +102,7 @@ $afterTransfer = Inspect-StableBatchControl (Find-Node 'BatchFilter' $mainRoot)
 $transferPopupIdentity = Get-StableBatchPopup $afterTransfer ([long]$transferPopup.popup)
 $afterTransferNative = [MtdAutomationWindowCloser]::NativeFocusSnapshot($script:automationMainWindow)
 @{ before=$transferPopup; after=$afterTransfer; popupIdentity=$transferPopupIdentity;
-    native=@{ foreground=$afterTransferNative[0]; active=$afterTransferNative[1]; focus=$afterTransferNative[2]; capture=$afterTransferNative[3] };
+    native=@{ foreground=$afterTransferNative[0]; foregroundPid=$afterTransferNative[4]; active=$afterTransferNative[1]; focus=$afterTransferNative[2]; capture=$afterTransferNative[3] };
     drainSamples=$drainWitness.samples; drainElapsedMs=$drainClock.Elapsed.TotalMilliseconds } | ConvertTo-Json -Depth 12 |
     Set-Content -LiteralPath (Join-Path $dataRoot 'batch-transfer-completion-popup.json') -Encoding utf8
 $completionFailures = [Collections.Generic.List[string]]::new()

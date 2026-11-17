@@ -28,6 +28,14 @@ public sealed record FormatSelection(
     bool AudioOnly,
     bool RequiresMerge)
 {
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; init; }
+    internal FormatSelection PersistenceCopy() => AdditionalData is null ? this : this with { AdditionalData = JsonExtensionFields.Copy(AdditionalData) };
+    public bool Equals(FormatSelection? other) => other is not null && VideoFormatId == other.VideoFormatId &&
+        AudioFormatId == other.AudioFormatId && VideoExtension == other.VideoExtension && AudioExtension == other.AudioExtension &&
+        AudioOnly == other.AudioOnly && RequiresMerge == other.RequiresMerge && RequiresStreamProbe == other.RequiresStreamProbe;
+    public override int GetHashCode() => HashCode.Combine(VideoFormatId, AudioFormatId, VideoExtension, AudioExtension, AudioOnly, RequiresMerge, RequiresStreamProbe);
+
     // Missing extractor codec fields are not codec facts. Such a direct-media
     // selection must be inspected locally before it can become a final output.
     public bool RequiresStreamProbe { get; init; }

@@ -194,6 +194,7 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
     private readonly Label identity = AppUi.Muted();
     private readonly Panel statusDot = new() { Width = 8, Height = 8 };
     private readonly Panel sectionRule = new(), activeMarker = new();
+    private bool refreshing;
     public override AppInterfaceMode Mode => AppInterfaceMode.ModernDashboard;
     public ModernDashboardAppShell(LocalizationService text, Action<AppPageId> navigate, Action toggleTheme, Action checkUpdates) : base(text, navigate, true)
     {
@@ -213,9 +214,15 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
         theme.Dock = DockStyle.Right; theme.Width = 110; AppUi.Secondary(theme);
         theme.Click += (_, _) => toggleTheme(); updates.Click += (_, _) => checkUpdates();
         theme.Visible = false; Footer.Controls.AddRange([identity, updates, theme]);
-        Logo.SetBounds(16, 0, 28, 28); Brand.SetBounds(54, 0, 150, 28); Brand.Text = "ModernTubeDownloader"; Brand.Multiline = false; Brand.AutoEllipsis = true; AppTypography.Bind(Brand, 10, FontStyle.Bold);
+        // Modern branding belongs to the caption. Invisible controls still contribute
+        // to the scroll canvas: Brand.Right=60 overflowed the compact 50px viewport
+        // once its vertical scrollbar appeared. Remove the unused chrome, not scrolling.
+        Sidebar.Controls.Remove(Logo); Sidebar.Controls.Remove(Brand);
+        Logo.Dispose(); Brand.Dispose();
+        Sidebar.SizeChanged += SidebarSizeChanged;
         Refresh();
     }
+    private void SidebarSizeChanged(object? sender, EventArgs e) => Refresh();
     public override void Select(AppPageId page)
     {
         base.Select(page);
@@ -231,30 +238,59 @@ internal sealed class ModernDashboardAppShell : ClassicAppShell
     public override void Refresh()
     {
         // The base constructor may receive a layout callback before derived fields exist.
-        if (theme is null) return;
-        Sidebar.Style.Border.Right.Color = Footer.Style.Border.Top.Color = AppUi.GetColor(AppThemeTokens.Border);
-        var p = AppearancePresentation.Current.ModernDashboardShell;
-        var compact = p.Sidebar == DashboardSidebarMode.Compact || p.Sidebar == DashboardSidebarMode.Auto && (Root.Width < 1280 || AppTypography.Scale > 1.25);
-        Sidebar.Width = compact ? 66 : Math.Max(212, AppTypography.TextHeight(170));
-        Brand.Visible = Logo.Visible = false; Logo.Left = compact ? 19 : 16; Brand.Width = Math.Max(0, Sidebar.Width - 60);
-        var row = AppTypography.TextHeight(42); var y = 32;
-        foreach (var page in new[] { AppPageId.Downloads, AppPageId.Live, AppPageId.Other, AppPageId.Batch, AppPageId.History, AppPageId.Settings })
+        if (theme is null || refreshing || Root.Disposing) return;
+        refreshing = true;
+        try
         {
-            if (page == AppPageId.Settings) y += 22;
-            SetButton(page, compact, compact ? 4 : 12, y, compact ? 40 : Sidebar.Width - 41, row); y += row + 8;
+            Sidebar.Style.Border.Right.Color = Footer.Style.Border.Top.Color = AppUi.GetColor(AppThemeTokens.Border);
+            var p = AppearancePresentation.Current.ModernDashboardShell;
+            var compact = p.Sidebar == DashboardSidebarMode.Compact || p.Sidebar == DashboardSidebarMode.Auto && (Root.Width < 1280 || AppTypography.Scale > 1.25);
+            Select(Selected); // Bind the actual Modern font before measuring translated labels.
+            var labelWidth = Buttons.Max(entry => DashboardVisual.TextWidth(entry.Value,
+                Text[entry.Key == AppPageId.Batch ? "Dashboard.Batch" : "Nav." + entry.Key]));
+            // Include icon/text padding, focus border, both gutters and the vertical rail.
+            Sidebar.Width = compact ? 66 : Math.Max(Math.Max(212, AppTypography.TextHeight(170)), labelWidth + 96);
+            Footer.Height = AppTypography.TextHeight(32); identity.Width = Math.Min(DashboardVisual.TextWidth(identity, identity.Text) + 30, Root.Width / 2);
+            statusDot.SetBounds(identity.Width + 8, (Footer.Height - 8) / 2, 8, 8);
+            Status.Padding = new Padding(26, 5, 8, 0);
+            theme.Text = Text["Dashboard.Theme"]; updates.Text = Text["Updates.Check"];
+            DashboardVisual.Flat(updates);
+            AppUi.BindInteractiveSurface(updates, AppThemeTokens.Background, AppThemeTokens.SurfaceHover);
+            AppTypography.Bind(identity, 9); AppTypography.Bind(Status, 9); AppTypography.Bind(updates, 9);
+            AppUi.BindForeground(updates, AppThemeTokens.Info);
+            ArrangeNavigation(compact);
         }
-        var bottom = Math.Max(y + 20, Sidebar.Height - 2 * (row + 6) - 36);
-        SetButton(AppPageId.Help, compact, compact ? 4 : 12, bottom, compact ? 40 : Sidebar.Width - 41, row);
-        SetButton(AppPageId.About, compact, compact ? 4 : 12, bottom + row + 6, compact ? 40 : Sidebar.Width - 41, row);
-        sectionRule.SetBounds(18, Buttons[AppPageId.Settings].Top - 16, Sidebar.Width - 36, 1);
-        Footer.Height = AppTypography.TextHeight(32); identity.Width = Math.Min(DashboardVisual.TextWidth(identity, identity.Text) + 30, Root.Width / 2);
-        statusDot.SetBounds(identity.Width + 8, (Footer.Height - 8) / 2, 8, 8);
-        Status.Padding = new Padding(26, 5, 8, 0);
-        theme.Text = Text["Dashboard.Theme"]; updates.Text = Text["Updates.Check"];
-        Select(Selected);
-        DashboardVisual.Flat(updates);
-        AppUi.BindInteractiveSurface(updates, AppThemeTokens.Background, AppThemeTokens.SurfaceHover);
-        AppTypography.Bind(identity, 9); AppTypography.Bind(Status, 9); AppTypography.Bind(updates, 9);
-        AppUi.BindForeground(updates, AppThemeTokens.Info);
+        finally { refreshing = false; }
+    }
+
+    private void ArrangeNavigation(bool compact)
+    {
+        // A new vertical rail changes the available width. Arrange again only when
+        // that viewport changes; ordinary selection/scrolling retains the same tree.
+        for (var pass = 0; pass < 2; pass++)
+        {
+            var viewport = Sidebar.DisplayRectangle;
+            var row = AppTypography.TextHeight(42);
+            var width = compact ? 40 : Math.Max(40, viewport.Width - 24);
+            var x = viewport.X + (compact ? Math.Max(4, (viewport.Width - width) / 2) : 12);
+            var y = 32;
+            Sidebar.SuspendLayout();
+            try
+            {
+                foreach (var page in new[] { AppPageId.Downloads, AppPageId.Live, AppPageId.Other, AppPageId.Batch, AppPageId.History, AppPageId.Settings })
+                {
+                    if (page == AppPageId.Settings) y += 22;
+                    SetButton(page, compact, x, viewport.Y + y, width, row); y += row + 8;
+                }
+                var bottom = Math.Max(y + 20, viewport.Height - 2 * (row + 6) - 36);
+                SetButton(AppPageId.Help, compact, x, viewport.Y + bottom, width, row);
+                SetButton(AppPageId.About, compact, x, viewport.Y + bottom + row + 6, width, row);
+                sectionRule.SetBounds(x + 4, Buttons[AppPageId.Settings].Top - 16, width - 8, 1);
+                var selected = Buttons[Selected];
+                activeMarker.SetBounds(viewport.X, selected.Top + 4, 4, selected.Height - 8);
+            }
+            finally { Sidebar.ResumeLayout(true); }
+            if (Sidebar.DisplayRectangle == viewport) break;
+        }
     }
 }

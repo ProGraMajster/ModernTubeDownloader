@@ -10,6 +10,7 @@ public enum SubtitleFormat { Auto, Srt, Vtt, Ass }
 
 public sealed class SubtitleOptions
 {
+    [JsonExtensionData] public Dictionary<string, JsonElement>? AdditionalData { get; set; }
     public bool Enabled { get; set; }
     public SubtitleSource Source { get; set; } = SubtitleSource.Manual;
     public List<string> Languages { get; set; } = [];
@@ -20,7 +21,7 @@ public sealed class SubtitleOptions
     public SubtitleOptions Copy() => new()
     {
         Enabled = Enabled, Source = Source, Languages = [.. Languages],
-        Format = Format, Embed = Embed, KeepFiles = KeepFiles
+        Format = Format, Embed = Embed, KeepFiles = KeepFiles, AdditionalData = JsonExtensionFields.Copy(AdditionalData)
     };
 
     public void Validate()
@@ -76,13 +77,14 @@ public enum SponsorBlockMode { Off, Mark, Remove }
 
 public sealed class SponsorBlockOptions
 {
+    [JsonExtensionData] public Dictionary<string, JsonElement>? AdditionalData { get; set; }
     private static readonly HashSet<string> SupportedCategories = new(StringComparer.OrdinalIgnoreCase)
         { "sponsor", "intro", "outro", "selfpromo", "interaction", "preview", "music_offtopic", "filler", "hook", "poi_highlight", "chapter" };
 
     public SponsorBlockMode Mode { get; set; }
     public List<string> Categories { get; set; } = ["sponsor"];
 
-    public SponsorBlockOptions Copy() => new() { Mode = Mode, Categories = [.. Categories] };
+    public SponsorBlockOptions Copy() => new() { Mode = Mode, Categories = [.. Categories], AdditionalData = JsonExtensionFields.Copy(AdditionalData) };
 
     public string? ToYtDlpCategories()
     {

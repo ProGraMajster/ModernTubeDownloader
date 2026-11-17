@@ -13,6 +13,8 @@ namespace ModernTubeDownloader.Services;
 public sealed record ApplicationRelease(string Version, string Notes, Uri Page, Uri Archive, Uri Checksum);
 public sealed class ApplicationUpdateState
 {
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalData { get; set; }
     public DateTimeOffset? LastCheck { get; set; }
     public string? SkippedVersion { get; set; }
     public DateTimeOffset? RemindAfter { get; set; }
@@ -29,7 +31,12 @@ public sealed class ApplicationUpdateState
     public DateTimeOffset? LastStartupAttemptAt { get; set; }
     public string? LastStartupResultKey { get; set; }
 
-    internal ApplicationUpdateState Copy() => (ApplicationUpdateState)MemberwiseClone();
+    internal ApplicationUpdateState Copy()
+    {
+        var copy = (ApplicationUpdateState)MemberwiseClone();
+        copy.AdditionalData = Models.JsonExtensionFields.Copy(AdditionalData);
+        return copy;
+    }
 }
 
 public interface IApplicationReleaseSource { Task<ApplicationRelease?> GetLatestAsync(CancellationToken token); }

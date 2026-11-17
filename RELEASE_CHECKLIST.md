@@ -1,5 +1,120 @@
 # ModernTubeDownloader release checklist
 
+## 1.3.0 candidate — final qualification, not publication approval
+
+Updated 2026-11-17. This section supersedes the historical 1.2.1 checklist **for the
+1.3.0 candidate only**. Prior outcomes below remain historical. Work stays on the
+isolated dashboard branch and Draft PR #3. Main checkout, existing installations,
+profiles, other worktrees and the framework source are outside the test scope.
+
+The starting source for this round is `c71a8fdedbe670deee8c69bb41618be359a73ca4`.
+A checked source-review item is not an executed product test. Test results and package
+hashes belong to the exact source recorded in the
+[release readiness ledger](docs/1.3.0-RELEASE-READINESS.md) and
+[scenario matrix](docs/1.3.0-SCENARIO-MATRIX.md); the older `4fd7155` package and CI
+must not qualify this candidate. The current decision is **NO-GO pending the gates
+below**, not an independent authorization to publish.
+
+### Identity, history and publication boundaries
+
+- [x] SOURCE REVIEW: central Product/Informational version is `1.3.0-candidate.1`;
+  Assembly/File version is `1.3.0.0`; framework pin remains
+  `7bf58d06d795d7298c86d9bf9471bbfb46852bab`. No promotion or pin change in this review.
+- [x] SOURCE REVIEW: tag-only Release rejects candidate suffixes, requires `v$Version`,
+  and verifies tag commit = checkout HEAD = `GITHUB_SHA`; public-release notes are required.
+  The stable updater accepts only an exact public `vX.Y.Z` release and expected assets;
+  it does not install a candidate from a beta channel. Candidate-to-corresponding-stable
+  comparison uses Product version, independently of Assembly version.
+- [ ] Resolve the current reachable-history privacy/hygiene failure without scanner
+  exclusions, shallow-history concealment or weakening assertions. Preserve original
+  evidence outside Git; obtain owner approval before any public-history rewrite,
+  force-push or replacement-PR operation. Current documentation cleanup alone is not
+  proof that reachable-history scanning passes.
+- [ ] Freeze reviewed candidate sources and record the exact SHA, framework pin and
+  current dirty-state provenance for every final run. Both required push/PR CI runs
+  must be terminal SUCCESS for that exact SHA.
+- [ ] Separate owner decision before stable-version promotion, merge of PR #3,
+  tag `v1.3.0`, GitHub Release or any NuGet publication. None is authorized here.
+
+### Data and exposed workflow qualification
+
+- [ ] Fresh profile: six-step setup, interrupt/reopen, explicit Classic/Modern choice,
+  language/folders/formats, What's New/Later/acknowledgment and Help/About.
+- [ ] Synthetic 1.2.1 migration: preserve canonical IDs, cookies/metadata bytes and
+  unknown JSON values through real service load/save/restart; settings-policy migration
+  must preserve disabled checks, Skip/Later and existing preferences. Verify the
+  once-only interface choice separately from service-only marker tests.
+- [ ] Re-run the narrow extension-data regressions added in this round: queue/History
+  organizer move/undo/reopen, LIVE legacy source/destination retry and conflict,
+  Batch committed row journal/manifest snapshots, nested settings/update-state values,
+  and unchanged known range/format equality. These tests are implemented, not yet
+  recorded as executed at this checklist update.
+- [ ] Organizer synthetic copies: exact provider/URL/ID, adjacent and central JSON,
+  subtitle/thumbnail companions, missing/ambiguous evidence refusal, collision,
+  move/History/queue commit, undo and interrupted recovery. Record original and final
+  hashes. Do not claim a private collection, physical disk-full or device-unplug test.
+- [ ] VOD/playlist: actual queue, distinct IDs, selected group entries, pause/restart,
+  output JSON and History; separately verify one legal short public source with real
+  ffprobe and bounded decode. FakeTool process results remain synthetic evidence.
+- [ ] LIVE: upcoming/active/completed, stop-and-save, controlled disconnection/partial
+  preservation and independent ownership; real-provider coverage recorded separately.
+- [ ] Batch: TXT/CSV/JSON/clipboard/multifile, rejected/duplicate/auth rows,
+  manual/automatic workflow, per-list destinations, idempotence and retained popup
+  through real analysis/transfer completion. Use 122/2750 plus a narrow 10000 case;
+  retain original FAIL and identify INTERFERED/INCONCLUSIVE focus conditions.
+- [ ] Malformed/locked store, controlled write failure, pending work, activation and
+  shutdown: preserve original bytes, drain owned processes, prevent unsafe installation.
+- [ ] Updater: automatic check/download + InstallOnExit for new profiles; preserved
+  legacy opt-out/Skip/Later; independent InstallAtStartup remains OFF unless selected.
+  VOD/LIVE/Batch/organizer work must defer startup installation. Execute the real
+  external updater only against a disposable synthetic installation, verifying ZIP,
+  checksum, parent identity/commit, transaction journal and rollback. Do not update
+  the existing installation or represent injected failures as actual power loss.
+- [ ] Bounded integration smoke: loopback Web Remote pairing/auth, NativeHost/URI,
+  opt-in synthetic cookies, tool availability, tray/notifications and localization.
+  Provider acceptance is not evidence of a visible OS toast or private-account access.
+
+### Native usability and candidate package
+
+- [ ] Re-run only unresolved QualitySelector 20-cycle, tooltip 150%, Batch quality and
+  completion-popup scenarios with foreground/active/focus ownership and exact popup
+  witnesses. Observe correct deliberate deactivation separately. Preserve old FAILs;
+  a Batch filter PASS does not qualify the independent quality selector.
+- [ ] Verify real sidebar geometry at PL/EN/DE/JA and 100/150/200% TextScale, including
+  narrow windows and keyboard focus; do not hide overflow while clipping actions.
+- [ ] Six screens plus setup/upgrade/What's New: inspect actual HWND screenshots and
+  list remaining reference differences for owner visual acceptance. Do not claim
+  pixel-perfect or physical Windows DPI from logical TextScale tests.
+- [ ] After source freeze: one full `scripts/Build-Release.ps1` validation with Debug,
+  Release, JavaScript, warnings-as-errors, NativeHost/Updater publish, package/privacy
+  and reachable-history hygiene. Record failures and counts without summing overlapping
+  targeted runs. Do not run heavy native suites concurrently in the same desktop.
+- [ ] Produce the local `ModernTubeDownloader-1.3.0-candidate.1-win-x64.zip`, symbols
+  and SHA-256 file with the clean pinned framework. Check assembly/product identities,
+  LICENSE/NOTICE/dependency license inventory, release documentation and no profiles,
+  cookies, test logs, private screenshots or Debug automation endpoints.
+- [ ] Extract that exact candidate into a new disposable location, use its production
+  EXE without the semantic bridge, and verify startup, main flows and graceful exit.
+  Record ZIP checksum and extraction identity; do not reuse earlier package evidence.
+- [ ] Record unsigned-binary/SmartScreen behavior only if actually observed. Explain
+  signing policy and owner-distribution implications without claiming a signature or
+  categorizing unsigned status as a new critical defect absent project policy.
+- [ ] Present final candidate, evidence and a GO/NO-GO decision **for owner manual
+  acceptance**, with product blockers separate from consciously unqualified limits.
+  Publication requires a subsequent explicit owner instruction.
+
+Consciously unqualified unless separately evidenced: physical 5K/Windows 225% DPI,
+all provider/account/browser combinations, the unavailable private collection, real
+power failure/device removal, and native-speaker review of all 16 locales.
+**Two-hour soak: DEFERRED / NOT EXECUTED**; no arbitrary duration gate and no short
+smoke relabeled as full soak. A newly reproduced freeze or data-loss defect remains a
+release blocker regardless of these deferred limits.
+
+Draft distribution text: [1.3.0 release notes](docs/releases/v1.3.0.md).
+The source/runtime scope and Batch before/after evidence remain in the linked ledgers;
+new final outcomes are added only after execution, not by checking prospective boxes.
+
+
 ## Final 1.2.1 — patch release
 
 Owner-authorized on 2026-10-18: reviewed master commit/push, terminal exact-SHA CI,

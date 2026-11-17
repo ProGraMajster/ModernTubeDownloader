@@ -80,7 +80,17 @@ public sealed class LiveSessionPersistenceService(AppPaths paths, IAppLogger log
         foreach (var item in queue.Where(item => item.LiveSession is not null))
         {
             var live = item.LiveSession!;
-            if (sessions.Any(session => session.Id == live.Id)) continue;
+            var wrapperFields = LegacyQueueFields(item);
+            var migrated = sessions.Find(session => session.Id == live.Id);
+            if (migrated is not null)
+            {
+                // A crash can leave both stores. Preserve unknown source evidence
+                // before removing the legacy row, without replacing newer state.
+                migrated.AdditionalData = MergeFields(migrated.AdditionalData, live.AdditionalData);
+                migrated.LegacyQueueAdditionalData = MergeFields(MergeFields(migrated.LegacyQueueAdditionalData, live.LegacyQueueAdditionalData), wrapperFields);
+                continue;
+            }
+            live.LegacyQueueAdditionalData = MergeFields(live.LegacyQueueAdditionalData, wrapperFields);
             live.SourceUrl = item.SourceUrl;
             live.MediaId = item.VideoId;
             live.Title = item.Title;
@@ -109,5 +119,36 @@ public sealed class LiveSessionPersistenceService(AppPaths paths, IAppLogger log
         await AtomicJsonFile.WriteAsync(paths.QueueFile,
             queue.Where(item => item.LiveSession is null).ToArray(), token).ConfigureAwait(false);
         logger.Info($"Migrated legacy LIVE sessions out of VOD queue Count={queue.Count(item => item.LiveSession is not null)}");
+    }
+
+    private static Dictionary<string, JsonElement>? MergeFields(Dictionary<string, JsonElement>? destination, Dictionary<string, JsonElement>? source)
+    {
+        if (source is null) return JsonExtensionFields.Copy(destination);
+        var merged = JsonExtensionFields.Copy(destination) ?? new(StringComparer.Ordinal);
+        foreach (var (key, value) in source)
+        {
+            if (merged.TryGetValue(key, out var existing) && !JsonElement.DeepEquals(existing, value))
+                throw new InvalidDataException("Conflicting legacy LIVE extension fields; both original stores are retained.");
+            merged[key] = value.Clone();
+        }
+        return merged;
+    }
+
+    private static Dictionary<string, JsonElement>? LegacyQueueFields(DownloadQueueItem item)
+    {
+        var fields = JsonExtensionFields.Copy(item.AdditionalData);
+        Preserve("requestedRange", item.RequestedRange.AdditionalData);
+        Preserve("subtitleOptions", item.SubtitleOptions.AdditionalData);
+        Preserve("sponsorBlockOptions", item.SponsorBlockOptions.AdditionalData);
+        Preserve("selectedFormats", item.SelectedFormats?.AdditionalData);
+        return fields;
+
+        void Preserve(string property, Dictionary<string, JsonElement>? unknown)
+        {
+            if (unknown is not { Count: > 0 }) return;
+            // Preserve only extension portions. Known VOD option semantics do not
+            // acquire new meaning in the independent LIVE runtime.
+            fields = MergeFields(fields, new() { [property] = JsonSerializer.SerializeToElement(unknown, JsonDefaults.Options) });
+        }
     }
 }

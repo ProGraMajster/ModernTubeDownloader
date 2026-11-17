@@ -19,7 +19,7 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
     {
         using var timing = PerformanceDiagnostics.Measure("history.snapshot.sort");
         lock (sync)
-            return entries.OrderByDescending(entry => entry.CompletedAt).ToArray();
+            return entries.OrderByDescending(entry => entry.CompletedAt).Select(entry => entry.PersistenceCopy()).ToArray();
     }
 
     public async Task LoadAsync(CancellationToken cancellationToken = default)
@@ -84,9 +84,24 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
         {
             EnsureWritable();
             List<DownloadHistoryEntry> next;
-            lock (sync) next = entries.Where(existing => existing.QueueItemId != entry.QueueItemId ||
-                existing.LivePartIndex != entry.LivePartIndex).ToList();
-            next.Add(Normalize(entry));
+            DownloadHistoryEntry? prior;
+            lock (sync)
+            {
+                prior = entries.Find(existing => existing.QueueItemId == entry.QueueItemId && existing.LivePartIndex == entry.LivePartIndex);
+                next = entries.Where(existing => existing.QueueItemId != entry.QueueItemId || existing.LivePartIndex != entry.LivePartIndex).ToList();
+            }
+            var updated = Normalize(entry);
+            if (prior is not null)
+            {
+                // Finalization reconstructs known facts for the same canonical row.
+                // Retain compatible extension evidence rather than dropping it on retry.
+                updated = updated with { AdditionalData = PreserveFields(prior.AdditionalData, updated.AdditionalData) };
+                if ((prior.RequestedRange ?? MediaTimeRange.Full) == (updated.RequestedRange ?? MediaTimeRange.Full) &&
+                    prior.RequestedRange?.AdditionalData is not null)
+                    updated = updated with { RequestedRange = (updated.RequestedRange ?? MediaTimeRange.Full) with
+                    { AdditionalData = PreserveFields(prior.RequestedRange.AdditionalData, updated.RequestedRange?.AdditionalData) } };
+            }
+            next.Add(updated.PersistenceCopy());
             await AtomicJsonFile.WriteAsync(paths.HistoryFile, next, cancellationToken).ConfigureAwait(false);
             hasObservedFile = true;
             lock (sync) { entries.Clear(); entries.AddRange(next); }
@@ -132,5 +147,14 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
     private void EnsureWritable()
     {
         if (LoadFailed) throw new IOException("History could not be loaded; preserve the original file and restart after recovery.");
+    }
+
+    private static Dictionary<string, JsonElement>? PreserveFields(Dictionary<string, JsonElement>? previous, Dictionary<string, JsonElement>? supplied)
+    {
+        var result = JsonExtensionFields.Copy(previous);
+        if (supplied is null) return result;
+        result ??= new(StringComparer.Ordinal);
+        foreach (var (key, value) in supplied) result[key] = value.Clone();
+        return result;
     }
 }

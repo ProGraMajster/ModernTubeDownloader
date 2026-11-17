@@ -41,6 +41,8 @@ function Get-StableBatchPopup($node, [long]$expectedPopup = 0) {
         firstAny = $any.ToInt64(); firstAnyWidth = $anyWidth; firstAnyHeight = $anyHeight }
 }
 function Observe-BatchPopup([string]$id, [string]$inputKind, [string]$stage = 'idle', [bool]$keepOpen = $false) {
+    Start-NativePopupWitness
+    Assert-NativePopupIsolation
     $node = Find-Node $id $mainRoot
     Invoke-NodeAction $node $mainRoot 'ScrollIntoView' | Out-Null
     Invoke-NodeAction $node $mainRoot 'Focus' | Out-Null
@@ -65,7 +67,7 @@ function Observe-BatchPopup([string]$id, [string]$inputKind, [string]$stage = 'i
         $native = [MtdAutomationWindowCloser]::NativeFocusSnapshot($script:automationMainWindow)
         $script:automationProcess.Refresh()
         $witness = @{ id=$id; input=$inputKind; stage=$stage; elapsedMs=$clock.Elapsed.TotalMilliseconds; node=$detail;
-            popup=$popup.ToInt64(); width=$w; height=$h; popupIdentity=$popupIdentity; foreground=$native[0]; active=$native[1]; focus=$native[2];
+            popup=$popup.ToInt64(); width=$w; height=$h; popupIdentity=$popupIdentity; foreground=$native[0]; foregroundPid=$native[4]; active=$native[1]; focus=$native[2];
             privateBytes=$script:automationProcess.PrivateMemorySize64; workingSet=$script:automationProcess.WorkingSet64 }
         $witness | ConvertTo-Json -Depth 12 -Compress | Add-Content -LiteralPath (Join-Path $dataRoot 'batch-idle-witness.jsonl') -Encoding utf8
         if ($null -eq $first) {

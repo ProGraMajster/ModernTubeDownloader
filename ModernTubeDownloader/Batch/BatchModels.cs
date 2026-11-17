@@ -8,6 +8,8 @@ public enum BatchFilter { All, Ready, Errors, Duplicates, Unsupported, AuthRequi
 public enum BatchWorkflowPhase { Prepared, Analyzing, Queueing, WaitingForQueue, Downloading, Finalizing, Completed, Paused, Cancelled, Attention }
 public sealed class BatchImportEntry
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
     public int Ordinal { get; set; }
     public string Url { get; set; } = "";
@@ -25,10 +27,18 @@ public sealed class BatchImportEntry
     public double? DurationSeconds { get; set; }
     public bool Removed { get; set; }
     public long Revision { get; set; }
-    public BatchImportEntry Copy() => (BatchImportEntry)MemberwiseClone();
+    public BatchImportEntry Copy()
+    {
+        var copy = (BatchImportEntry)MemberwiseClone();
+        copy.AdditionalData = JsonExtensionFields.Copy(AdditionalData);
+        copy.Range = Range.PersistenceCopy();
+        return copy;
+    }
 }
 public sealed class BatchImportSession
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public int SchemaVersion { get; set; } = 1;
     public Guid Id { get; set; } = Guid.NewGuid();
     public string FileName { get; set; } = "";
@@ -51,7 +61,15 @@ public sealed class BatchImportSession
     [JsonIgnore] internal SemaphoreSlim MetadataWriteGate { get; } = new(1, 1);
     [JsonIgnore] internal bool PendingPhaseCommit { get; set; }
     [JsonIgnore] internal long PresentationRevision;
-    internal BatchImportSession MetadataSnapshot() { lock (Sync) return (BatchImportSession)MemberwiseClone(); }
+    internal BatchImportSession MetadataSnapshot()
+    {
+        lock (Sync)
+        {
+            var copy = (BatchImportSession)MemberwiseClone();
+            copy.AdditionalData = JsonExtensionFields.Copy(AdditionalData);
+            return copy;
+        }
+    }
     [JsonIgnore] internal List<BatchImportEntry> Entries { get; } = [];
     [JsonIgnore] internal Dictionary<Guid, BatchImportEntry> ById { get; } = [];
     public IReadOnlyList<BatchImportEntry> Snapshot() { lock (Sync) return Entries.Where(entry => !entry.Removed).Select(entry => entry.Copy()).ToArray(); }

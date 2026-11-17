@@ -17,6 +17,11 @@ public enum LiveSessionState
 /// <summary>Independent durable LIVE intent; never admitted by the VOD queue.</summary>
 public sealed class LiveSession
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
+    // The legacy queue wrapper is removed after migration. Retain its unknown
+    // fields separately from those of the embedded LIVE session.
+    public Dictionary<string, System.Text.Json.JsonElement>? LegacyQueueAdditionalData { get; set; }
     public Guid SessionId { get; set; } = Guid.NewGuid();
     [JsonIgnore] public Guid Id { get => SessionId; set => SessionId = value; }
     public string SourceUrl { get; set; } = string.Empty;
@@ -61,6 +66,8 @@ public sealed class LiveSession
     {
         var copy = (LiveSession)MemberwiseClone();
         copy.Parts = [.. Parts];
+        copy.AdditionalData = JsonExtensionFields.Copy(AdditionalData);
+        copy.LegacyQueueAdditionalData = JsonExtensionFields.Copy(LegacyQueueAdditionalData);
         return copy;
     }
 

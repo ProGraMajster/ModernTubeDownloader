@@ -20,12 +20,18 @@ public enum DownloadStatus
 
 public sealed class DownloadQueueItem
 {
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
+
     internal DownloadQueueItem PersistenceCopy()
     {
         var copy = (DownloadQueueItem)MemberwiseClone();
         copy.TemporaryFiles = [.. TemporaryFiles];
         copy.SubtitleOptions = SubtitleOptions.Copy();
         copy.SponsorBlockOptions = SponsorBlockOptions.Copy();
+        copy.AdditionalData = JsonExtensionFields.Copy(AdditionalData);
+        copy.RequestedRange = RequestedRange.PersistenceCopy();
+        copy.SelectedFormats = SelectedFormats?.PersistenceCopy();
         // VOD owns immutable strings/value records; legacy LIVE is migrated before
         // loading this store. Freeze mutable collections while holding queue.sync.
         return copy;
@@ -138,7 +144,17 @@ public sealed record DownloadHistoryEntry(
     bool WasPartial = false,
     int? PartsCount = null,
     double? DurationSeconds = null,
-    long? FileSizeBytes = null);
+    long? FileSizeBytes = null)
+{
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; init; }
+
+    internal DownloadHistoryEntry PersistenceCopy() => AdditionalData is null && RequestedRange?.AdditionalData is null ? this : this with
+    {
+        AdditionalData = JsonExtensionFields.Copy(AdditionalData),
+        RequestedRange = RequestedRange?.PersistenceCopy()
+    };
+}
 
 public enum QueueChangeKind
 {

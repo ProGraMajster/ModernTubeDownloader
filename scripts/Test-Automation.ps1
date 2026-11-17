@@ -55,6 +55,7 @@ param(
     [switch]$DashboardEmptyFixture,
     [switch]$ClassicUiRecovery,
     [switch]$QualityDropdownSmoke,
+    [switch]$QualityDeactivationSmoke,
     [ValidateRange(1, 100)][int]$QualityDropdownPasses = 20,
     [switch]$RangeSmoke,
     [switch]$QueueScrollRepro,
@@ -93,6 +94,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Test-NativePopupWitness.ps1')
+$script:popupWitnessStarted = $false
 if ($ExperienceExternalActivation -and $ExperienceSmoke -ne 'Resume') { throw 'ExperienceExternalActivation requires ExperienceSmoke Resume.' }
 if ($ExperienceSmoke -eq 'News') { $InterfaceMode = 'ModernDashboard' }
 if ($OrganizerWorkflowSmoke) { $BatchWorkflowSmoke = $true }
@@ -619,7 +622,9 @@ public static class MtdAutomationWindowCloser {
         uint threadId = GetWindowThreadProcessId(mainWindow, out uint owner);
         var info = new GuiThreadInfo { Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo)) };
         if (!GetGUIThreadInfo(threadId, ref info)) throw new InvalidOperationException("Cannot inspect own GUI thread focus.");
-        return new[] { GetForegroundWindow().ToInt64(), info.Active.ToInt64(), info.Focus.ToInt64(), info.Capture.ToInt64() };
+        var foreground = GetForegroundWindow();
+        GetWindowThreadProcessId(foreground, out uint foregroundPid);
+        return new[] { foreground.ToInt64(), info.Active.ToInt64(), info.Focus.ToInt64(), info.Capture.ToInt64(), (long)foregroundPid };
     }
     public static IntPtr FindOwnPopup(int processId, IntPtr mainWindow, out int width, out int height) {
         IntPtr target = IntPtr.Zero;
@@ -1346,6 +1351,7 @@ try {
             elseif ($DashboardScreenSmoke -eq 'Batch') {
                 if ($BatchIdleStabilitySmoke) {
                     . (Join-Path $PSScriptRoot 'Test-BatchIdleStability.ps1')
+                    Complete-NativePopupWitness $true
                     Close-DashboardProcess
                     Write-Output "Batch idle stability PASS (profile: $dataRoot)"
                     return
@@ -1566,22 +1572,17 @@ try {
                 Invoke-NodeAction (Find-Node ('QueueItem-' + $seededQueue[0].Id.ToString('N')) $mainRoot) $mainRoot 'Select' | Out-Null
             }
             if ($DownloadsTooltipSmoke) {
-                $titleTree = Invoke-AutomationCli -CliArguments @('tree','--pid',"$($script:automationProcess.Id)",'--root',$mainRoot,'--depth','12')
-                $titleNode = @($titleTree.nodes | Where-Object { $_.node.name -eq $seededQueue[0].Title -and $_.node.role -eq 'StaticText' }) | Select-Object -First 1
-                if (-not $titleNode) { throw 'Native title node unavailable for tooltip target.' }
-                $bounds = $titleNode.node.bounds
-                [void][MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow,0x0200,[int]($bounds.x+8),[int]($bounds.y+8),$false)
-                Start-Sleep -Milliseconds 800
-                $popupWidth=0; $popupHeight=0
-                $popup = [MtdAutomationWindowCloser]::FindOwnPopup($script:automationProcess.Id,$script:automationMainWindow,[ref]$popupWidth,[ref]$popupHeight)
-                if ($popup -eq [IntPtr]::Zero) { throw 'Native tooltip did not open for the owned-window mouse event.' }
-                $popupBitmap = [Drawing.Bitmap]::new($popupWidth,$popupHeight); $popupGraphics = [Drawing.Graphics]::FromImage($popupBitmap)
-                $popupDc = $popupGraphics.GetHdc()
-                try { if (-not [MtdAutomationWindowCloser]::CaptureOwnPopup($script:automationProcess.Id,$popup,$popupDc)) { throw 'Owned tooltip capture failed.' } }
-                finally { $popupGraphics.ReleaseHdc($popupDc); $popupGraphics.Dispose() }
-                try { $popupBitmap.Save((Join-Path $dataRoot 'downloads-title-tooltip.png')) } finally { $popupBitmap.Dispose() }
-                [void][MtdAutomationWindowCloser]::SendMouse($script:automationMainWindow,0x0200,240,205,$false)
-                Write-Output 'Native tooltip HWND captured; full title requires visual inspection of downloads-title-tooltip.png.'
+                Start-NativePopupWitness
+                Assert-NativePopupIsolation
+                $tooltipClient = Join-Path $PSScriptRoot 'Test-NativeTooltip.ps1'
+                $tooltipWitness = Join-Path $PSScriptRoot 'NativePopupWitness.cs'
+                $tooltipCommand = "& ([scriptblock]::Create([IO.File]::ReadAllText('" + $tooltipClient.Replace("'", "''") + "'))) -ProcessId " + $script:automationProcess.Id +
+                    ' -MainHwnd ' + $script:automationMainWindow.ToInt64() + " -DataRoot '" + $dataRoot.Replace("'", "''") + "' -WitnessPath '" + $tooltipWitness.Replace("'", "''") + "'"
+                & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command $tooltipCommand
+                if ($LASTEXITCODE -ne 0) { throw 'Native tooltip hit-test/content/visibility/close qualification failed; original witnesses retained.' }
+                Assert-NativePopupIsolation
+                Complete-NativePopupWitness $true
+                Write-Output 'Native tooltip PASS: exact canonical title hit-test, real hover, exact owned HWND and text, screenshot, closed after pointer leave.'
             }
             if ($DownloadsFullValuesSmoke) {
                 foreach ($valueId in @('InspectorTitle','InspectorSource','InspectorFolder')) {
@@ -3109,7 +3110,10 @@ try {
             }
             finally { $drawing.Dispose(); $picture.Dispose() }
         }
-        if ($CaptureVisual -or $QualityDropdownSmoke) {
+        if ($QualityDropdownSmoke -or $QualityDeactivationSmoke) {
+            . (Join-Path $PSScriptRoot 'Invoke-QualityDropdownSmoke.ps1')
+        }
+        elseif ($CaptureVisual) {
             $dropdownTrace = Join-Path $dataRoot 'quality-dropdown-native-trace.jsonl'
             function Write-QualityDropdownTrace([string]$stage, $node, $actionResult) {
                 $popupWidth = 0; $popupHeight = 0
@@ -3392,6 +3396,7 @@ try {
     }
 }
 catch {
+    if ($script:popupWitnessStarted) { Complete-NativePopupWitness $false $_.Exception.Message }
     if ($RealVodSmoke) {
         $failure = $_
         $failure | Format-List * -Force | Out-String | Set-Content -LiteralPath (Join-Path $dataRoot 'real-vod-failure.txt') -Encoding utf8
@@ -3401,6 +3406,7 @@ catch {
     throw
 }
 finally {
+    if ($script:popupWitnessStarted) { Complete-NativePopupWitness $false 'Native popup scenario exited without qualification.' }
     $env:MTD_FAKE_DOWNLOAD_DELAY_MS = $previousFakeDownloadDelay
     $env:MODERNTUBEDOWNLOADER_QA_ALL_SETTINGS = $previousAllSettings
     $env:MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL = $previousSkipProtocol

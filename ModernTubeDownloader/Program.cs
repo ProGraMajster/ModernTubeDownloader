@@ -108,13 +108,11 @@ internal static class Program
             var configureProtocol = OperatingSystem.IsWindows();
 #if DEBUG
             // Native QA uses an isolated data profile, never the owner's URL association.
-            if (enableAutomation || Environment.GetEnvironmentVariable("MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL") == "1")
+            if (enableAutomation)
                 configureProtocol = false;
 #endif
             // Explicit isolated QA never changes the owner's registered protocol, including Release QA.
-            if (Environment.GetEnvironmentVariable("MODERNTUBEDOWNLOADER_QA_SKIP_PROTOCOL") == "1" &&
-                paths.RootDirectory.StartsWith(System.IO.Path.GetFullPath(System.IO.Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) &&
-                System.IO.Path.GetFileName(paths.RootDirectory).StartsWith("mtd-automation-smoke-", StringComparison.Ordinal))
+            if (IsolatedQaProfile.SuppressSystemRegistration(paths))
                 configureProtocol = false;
             if (configureProtocol)
             {
@@ -171,6 +169,9 @@ internal static class Program
 
     private static ISystemNotificationService? RegisterNotifications(AppPaths paths)
     {
+        // Toast/COM registration is per Windows user, not per data root. The
+        // isolated QA profile must not register its copied EXE as the real app.
+        if (IsolatedQaProfile.SuppressSystemRegistration(paths)) return null;
         try
         {
             paths.EnsureCreated();

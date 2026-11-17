@@ -190,6 +190,9 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'COOKIE_SYNC.md') -Destination
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'UPDATES.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'TRAY_AND_STARTUP.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'BATCH_IMPORT.md') -Destination $releaseRoot
+foreach ($document in @('ONBOARDING.md', 'FILE_ORGANIZER_SAFETY.md', 'STARTUP_UPDATE_POLICY.md', 'LOCALIZATION_COVERAGE.md')) {
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot $document) -Destination $releaseRoot
+}
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'PERSONALIZATION.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'MODERN_DASHBOARD_UI.md') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'MFN_DASHBOARD_REPRO.md') -Destination $releaseRoot
