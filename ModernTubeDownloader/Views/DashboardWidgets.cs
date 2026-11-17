@@ -4,6 +4,7 @@ using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Theming;
+using ModernTubeDownloader.Utilities;
 using SkiaSharp;
 
 namespace ModernTubeDownloader.Views;
@@ -12,15 +13,26 @@ namespace ModernTubeDownloader.Views;
 internal sealed class SpeedSamples(int capacity = 120)
 {
     private readonly double[] samples = new double[capacity > 1 ? capacity : throw new ArgumentOutOfRangeException(nameof(capacity))];
+    private readonly double[] timestamps = new double[capacity];
     private int next, count;
+    private double elapsed;
     public int Count => count;
     public int Capacity => samples.Length;
     public double HorizontalFraction(int index)
     {
         if (index < 0 || index >= count) throw new ArgumentOutOfRangeException(nameof(index));
-        return 1 - (count - 1 - index) / (double)samples.Length;
+        return Math.Clamp(1 - (elapsed - timestamps[(next - count + index + samples.Length) % samples.Length]) / samples.Length, 0, 1);
     }
-    public void Add(double value) { samples[next] = double.IsFinite(value) ? Math.Max(0, value) : 0; next = (next + 1) % samples.Length; count = Math.Min(samples.Length, count + 1); }
+    public void Add(double value, double elapsedSeconds = 1)
+    {
+        if (!double.IsFinite(elapsedSeconds) || elapsedSeconds <= 0) throw new ArgumentOutOfRangeException(nameof(elapsedSeconds));
+        elapsed += elapsedSeconds;
+        samples[next] = double.IsFinite(value) ? Math.Max(0, value) : 0;
+        timestamps[next] = elapsed;
+        next = (next + 1) % samples.Length; count = Math.Min(samples.Length, count + 1);
+        while (count > 1 && elapsed - timestamps[(next - count + samples.Length) % samples.Length] > samples.Length) count--;
+    }
+    public void Clear() { next = count = 0; elapsed = 0; }
     public double[] Snapshot() => Enumerable.Range(0, count).Select(i => samples[(next - count + i + samples.Length) % samples.Length]).ToArray();
 }
 
@@ -30,7 +42,7 @@ internal sealed class SpeedChart : Control
     public string NoDataText { get; set; } = "";
     public bool CompactAxes { get; set; }
     public SpeedChart() { AppUi.BindBackground(this, AppThemeTokens.Surface); AppTypography.Bind(this, 8.5f); }
-    public void Sample(double speed) { Samples.Add(speed); Invalidate(); }
+    public void Sample(double speed, double elapsedSeconds = 1) { Samples.Add(speed, elapsedSeconds); Invalidate(); }
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e); e.Canvas.Save(); e.Canvas.Scale((float)Scaling);
@@ -38,8 +50,8 @@ internal sealed class SpeedChart : Control
         {
             var values = Samples.Snapshot();
             var maximum = Math.Max(1, values.DefaultIfEmpty(0).Max());
-            var maximumText = DashboardStyle.Bytes((long)maximum) + "/s";
-            var middleText = DashboardStyle.Bytes((long)(maximum / 2)) + "/s";
+            var maximumText = TransferRateFormatter.Format(maximum);
+            var middleText = TransferRateFormatter.Format(maximum / 2);
             var lineHeight = AppTypography.TextHeight(20);
             var left = Math.Max(AppTypography.TextHeight(32), Math.Max(DashboardVisual.TextWidth(this, maximumText), DashboardVisual.TextWidth(this, middleText)) + 10);
             var width = Math.Max(1, Width - left - 8); var height = Math.Max(1, Height - (CompactAxes ? 0 : lineHeight) - 8);
@@ -54,7 +66,7 @@ internal sealed class SpeedChart : Control
                 Text(Samples.Capacity + " s", left, height + 4, AppTypography.TextHeight(64), lineHeight, ModernFormsNext.ContentAlignment.MiddleLeft);
                 Text("0 s", Width - AppTypography.TextHeight(48), height + 4, AppTypography.TextHeight(40), lineHeight, ModernFormsNext.ContentAlignment.MiddleRight);
             }
-            if (values.Length < 2 || !values.Any(v => v > 0))
+            if (values.Length == 0 || !values.Any(v => v > 0))
             { Text(NoDataText, left + 8, (height - lineHeight) / 2, width - 16, lineHeight, ModernFormsNext.ContentAlignment.MiddleCenter); return; }
             Text(maximumText, 0, 0, left - 8, lineHeight, ModernFormsNext.ContentAlignment.MiddleRight);
             Text(middleText, 0, (height - lineHeight) / 2, left - 8, lineHeight, ModernFormsNext.ContentAlignment.MiddleRight);
@@ -65,6 +77,7 @@ internal sealed class SpeedChart : Control
             e.Canvas.DrawPath(area, fill);
             using var line = new SKPaint { Color = AppUi.GetColor(AppThemeTokens.Accent), StrokeWidth = 1.5f, IsAntialias = true, Style = SKPaintStyle.Stroke };
             e.Canvas.DrawPath(path, line);
+            if (values.Length == 1) e.Canvas.DrawCircle(left + width, 4 + height * (1 - (float)(values[0] / maximum)), 2, line);
         }
         finally { e.Canvas.Restore(); }
     }
@@ -82,6 +95,9 @@ internal sealed class DashboardWidgets : Panel
     private readonly Panel statisticsDivider = new();
     private readonly Label rateCaption = AppUi.Muted(), rateValue = AppUi.Muted(), etaCaption = AppUi.Muted(), etaValue = AppUi.Muted(), diskCaption = AppUi.Muted();
     private readonly SpeedChart chart = new();
+    private readonly DownloadTransferSampler transfer = new();
+    private readonly ToolTip transferTips = new();
+    private string transferHelp = "";
     private readonly Label currentCaption = AppUi.Muted();
     private readonly ModernFormsNext.Timer timer = new() { Interval = 1000 };
     private int ticks;
@@ -91,6 +107,9 @@ internal sealed class DashboardWidgets : Panel
     public DashboardWidgets(AppServices services, bool live = false)
     {
         this.services = services; this.live = live; AccessibleAutomationId = live ? "LiveDashboardWidgets" : "DashboardWidgets";
+        speedValue.AccessibleAutomationId = live ? "LiveTransferRate" : "DashboardTransferRate";
+        rateValue.AccessibleAutomationId = "DashboardStatisticsRate";
+        transfer.Reset(services.Queue.ObservedTransferBytes);
         AppUi.BindBackground(this);
         foreach (var panel in new[] { statistics, speed, processes }) { DashboardStyle.Card(panel); Controls.Add(panel); }
         disk.Multiline = processBody.Multiline = true;
@@ -126,7 +145,16 @@ internal sealed class DashboardWidgets : Panel
         }
         diskBar.Padding = new Padding(0); diskBar.Style.Border.Width = 0; AppUi.BindBackground(diskBar, AppThemeTokens.SurfaceSecondary);
         speed.Controls.AddRange([speedTitle, speedValue, chart]); processes.Controls.AddRange([processTitle, processBody]);
-        timer.Tick += Tick; VisibleChanged += (_, _) => { if (Visible) { timer.Start(); RefreshValues(); } else timer.Stop(); };
+        timer.Tick += Tick; VisibleChanged += (_, _) =>
+        {
+            if (Visible)
+            {
+                transfer.Reset(services.Queue.ObservedTransferBytes);
+                if (!live) { chart.Samples.Clear(); chart.Invalidate(); }
+                timer.Start(); RefreshValues();
+            }
+            else timer.Stop();
+        };
         SizeChanged += (_, _) => LayoutWidgets(); AppTypography.RegisterLayout(this, LayoutWidgets);
     }
     private void Tick(object? sender, EventArgs e) { if (!Visible || disposed) return; ticks++; RefreshValues(sample: true); }
@@ -134,7 +162,8 @@ internal sealed class DashboardWidgets : Panel
     {
         var text = services.Localization; var items = services.Queue.Snapshot(); var sessions = services.Live.Snapshot();
         var active = items.Where(i => i.Status is DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing).ToArray();
-        var rate = live ? sessions.Where(s => s.IsActive).Sum(s => s.CurrentSpeed ?? 0) : active.Sum(i => i.SpeedBytesPerSecond ?? 0);
+        var rate = live ? sessions.Where(s => s.IsActive).Sum(s => s.CurrentSpeed is { } value && value is >= 0 and < 1e15 && double.IsFinite(value) ? value : 0)
+            : sample ? transfer.Sample(services.Queue.ObservedTransferBytes) : transfer.CurrentRate;
         statisticsTitle.Text = text[live ? "Dashboard.LiveStatistics" : "Dashboard.Statistics"];
         var countText = live ? text.Get("Dashboard.LiveCounts", sessions.Count(s => s.IsActive), sessions.Count(s => s.State == LiveSessionState.WaitingForLive), sessions.Count(s => s.State == LiveSessionState.Completed), DashboardStyle.Bytes(sessions.Sum(s => s.BytesWritten)))
             : text.Get("Dashboard.Counts", active.Length, items.Count(i => i.Status is DownloadStatus.Queued or DownloadStatus.Waiting), items.Count(i => i.Status == DownloadStatus.Completed), items.Count(i => i.Status is DownloadStatus.Failed or DownloadStatus.Partial));
@@ -150,13 +179,21 @@ internal sealed class DashboardWidgets : Panel
         if (!live)
         {
             timing.Visible = false;
-            rateCaption.Text = text["Dashboard.TransferRate"]; rateValue.Text = DashboardStyle.Bytes((long)rate) + "/s";
+            rateCaption.Text = text["Dashboard.TransferRate"]; rateValue.Text = TransferRateFormatter.Format(rate);
+            var help = text["Dashboard.TransferRateHelp"];
+            if (help != transferHelp)
+            {
+                transferHelp = help;
+                foreach (var control in new Control[] { chart, speedValue, rateValue, speedTitle }) transferTips.SetToolTip(control, help);
+            }
             etaCaption.Text = text["Dashboard.RemainingActive"]; etaValue.Text = eta;
             diskCaption.Text = text["Dashboard.DiskSpace"];
         }
-        chart.NoDataText = text["Dashboard.NoSpeed"]; speedTitle.Text = text["Dashboard.SpeedChart"]; speedValue.Text = DashboardStyle.Bytes((long)rate) + "/s";
+        chart.NoDataText = text["Dashboard.NoSpeed"]; speedTitle.Text = text["Dashboard.SpeedChart"]; speedValue.Text = TransferRateFormatter.Format(rate);
         if (!live) currentCaption.Text = text["Dashboard.Current"];
-        if (sample && (rate > 0 || chart.Samples.Snapshot().Any(v => v > 0))) chart.Sample(rate);
+        if (sample && !live && transfer.HasHistoryGap) { chart.Samples.Clear(); chart.Invalidate(); }
+        if (sample && (live || transfer.LastIntervalSeconds > 0) && (rate > 0 || chart.Samples.Snapshot().Any(v => v > 0)))
+            chart.Sample(rate, live ? 1 : transfer.LastIntervalSeconds);
         var observed = ProcessActivity.Snapshot(); processTitle.Text = text["Dashboard.ActiveProcesses"] + $" ({observed.Count})"; processBody.Text = observed.Count == 0 ? text["Dashboard.NoProcesses"] : string.Join("\n", observed.Select(p => p.Name + "  ·  " + p.Elapsed.ToString(@"mm\:ss")));
         var storage = services.Queue.Storage.State;
         if (storage.IsBlocked) { disk.Text = text[storage.MessageKey]; AppUi.BindForeground(disk, AppThemeTokens.Warning); }
@@ -239,7 +276,7 @@ internal sealed class DashboardWidgets : Panel
         processTitle.SetBounds(14, 8, pw - 28, line); processBody.SetBounds(14, line + 10, pw - 28, h - line - 18);
         if (!live) processBody.Top += 8;
     }
-    protected override void Dispose(bool disposing) { if (disposing && !disposed) { disposed = true; timer.Tick -= Tick; timer.Dispose(); } base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing && !disposed) { disposed = true; timer.Tick -= Tick; timer.Dispose(); transferTips.Dispose(); } base.Dispose(disposing); }
 }
 
 internal static class DashboardStyle

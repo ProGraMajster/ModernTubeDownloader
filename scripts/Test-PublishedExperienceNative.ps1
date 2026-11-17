@@ -55,6 +55,10 @@ $output = Join-Path $DataRoot 'wizard-output'
 $temporary = Join-Path $DataRoot 'wizard-temporary'
 $owned = Get-Process -Id $OwnedProcessId
 if ($owned.Path -ne $ApplicationPath -or $owned.StartTime.ToUniversalTime().Ticks -ne $StartUtcTicks) { throw 'Owned PID/path/start-time mismatch.' }
+# Get-Process attaches by PID rather than starting the child. Retain its native
+# process handle before shutdown so .NET Framework can read the real exit code
+# after the process object has disappeared from the system process list.
+[void]$owned.Handle
 
 function Record([string]$Action, $Detail) { $events.Add(@{ action = $Action; elapsedMs = $watch.Elapsed.TotalMilliseconds; utc = [DateTime]::UtcNow.ToString('O'); detail = $Detail }) }
 function Assert-Alive {
@@ -121,10 +125,19 @@ function Step($Wizard, [int]$Index, [string]$ControlId) {
     if ($progress -notmatch [regex]::Escape([string]($Index + 1)) -or $progress -notmatch '6') { throw "Visible progress disagrees with six-step draft: $progress" }
     Record 'step.verified' @{ zeroBasedStep = $Index; visibleProgress = $progress }
 }
+function Get-CaptureHash([string]$Path) {
+    # The Windows PowerShell UIA child can inherit PowerShell 7's module search
+    # path. Use the .NET Framework crypto API directly; do not depend on optional
+    # cmdlet auto-loading or weaken the screenshot identity assertion.
+    $stream = [IO.File]::OpenRead($Path)
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-', '') }
+    finally { $hash.Dispose(); $stream.Dispose() }
+}
 function Capture($Window, [string]$Name) {
     $path = Join-Path $EvidenceDirectory ($Name + '.png')
     $rect = [PublishedExperienceWindow]::Capture([IntPtr]$Window.Current.NativeWindowHandle, $OwnedProcessId, $path)
-    Record 'capture' @{ file = [IO.Path]::GetFileName($path); width = $rect.Right - $rect.Left; height = $rect.Bottom - $rect.Top; sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash }
+    Record 'capture' @{ file = [IO.Path]::GetFileName($path); width = $rect.Right - $rect.Left; height = $rect.Bottom - $rect.Top; sha256 = (Get-CaptureHash $path) }
 }
 function Close-Window($Window) { $Window.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close() }
 function Assert-PersistedSettings {

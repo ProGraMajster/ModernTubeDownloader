@@ -2,6 +2,7 @@ using ModernFormsNext;
 using ModernFormsNext.Accessibility;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Theming;
+using ModernTubeDownloader.Utilities;
 
 namespace ModernTubeDownloader.Views;
 
@@ -191,7 +192,7 @@ internal sealed partial class QueueItemCard
         statusGlyph?.SetColorToken(item.Status switch { DownloadStatus.Completed => AppThemeTokens.Success, DownloadStatus.Failed or DownloadStatus.Partial => AppThemeTokens.Error, _ => AppThemeTokens.TextSecondary });
         var transferParts = new List<string>();
         if (p.ShowSize && item.DownloadedBytes is { } bytes) transferParts.Add(DashboardStyle.Bytes(bytes) + (item.TotalBytes is { } totalBytes ? " / " + DashboardStyle.Bytes(totalBytes) : ""));
-        if (p.ShowSpeed && item.SpeedBytesPerSecond is { } speed) transferParts.Add(DashboardStyle.Bytes((long)speed) + "/s");
+        if (p.ShowSpeed && item.SpeedBytesPerSecond is { } speed) transferParts.Add(TransferRateFormatter.Format(speed, text.Culture));
         if (p.ShowEta && item.Eta is { } eta) transferParts.Add(eta.ToString(@"hh\:mm\:ss"));
         transfer.Text = transferring ? string.Join(" · ", transferParts) : ""; transfer.AutoEllipsis = true; dashboardTips.SetToolTip(transfer, transfer.Text);
         progress.FillToken = item.RetryDelaySeconds > 0 || item.StatusMessageKey == "Queue.Detail.StoragePaused" ? AppThemeTokens.Warning : AppThemeTokens.Accent;

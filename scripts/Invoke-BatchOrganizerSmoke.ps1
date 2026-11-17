@@ -40,10 +40,16 @@ if ($BatchWorkflowSmoke) {
     $batchRoot = if ($InterfaceMode -eq 'ModernDashboard') { $mainRoot } else { (Wait-ExperienceRoot 'BatchWindow').rootId }
     Invoke-NodeAction (Find-Node 'BatchFilePath' $batchRoot) $batchRoot 'SetValue' $batchFile | Out-Null
     Invoke-NodeAction (Find-Node 'BatchAutomatic' $batchRoot) $batchRoot 'Invoke' | Out-Null
+    $workflowLabels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
+    # Observe the product state without opening a checkpoint while its writer
+    # is publishing it. MoveFileEx can fail even for a delete-sharing reader.
     Wait-WorkflowState {
-        $script:workflowQueue = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json)
-        $script:workflowQueue.Count -eq 2 -and @($script:workflowQueue | Where-Object { $_.status -ne 6 -and $_.status -ne 'Completed' }).Count -eq 0
-    } 'two real FakeTool downloads completed in canonical queue'
+        (Find-Node 'BatchWorkflowStage' $batchRoot).name -eq $workflowLabels.'Batch.Workflow.Completed'
+    } 'both FakeTool downloads complete in Batch workflow'
+    $script:workflowQueue = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)
+    if ($script:workflowQueue.Count -ne 2 -or @($script:workflowQueue | Where-Object { $_.status -ne 6 -and $_.status -ne 'Completed' }).Count -ne 0) {
+        throw 'Two completed jobs were not persisted in the canonical queue.'
+    }
     $expected = Join-Path ($dataRoot + '-media') 'native-batch-list'
     foreach ($item in $script:workflowQueue) {
         if ($item.outputDirectory -ne $expected -or [IO.Path]::GetDirectoryName($item.finalFile) -ne $expected -or -not (Test-Path -LiteralPath $item.finalFile)) { throw 'Per-list media destination mismatch.' }
@@ -82,21 +88,79 @@ if ($BatchWorkflowSmoke) {
         Invoke-NodeAction (Find-Node 'OrganizerMove' $organizer) $organizer 'Invoke' | Out-Null
         $confirm = (Wait-ExperienceRoot 'OrganizerConfirmMoveWindow').rootId
         Invoke-NodeAction (Find-Node 'OrganizerConfirmMoveConfirm' $confirm) $confirm 'Invoke' | Out-Null
-        Wait-WorkflowState {
-            $history = @(Get-Content -LiteralPath (Join-Path $dataRoot 'history.json') -Raw | ConvertFrom-Json)
-            $history.Count -eq 2 -and @($history | Where-Object { [IO.Path]::GetDirectoryName($_.finalPath) -ne $target }).Count -eq 0
-        } 'organizer moved selected media/sidecars and committed History paths'
         Wait-Node 'OrganizerUndo' $organizer 'Enabled' | Out-Null
+        $history = @(Get-Content -LiteralPath (Join-Path $dataRoot 'history.json') -Raw | ConvertFrom-Json)
+        if ($history.Count -ne 2 -or @($history | Where-Object { [IO.Path]::GetDirectoryName($_.finalPath) -ne $target }).Count -ne 0) {
+            throw 'Organizer did not commit both moved History paths.'
+        }
         [void](Capture-WorkflowDialog 'OrganizerWindow' 'Organizer.Title' 'organizer-completed')
         Invoke-NodeAction (Find-Node 'OrganizerUndo' $organizer) $organizer 'Invoke' | Out-Null
         $confirm = (Wait-ExperienceRoot 'OrganizerConfirmJournalWindow').rootId
         Invoke-NodeAction (Find-Node 'OrganizerConfirmJournalConfirm' $confirm) $confirm 'Invoke' | Out-Null
-        Wait-WorkflowState {
-            $history = @(Get-Content -LiteralPath (Join-Path $dataRoot 'history.json') -Raw | ConvertFrom-Json)
-            $history.Count -eq 2 -and @($history | Where-Object { [IO.Path]::GetDirectoryName($_.finalPath) -ne $expected }).Count -eq 0
-        } 'verified undo restored History and media locations'
+        Wait-Node 'OrganizerPlan' $organizer 'Enabled' | Out-Null
+        $history = @(Get-Content -LiteralPath (Join-Path $dataRoot 'history.json') -Raw | ConvertFrom-Json)
+        if ($history.Count -ne 2 -or @($history | Where-Object { [IO.Path]::GetDirectoryName($_.finalPath) -ne $expected }).Count -ne 0) {
+            throw 'Verified undo did not restore both History paths.'
+        }
         [void](Capture-WorkflowDialog 'OrganizerWindow' 'Organizer.Title' 'organizer-undone')
         Invoke-NodeAction (Find-Node 'OrganizerClose' $organizer) $organizer 'Invoke' | Out-Null
+    }
+    if ($OrganizerDiagnosticsSmoke) {
+        # Reproduce the reported sparse-match shape without touching the owner's
+        # list, media, metadata, History or application profile.
+        $diagnosticSource = Join-Path ($dataRoot + '-media') 'source-identity-diagnostics'
+        [void][IO.Directory]::CreateDirectory($diagnosticSource)
+        for ($i = 0; $i -lt 59; $i++) {
+            $id = 'QaClip{0:D5}' -f $i
+            $file = Join-Path $diagnosticSource ("Synthetic recording [$id].mp4")
+            [IO.File]::WriteAllBytes($file, [BitConverter]::GetBytes($i))
+            @{ id=$id; webpage_url="https://www.youtube.com/watch?v=$id"; original_url="https://www.youtube.com/watch?v=$id";
+                title='Synthetic recording'; extractor_key='Youtube'; retained_unknown=@{ values=@($i,7) } } |
+                ConvertTo-Json -Depth 4 | Set-Content -LiteralPath ([IO.Path]::ChangeExtension($file,'.json')) -Encoding utf8
+        }
+        $originalHashes = @{}
+        Get-ChildItem -LiteralPath $diagnosticSource -File | ForEach-Object { $originalHashes[$_.FullName] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+        $diagnosticName = 'synthetic-organizer-long-list-name-with-unrelated-recordings-122.txt'
+        $diagnosticList = Join-Path $dataRoot $diagnosticName
+        $diagnosticUrls = @(100..216 | ForEach-Object { 'https://www.youtube.com/watch?v=QaClip{0:D5}' -f $_ })
+        $diagnosticUrls += @(100..102 | ForEach-Object { 'https://www.youtube.com/watch?v=QaClip{0:D5}' -f $_ })
+        $diagnosticUrls += @('https://www.youtube.com/watch?v=QaClip00000','https://www.youtube.com/watch?v=QaClip00103')
+        $diagnosticUrls | Set-Content -LiteralPath $diagnosticList -Encoding utf8
+        Invoke-NodeAction (Find-Node 'BatchFilePath' $batchRoot) $batchRoot 'SetValue' $diagnosticList | Out-Null
+        Invoke-NodeAction (Find-Node 'BatchImport' $batchRoot) $batchRoot 'Invoke' | Out-Null
+        Wait-Node 'BatchImport' $batchRoot 'Enabled' | Out-Null
+        Wait-Node 'BatchOrganize' $batchRoot 'Enabled' | Out-Null
+        $committed = @(Get-ChildItem -LiteralPath (Join-Path $dataRoot 'Batch') -Filter 'session.json' -Recurse | ForEach-Object {
+            Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
+        } | Where-Object { $_.fileName -eq $diagnosticName -and $_.importedCount -eq 122 })
+        if ($committed.Count -ne 1) { throw '122 diagnostic URLs were not committed without downloading.' }
+        Invoke-NodeAction (Find-Node 'BatchOrganize' $batchRoot) $batchRoot 'Invoke' | Out-Null
+        $organizer = (Wait-ExperienceRoot 'OrganizerWindow').rootId
+        Wait-Node 'OrganizerSource' $organizer 'Enabled' | Out-Null
+        if ((Find-Node 'OrganizerLists' $organizer).value -ne $diagnosticName) { throw 'Organizer opened a stale Batch list.' }
+        Invoke-NodeAction (Find-Node 'OrganizerSource' $organizer) $organizer 'SetValue' $diagnosticSource | Out-Null
+        Invoke-NodeAction (Find-Node 'OrganizerDestination' $organizer) $organizer 'SetValue' (Join-Path ($dataRoot+'-media') 'diagnostic-destination') | Out-Null
+        Invoke-NodeAction (Find-Node 'OrganizerPlan' $organizer) $organizer 'Invoke' | Out-Null
+        Wait-Node 'OrganizerPlan' $organizer 'Enabled' | Out-Null
+        $labels = Get-Content -LiteralPath (Join-Path $repo "ModernTubeDownloader/Resources/Languages/$Language.json") -Raw | ConvertFrom-Json
+        $expectedSummary = $labels.'Organizer.ScanSummary' -f 59,59,58,0
+        $scan = Find-Node 'OrganizerScanSummary' $organizer
+        if ($scan.name -ne $expectedSummary -and $scan.value -ne $expectedSummary) { throw 'Organizer source diagnostics do not explain 59 identified files, 58 outside the list.' }
+        $detail = (Find-Node 'OrganizerDetails' $organizer).value
+        if ($detail -notmatch 'QaClip00100' -or $detail -match 'QaClip00000') { throw 'Inspector does not describe the first visible missing URL.' }
+        [void](Capture-WorkflowDialog 'OrganizerWindow' 'Organizer.Title' 'organizer-source-mismatch')
+        for ($pageIndex=0; $pageIndex -lt 3; $pageIndex++) { Invoke-NodeAction (Find-Node 'OrganizerNext' $organizer) $organizer 'Invoke' | Out-Null }
+        $detail = (Find-Node 'OrganizerDetails' $organizer).value
+        if ($detail -notmatch 'QaClip00000' -or $detail -notmatch 'SHA-256') { throw 'Last-page inspector did not select the visible verified file.' }
+        [void](Capture-WorkflowDialog 'OrganizerWindow' 'Organizer.Title' 'organizer-source-match')
+        foreach ($file in $originalHashes.Keys) {
+            if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $originalHashes[$file]) { throw 'Diagnostic dry run modified a synthetic source.' }
+        }
+        if (Test-Path -LiteralPath (Join-Path ($dataRoot+'-media') 'diagnostic-destination')) { throw 'Diagnostic dry run created a destination.' }
+        $afterDiagnostics = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)
+        if (@(Compare-Object $originalIds @($afterDiagnostics | ForEach-Object id | Sort-Object)).Count -ne 0) { throw 'Diagnostic list added queue tasks.' }
+        Invoke-NodeAction (Find-Node 'OrganizerClose' $organizer) $organizer 'Invoke' | Out-Null
+        Write-Output 'Organizer source diagnostics PASS: 122 list rows / 59 media-JSON pairs / 1 match / 58 unrelated; visible-row inspector, paging and unchanged source hashes.'
     }
     if ($InterfaceMode -eq 'Classic') { Invoke-NodeAction (Find-Node 'BatchClose' $batchRoot) $batchRoot 'Invoke' | Out-Null }
 }

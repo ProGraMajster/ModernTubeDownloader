@@ -11,6 +11,7 @@ param(
     [switch]$BatchSmoke,
     [switch]$BatchWorkflowSmoke,
     [switch]$OrganizerWorkflowSmoke,
+    [switch]$OrganizerDiagnosticsSmoke,
     [switch]$LocalePickerSmoke,
     [switch]$HotfixSmoke,
     [switch]$RealBatchSmoke,
@@ -98,6 +99,7 @@ $ErrorActionPreference = 'Stop'
 $script:popupWitnessStarted = $false
 if ($ExperienceExternalActivation -and $ExperienceSmoke -ne 'Resume') { throw 'ExperienceExternalActivation requires ExperienceSmoke Resume.' }
 if ($ExperienceSmoke -eq 'News') { $InterfaceMode = 'ModernDashboard' }
+if ($OrganizerDiagnosticsSmoke) { $OrganizerWorkflowSmoke = $true }
 if ($OrganizerWorkflowSmoke) { $BatchWorkflowSmoke = $true }
 if ($RealVodSmoke -and $InterfaceMode -ne 'Classic') { throw 'RealVodSmoke currently exercises the Classic analysis/add controls; Modern transfer has its own native lane.' }
 if ($BatchWorkflowSmoke -or $LocalePickerSmoke) { $CaptureVisual = $true }
@@ -1660,6 +1662,17 @@ try {
             } while ($reviewClock.Elapsed.TotalSeconds -lt 15)
             if (-not $finished) { throw 'Review transfer failed to finish after releasing its process barrier.' }
             Capture-Dashboard 'downloads-completed'
+            # The last completed payload belongs to the current sampling window.
+            # Observe the next idle sample; do not fabricate it with a fixed sleep.
+            $reviewClock.Restart()
+            do {
+                $idleRate = (Find-Node 'DashboardTransferRate' $mainRoot).name
+                $idleStatistics = (Find-Node 'DashboardStatisticsRate' $mainRoot).name
+                if ($idleRate -eq '0 B/s' -and $idleStatistics -eq $idleRate) { break }
+                Start-Sleep -Milliseconds 100
+            } while ($reviewClock.Elapsed.TotalSeconds -lt 15)
+            if ($idleRate -ne '0 B/s' -or $idleStatistics -ne $idleRate) { throw 'Completed transfer left stale or divergent current graph/statistics rates.' }
+            Capture-Dashboard 'downloads-idle-zero-rate'
             Close-DashboardProcess
             $reviewQueue = @(Get-Content -LiteralPath (Join-Path $dataRoot 'queue.json') -Raw | ConvertFrom-Json)
             if ($reviewQueue.Count -ne 5 -or $reviewQueue[0].Status -ne 6 -or $reviewQueue[1].Status -ne 0 -or -not (Test-Path -LiteralPath $reviewQueue[0].FinalFile)) { throw 'Review transfer did not preserve the pending record and final file.' }

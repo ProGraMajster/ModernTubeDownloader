@@ -14,7 +14,7 @@ internal sealed class OrganizerForm : Form
     private readonly Panel surface = new() { Dock = DockStyle.Fill }, setup = new(), results = new(), inspector = new(), footer = new();
     private readonly ExperienceScrollPanel body = new() { AutoScroll = true }, rows = new() { AutoScroll = true, AccessibleAutomationId = "OrganizerRows" };
     private readonly Label heading = AppUi.Heading("", 20), description = AppUi.Muted(), sourceLabel = AppUi.Muted(), destinationLabel = AppUi.Muted(),
-        summary = AppUi.Muted(), status = AppUi.Muted(), pageLabel = AppUi.Muted(), detailHeading = AppUi.Heading("", 12), journalLabel = AppUi.Muted();
+        summary = AppUi.Muted(), scanSummary = AppUi.Muted(), status = AppUi.Muted(), pageLabel = AppUi.Muted(), detailHeading = AppUi.Heading("", 12), journalLabel = AppUi.Muted();
     private readonly TextBox source = new() { AccessibleAutomationId = "OrganizerSource" }, destination = new() { AccessibleAutomationId = "OrganizerDestination" },
         details = new() { MultiLine = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, AccessibleAutomationId = "OrganizerDetails" };
     private readonly ComboBox listChoice = new() { AccessibleAutomationId = "OrganizerLists" }, filter = new() { AccessibleAutomationId = "OrganizerFilter" },
@@ -57,9 +57,10 @@ internal sealed class OrganizerForm : Form
         foreach (var input in new[] { listChoice, filter, candidateChoice, journals }) AppUi.Input(input);
         foreach (var button in new[] { add, remove, browseSource, browseDestination, planButton, selectPage, previous, next, resolve, move, pause, cancel, close, refreshJournals, recover, undo })
             ExperienceVisual.Action(button, button == planButton || button == move);
-        description.Multiline = summary.Multiline = status.Multiline = true;
+        description.Multiline = summary.Multiline = scanSummary.Multiline = status.Multiline = true;
+        scanSummary.AccessibleAutomationId = "OrganizerScanSummary";
         setup.Controls.AddRange([add, listChoice, remove, sourceLabel, source, browseSource, destinationLabel, destination, browseDestination, recursive, requireJson, planButton]);
-        results.Controls.AddRange([summary, filter, selectPage, rows, previous, pageLabel, next]);
+        results.Controls.AddRange([summary, scanSummary, filter, selectPage, rows, previous, pageLabel, next]);
         inspector.Controls.AddRange([detailHeading, details, candidateChoice, resolve, journalLabel, journals, refreshJournals, recover, undo]);
         footer.Controls.AddRange([status, progress, move, pause, cancel, close]);
         source.Text = services.Settings.Current.FinalOutputDirectory;
@@ -72,7 +73,6 @@ internal sealed class OrganizerForm : Form
         {
             plan = await services.Organizer.BuildPlanAsync(lists.ToArray(), source.Text, recursive.Checked, requireJson.Checked, token);
             selection.Clear(); selectedMatch = null; page = 0; RenderRows();
-            if ((plan.Matches.FirstOrDefault(match => match.Status == OrganizerMatchStatus.Found) ?? plan.Matches.FirstOrDefault()) is { } first) ShowDetails(first);
         });
         filter.SelectedIndexChanged += (_, _) => { if (!rebuilding) { page = 0; RenderRows(); } };
         selectPage.Click += (_, _) => { foreach (var item in Filtered().Skip(page * DownloadOrganizerService.PageSize).Take(DownloadOrganizerService.PageSize).Where(item => item.Status == OrganizerMatchStatus.Found)) selection.Add(item.Id); RenderRows(); };
@@ -145,7 +145,8 @@ internal sealed class OrganizerForm : Form
         foreach (var row in visibleRows) { rows.Controls.Remove(row.Panel); row.Panel.Dispose(); } visibleRows.Clear();
         var values = Filtered(); var pages = Math.Max(1, (values.Length + DownloadOrganizerService.PageSize - 1) / DownloadOrganizerService.PageSize);
         page = Math.Clamp(page, 0, pages - 1); previous.Enabled = page > 0; next.Enabled = page + 1 < pages;
-        foreach (var match in values.Skip(page * DownloadOrganizerService.PageSize).Take(DownloadOrganizerService.PageSize))
+        var pageValues = values.Skip(page * DownloadOrganizerService.PageSize).Take(DownloadOrganizerService.PageSize).ToArray();
+        foreach (var match in pageValues)
         {
             var panel = new Panel(); DownloadsVisual.Card(panel);
             // Rows are assembled before attaching to the live tree. Give their subtree
@@ -153,7 +154,11 @@ internal sealed class OrganizerForm : Form
             AppTypography.SetDashboardPresentation(panel, true);
             var selected = new CheckBox { Checked = selection.Contains(match.Id), Enabled = match.Status == OrganizerMatchStatus.Found, AccessibleAutomationId = "OrganizerSelect-" + match.Id.ToString("N"), AccessibleName = match.ListName + " — " + match.Url };
             DashboardVisual.Flat(selected); AppUi.BindBackground(selected, DownloadsVisual.Panel); AppUi.BindForeground(selected);
-            var title = AppUi.Heading(match.ListName + " · " + (match.MediaPath is null ? match.Url : Path.GetFileName(match.MediaPath)), 11f); title.AutoEllipsis = true;
+            // Source information comes first: an exported list name can be longer
+            // than the entire row and must not hide every URL behind ellipsis.
+            var title = AppUi.Heading(match.MediaPath is null ? match.Url : Path.GetFileName(match.MediaPath), 11f);
+            title.AutoEllipsis = true; title.AccessibleAutomationId = "OrganizerTitle-" + match.Id.ToString("N");
+            title.AccessibleName = match.Url + " — " + match.ListName;
             var state = AppUi.Muted(services.Localization["Organizer.Status." + match.Status] + " · " + services.Localization[match.ReasonKey]); state.AutoEllipsis = true;
             AppTypography.Bind(state, 10.5f);
             AppUi.BindForeground(state, match.Status == OrganizerMatchStatus.Found ? AppThemeTokens.Success : match.Status is OrganizerMatchStatus.Missing or OrganizerMatchStatus.AlreadyOrganized ? AppThemeTokens.TextSecondary : AppThemeTokens.Warning);
@@ -162,18 +167,31 @@ internal sealed class OrganizerForm : Form
             inspect.Click += (_, _) => ShowDetails(match); panel.Controls.AddRange([selected, title, state, inspect]); rows.Controls.Add(panel); visibleRows.Add((panel, selected, title, state, inspect));
         }
         pageLabel.Text = $"{page + 1} / {pages}";
-        summary.Text = services.Localization.Get("Organizer.Summary", plan?.Matches.Count ?? 0, plan?.Matches.Count(match => match.Status == OrganizerMatchStatus.Found) ?? 0, selection.Count,
-            DashboardStyle.Bytes(plan?.Matches.Sum(match => match.Bytes) ?? 0));
+        // Never describe an off-page successful match beside a page of missing
+        // URLs. Filter and page changes retain the inspected row only if visible.
+        if (selectedMatch is null || !pageValues.Any(match => match.Id == selectedMatch.Id))
+        {
+            if (pageValues.FirstOrDefault() is { } first) ShowDetails(first);
+            else
+            {
+                selectedMatch = null; details.Text = ""; candidateChoice.Items.Clear(); candidateChoice.SelectedIndex = -1;
+                detailHeading.Text = services.Localization["Organizer.Details"];
+            }
+        }
         RefreshEnabled(); Arrange();
     }
     private void ShowDetails(OrganizerMatch match)
     {
         selectedMatch = match; var t = services.Localization;
         detailHeading.Text = t["Organizer.Details"] + " · " + t["Organizer.Status." + match.Status];
-        details.Text = string.Join(Environment.NewLine, new[] { match.ListName, match.Url, t[match.ReasonKey], "", match.MediaPath ?? "—", "→ " + match.DestinationDirectory, "" }
+        details.Text = string.Join(Environment.NewLine, new[] { t["Organizer.Status." + match.Status] + " · " + t[match.ReasonKey], match.Url, match.Identity,
+                "", ScanSummaryText(), t["Organizer.ScanExplanation"], "", t.Get("Organizer.ListLabel", match.ListName), match.MediaPath ?? "—", "→ " + match.DestinationDirectory, "" }
             .Concat(match.Files.Select(file => $"{(file.CopyOnly ? t["Organizer.CopyMetadata"] : t["Organizer.MoveFile"])}  {file.Source}\n→ {file.Destination}\n{DashboardStyle.Bytes(file.Length)} · SHA-256 {file.Sha256}")));
+        details.SelectionStart = details.SelectionEnd = 0; details.ScrollToCaret();
         candidateChoice.Items.Clear(); foreach (var candidate in match.Candidates) candidateChoice.Items.Add(candidate); candidateChoice.SelectedIndex = match.Candidates.Length > 0 ? 0 : -1; RefreshEnabled();
     }
+    private string ScanSummaryText() => plan is null ? "" : services.Localization.Get("Organizer.ScanSummary",
+        plan.ScannedMediaFiles, plan.IdentifiedMediaFiles, plan.UnmatchedIdentifiedMediaFiles, plan.UnidentifiedMediaFiles);
     private async Task MoveAsync()
     {
         if (plan is null || selection.Count == 0) return;
@@ -225,6 +243,7 @@ internal sealed class OrganizerForm : Form
         var idle = operation is null;
         summary.Text = services.Localization.Get("Organizer.Summary", plan?.Matches.Count ?? 0, plan?.Matches.Count(match => match.Status == OrganizerMatchStatus.Found) ?? 0, selection.Count,
             DashboardStyle.Bytes(plan?.Matches.Sum(match => match.Bytes) ?? 0));
+        scanSummary.Text = ScanSummaryText(); scanSummary.Visible = plan is not null;
         setup.Enabled = filter.Enabled = selectPage.Enabled = rows.Enabled = idle;
         move.Enabled = idle && plan is not null && selection.Count > 0; pause.Enabled = cancel.Enabled = !idle;
         remove.Enabled = destination.Enabled = browseDestination.Enabled = idle && selectedList >= 0; planButton.Enabled = idle && lists.Count > 0;
@@ -242,7 +261,7 @@ internal sealed class OrganizerForm : Form
         recursive.Text = t["Organizer.Recursive"]; requireJson.Text = t["Organizer.RequireJson"]; planButton.Text = t["Organizer.Plan"]; selectPage.Text = t["Organizer.SelectPage"];
         previous.Text = "‹"; next.Text = "›"; previous.AccessibleName = t["Organizer.Previous"]; next.AccessibleName = t["Organizer.Next"];
         move.Text = t["Organizer.Move"]; pause.Text = t[services.Organizer.IsPaused ? "Organizer.Resume" : "Organizer.Pause"]; cancel.Text = t["Common.Cancel"]; close.Text = t["Common.Close"];
-        resolve.Text = t["Organizer.Resolve"]; detailHeading.Text = t["Organizer.Details"]; journalLabel.Text = t["Organizer.Journals"]; refreshJournals.Text = t["Organizer.Refresh"]; recover.Text = t["Organizer.Recover"]; undo.Text = t["Organizer.Undo"];
+        resolve.Text = t["Organizer.Resolve"]; detailHeading.Text = t["Organizer.Details"] + (selectedMatch is null ? "" : " · " + t["Organizer.Status." + selectedMatch.Status]); journalLabel.Text = t["Organizer.Journals"]; refreshJournals.Text = t["Organizer.Refresh"]; recover.Text = t["Organizer.Recover"]; undo.Text = t["Organizer.Undo"];
         rebuilding = true; var selected = filter.SelectedIndex; filter.Items.Clear(); filter.Items.Add(t["Organizer.All"]); foreach (var value in Enum.GetValues<OrganizerMatchStatus>()) filter.Items.Add(t["Organizer.Status." + value]); filter.SelectedIndex = Math.Max(0, selected); rebuilding = false;
         Arrange();
     }
@@ -266,8 +285,14 @@ internal sealed class OrganizerForm : Form
             requireJson.SetBounds(checksInline ? width / 2 : 14, checksInline ? recursive.Top : recursive.Bottom + 6, checksInline ? width / 2 - 14 : width - 28, line);
             planButton.SetBounds(14, requireJson.Bottom + 8, Math.Min(width - 28, DashboardVisual.ActionWidth(planButton)), line); setup.Height = planButton.Bottom + 14;
             var wide = width >= AppTypography.TextHeight(1000); var leftWidth = wide ? (int)(width * .63) : width;
-            results.SetBounds(x, setup.Bottom + 12, leftWidth, AppTypography.TextHeight(470));
-            summary.SetBounds(14, 12, leftWidth - 28, AppTypography.TextHeight(44)); filter.SetBounds(14, summary.Bottom + 8, (leftWidth - 40) / 2, line); selectPage.SetBounds(filter.Right + 12, filter.Top, leftWidth - filter.Right - 26, line);
+            var scanHeight = scanSummary.Visible ? DashboardVisual.LabelHeight(scanSummary, leftWidth - 28, 4) : 0;
+            var scanSpace = scanHeight > 0 ? scanHeight + 6 : 0;
+            // Grow the card by its diagnostic text so the existing row viewport
+            // does not shrink at large text scales or with longer translations.
+            results.SetBounds(x, setup.Bottom + 12, leftWidth, AppTypography.TextHeight(470) + scanSpace);
+            summary.SetBounds(14, 12, leftWidth - 28, AppTypography.TextHeight(44));
+            scanSummary.SetBounds(14, summary.Bottom + 2, leftWidth - 28, scanHeight);
+            filter.SetBounds(14, summary.Bottom + scanSpace + 8, (leftWidth - 40) / 2, line); selectPage.SetBounds(filter.Right + 12, filter.Top, leftWidth - filter.Right - 26, line);
             previous.SetBounds(14, results.Height - line - 12, 44, line); next.SetBounds(leftWidth - 58, previous.Top, 44, line); pageLabel.SetBounds(previous.Right + 8, previous.Top, Math.Max(1, next.Left - previous.Right - 16), line);
             rows.SetBounds(8, filter.Bottom + 10, leftWidth - 16, Math.Max(1, previous.Top - filter.Bottom - 22));
             inspector.SetBounds(wide ? results.Right + 12 : x, wide ? results.Top : results.Bottom + 12, wide ? width - leftWidth - 12 : width, results.Height);

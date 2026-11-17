@@ -413,8 +413,11 @@ public sealed class DownloadJobExecutor(
             queueItem.ProgressPercent = progress.Percent;
             queueItem.DownloadedBytes = progress.DownloadedBytes;
             queueItem.TotalBytes = progress.TotalBytes;
-            queueItem.SpeedBytesPerSecond = progress.SpeedBytesPerSecond;
-            queueItem.Eta = progress.Eta;
+            var downloading = progress.Status.Equals("downloading", StringComparison.OrdinalIgnoreCase);
+            queueItem.SpeedBytesPerSecond = downloading ? progress.SpeedBytesPerSecond : null;
+            queueItem.Eta = downloading ? progress.Eta : null;
+            if (progress.ObservedBytesDelta > 0)
+                queueItem.ObservedTransferBytes += Math.Min(progress.ObservedBytesDelta, long.MaxValue - queueItem.ObservedTransferBytes);
         }, false));
 
     internal static IProgress<double> CreateMergeProgress(Action<Action<DownloadQueueItem>, bool> update) =>

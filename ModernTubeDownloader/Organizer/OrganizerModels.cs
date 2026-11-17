@@ -52,6 +52,11 @@ public sealed class OrganizerPlan
     public List<OrganizerMatch> Matches { get; set; } = [];
     public int ScannedFiles { get; set; }
     public int SkippedFiles { get; set; }
+    public int ScannedMediaFiles { get; set; }
+    /// <summary>Files indexed by source identity; this is not move authorization.</summary>
+    public int IdentifiedMediaFiles { get; set; }
+    public int UnmatchedIdentifiedMediaFiles { get; set; }
+    public int UnidentifiedMediaFiles => ScannedMediaFiles - IdentifiedMediaFiles;
 }
 
 public sealed class OrganizerJournal

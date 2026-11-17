@@ -31,16 +31,17 @@ public static class YtDlpProgressParser
             downloaded,
             total,
             speed,
-            etaSeconds is null ? null : TimeSpan.FromSeconds(Math.Max(0, etaSeconds.Value)),
+            etaSeconds is null || etaSeconds >= TimeSpan.MaxValue.TotalSeconds ? null : TimeSpan.FromSeconds(etaSeconds.Value),
             parts[0]);
         return true;
     }
 
     private static long? ParseLong(string value) =>
-        long.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var result) ? result : null;
+        long.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var result) && result >= 0 ? result : null;
 
     private static double? ParseDouble(string value) =>
-        double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var result) ? result : null;
+        double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var result) &&
+            double.IsFinite(result) && result >= 0 ? result : null;
 
     private static double? ParsePercent(string value) =>
         ParseDouble(value.Trim().TrimEnd('%'));

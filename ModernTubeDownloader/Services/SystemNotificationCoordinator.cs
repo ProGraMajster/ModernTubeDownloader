@@ -4,6 +4,7 @@ using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Localization;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Settings;
+using ModernTubeDownloader.Utilities;
 
 namespace ModernTubeDownloader.Services;
 
@@ -227,7 +228,7 @@ public sealed class SystemNotificationCoordinator : IAsyncDisposable
     {
         Value = double.IsFinite(item.Percent) ? Math.Clamp(item.Percent / 100d, 0, 1) : 0,
         Status = text["Notification.DownloadProgress"] +
-            (item.Speed is { } speed && double.IsFinite(speed) ? $" • {(speed / 1048576d).ToString("N1", text.Culture)} MB/s" : string.Empty) +
+            (item.Speed is { } speed && double.IsFinite(speed) ? $" • {TransferRateFormatter.Format(speed, text.Culture)}" : string.Empty) +
             (item.Eta is { } eta ? $" • ETA {eta.ToString(@"hh\:mm\:ss")}" : string.Empty),
         Title = preferences().PrivacyMode ? text["Notification.PrivateMedia"] : item.Title
     };

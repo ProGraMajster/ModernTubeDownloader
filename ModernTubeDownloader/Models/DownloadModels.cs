@@ -60,6 +60,8 @@ public sealed class DownloadQueueItem
     public long? TotalBytes { get; set; }
     public long? EstimatedSizeBytes { get; set; }
     public double? SpeedBytesPerSecond { get; set; }
+    // Runtime-only telemetry. Loading a saved queue cannot manufacture traffic.
+    internal long ObservedTransferBytes { get; set; }
     public TimeSpan? Eta { get; set; }
     public DownloadStatus Status { get; set; } = DownloadStatus.Queued;
     public string StatusMessage { get; set; } = "Queued";
@@ -118,7 +120,10 @@ public sealed record DownloadProgress(
     long? TotalBytes,
     double? SpeedBytesPerSecond,
     TimeSpan? Eta,
-    string Status);
+    string Status)
+{
+    internal long ObservedBytesDelta { get; init; }
+}
 
 public sealed record DownloadHistoryEntry(
     Guid QueueItemId,

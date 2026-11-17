@@ -130,6 +130,7 @@ public sealed partial class DownloadOrganizerService : IDisposable
             }
         }
         var media = files.Where(file => MediaExtensions.Contains(Path.GetExtension(file))).ToHashSet(OrganizerPathSafety.Comparer);
+        plan.ScannedMediaFiles = media.Count;
         var byStem = media.GroupBy(file => Path.Combine(Path.GetDirectoryName(file)!, Path.GetFileNameWithoutExtension(file)), OrganizerPathSafety.Comparer)
             .ToDictionary(group => group.Key, group => group.ToArray(), OrganizerPathSafety.Comparer);
         var known = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -196,6 +197,14 @@ public sealed partial class DownloadOrganizerService : IDisposable
         }
         foreach (var group in plan.Matches.Where(match => match.MediaPath is not null).GroupBy(match => match.MediaPath!, OrganizerPathSafety.Comparer).Where(group => group.Count() > 1))
             foreach (var match in group) { match.Status = OrganizerMatchStatus.Conflict; match.ReasonKey = "Organizer.Reason.MultipleLists"; }
+        // Explain a sparse match without treating unrelated files as candidates.
+        // Count files, not URL aliases, list duplicates or canonical references.
+        var identifiedFiles = known.Values.SelectMany(value => value).ToHashSet(OrganizerPathSafety.Comparer);
+        plan.IdentifiedMediaFiles = identifiedFiles.Count;
+        foreach (var identity in plan.Matches.Where(match => match.Status != OrganizerMatchStatus.Invalid)
+            .Select(match => match.Identity).Distinct(StringComparer.Ordinal))
+            if (known.TryGetValue(identity, out var matchingFiles)) identifiedFiles.ExceptWith(matchingFiles);
+        plan.UnmatchedIdentifiedMediaFiles = identifiedFiles.Count;
         Report("Organizer.Phase.Planned", plan.Matches.Count, plan.Matches.Count, 0, plan.Matches.Sum(match => match.Bytes));
         return plan;
     }

@@ -17,6 +17,8 @@ public sealed class DownloadQueueService
     private readonly SemaphoreSlim checkpointGate = new(1, 1);
     private readonly SemaphoreSlim recoveryGate = new(1, 1);
     private long revision, savedRevision;
+    private long observedTransferBytes;
+    internal long ObservedTransferBytes { get { lock (sync) return observedTransferBytes; } }
     public QueueStorageSafety Storage { get; }
     public bool LoadFailed { get; private set; }
     public bool IsReadOnly => LoadFailed || persistence.LoadFailed || dependencyAvailability?.Invoke() == false;
@@ -361,7 +363,12 @@ public sealed class DownloadQueueService
         {
             var item = items.FirstOrDefault(candidate => candidate.Id == id)
                 ?? throw new InvalidOperationException("The queue item no longer exists.");
+            var previousTransferBytes = item.ObservedTransferBytes;
             update(item);
+            // Count real progress notifications even when a job finishes/removes
+            // between UI timer ticks. This counter is never loaded or persisted.
+            if (item.ObservedTransferBytes > previousTransferBytes)
+                observedTransferBytes += Math.Min(item.ObservedTransferBytes - previousTransferBytes, long.MaxValue - observedTransferBytes);
             status = item.Status;
             if (persist) revision++;
         }

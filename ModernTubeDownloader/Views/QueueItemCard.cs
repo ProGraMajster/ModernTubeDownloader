@@ -260,7 +260,7 @@ internal sealed partial class QueueItemCard : UserControl
         if (appearance.ShowFileSize && item.DownloadedBytes is { } downloaded)
             parts.Add(item.TotalBytes is { } total ? $"{FormatBytes(downloaded)} / {FormatBytes(total)}" : FormatBytes(downloaded));
         if (appearance.ShowSpeed && item.SpeedBytesPerSecond is { } speed)
-            parts.Add($"{FormatBytes((long)speed)}/s");
+            parts.Add(TransferRateFormatter.Format(speed, text.Culture));
         if (appearance.ShowEta && item.Eta is { } eta)
             parts.Add(text.Get("Queue.Eta", eta.ToString(@"mm\:ss")));
         return string.Join("  ", parts);
