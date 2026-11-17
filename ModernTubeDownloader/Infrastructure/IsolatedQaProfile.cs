@@ -11,6 +11,14 @@ internal static class IsolatedQaProfile
         Path.GetTempPath(),
         File.GetAttributes);
 
+    internal static bool SuppressCurrentSystemRegistration() => SuppressSystemRegistration(AppPaths.CreateDefault());
+
+    internal static void DemandSystemRegistrationAllowed(Func<bool> suppress)
+    {
+        if (suppress())
+            throw new InvalidOperationException("Per-user system registration changes are disabled for an isolated QA profile.");
+    }
+
     // The injected attribute reader keeps policy tests independent of the owner's
     // filesystem. Production uses the real attributes, including all ancestors.
     internal static bool IsEligible(string root, string? requested, string temporaryDirectory,

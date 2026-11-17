@@ -8,7 +8,17 @@ public static class ExternalProtocolRegistration
     public enum RegistrationStatus { Registered, NeedsRepair }
 
     /// <summary>Registers the current executable under HKCU; no elevation is required.</summary>
-    public static void RegisterCurrentExecutable()
+    public static void RegisterCurrentExecutable() => RegisterCurrentExecutable(RegisterCurrentExecutableCore, IsolatedQaProfile.SuppressCurrentSystemRegistration);
+
+    // Keep the guard at the current-user mutation boundary: startup, Settings
+    // Save/Repair and the explicit CLI entry all pass through this method.
+    internal static void RegisterCurrentExecutable(Action register, Func<bool> suppress)
+    {
+        IsolatedQaProfile.DemandSystemRegistrationAllowed(suppress);
+        register();
+    }
+
+    private static void RegisterCurrentExecutableCore()
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         var executable = GetCurrentExecutable();
@@ -70,7 +80,15 @@ public static class ExternalProtocolRegistration
         return true;
     }
 
-    public static bool UnregisterCurrentUser()
+    public static bool UnregisterCurrentUser() => UnregisterCurrentUser(UnregisterCurrentUserCore, IsolatedQaProfile.SuppressCurrentSystemRegistration);
+
+    internal static bool UnregisterCurrentUser(Func<bool> unregister, Func<bool> suppress)
+    {
+        IsolatedQaProfile.DemandSystemRegistrationAllowed(suppress);
+        return unregister();
+    }
+
+    private static bool UnregisterCurrentUserCore()
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         using var classes = Registry.CurrentUser.OpenSubKey(@"Software\Classes", true);
