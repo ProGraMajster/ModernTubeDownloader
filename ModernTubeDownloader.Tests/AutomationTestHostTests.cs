@@ -40,9 +40,14 @@ public sealed class AutomationTestHostTests
             combo.SelectedIndex = 0;
             Assert.Equal("1080p", combo.SelectedItem);
             AssertComboState(combo.Style, AppThemeTokens.Surface, AppThemeTokens.TextPrimary);
-            AssertComboState(combo.StyleHover, AppThemeTokens.SurfaceHover, AppThemeTokens.TextPrimary);
-            AssertComboState(combo.StyleFocused, AppThemeTokens.SurfaceHover, AppThemeTokens.TextPrimary);
-            AssertComboState(combo.StylePressed, AppThemeTokens.SurfaceSecondary, AppThemeTokens.TextPrimary);
+            AssertComboState(combo.StyleHover, AppThemeTokens.Surface, AppThemeTokens.TextPrimary);
+            AssertComboState(combo.StyleFocused, AppThemeTokens.Surface, AppThemeTokens.TextPrimary);
+            AssertComboState(combo.StylePressed, AppThemeTokens.Surface, AppThemeTokens.TextPrimary);
+            foreach (var state in new[] { combo.StyleHover, combo.StyleFocused, combo.StylePressed })
+            {
+                Assert.Equal(AppUi.GetColor(AppThemeTokens.Accent), state.Border.GetColor());
+                Assert.True(state.Border.GetWidth() > 0);
+            }
             AssertComboState(combo.StyleDisabled, AppThemeTokens.SurfaceSecondary, AppThemeTokens.TextDisabled);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }

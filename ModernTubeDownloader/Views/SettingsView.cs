@@ -476,6 +476,7 @@ internal sealed partial class SettingsView : UserControl
         }
         InitializeSettingsSearch();
         AppUi.BindBackground(categories); Controls.AddRange([header, categories, scroll, categorySearch, categoryEmpty]);
+        searchClear.BringToFront();
         SizeChanged += ViewSizeChanged;
         VisibleChanged += ViewSizeChanged;
         scroll.SizeChanged += ScrollSizeChanged;

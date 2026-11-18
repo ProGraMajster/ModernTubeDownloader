@@ -62,6 +62,30 @@ public sealed class SettingsOptionSearchTests
         });
     }
 
+    [Theory]
+    [InlineData(100, 1536)]
+    [InlineData(200, 900)]
+    public async Task ClearSearchIsPointerAccessibleAndDoesNotEditSettings(int scale, int width)
+    {
+        await InSettings("pl", scale, width, (services, host, view) =>
+        {
+            var search = Find<TextBox>(view, "SettingsCategorySearch");
+            var clear = Find<Button>(view, "SettingsSearchClear");
+            var originalSettings = JsonSerializer.Serialize(services.Settings.Current);
+            search.Select(); search.Text = services.Localization["Settings.Language"]; host.ProcessPendingWork();
+            Assert.True(clear.Visible); Assert.True(clear.Enabled);
+            Assert.True(view.SettingsSearchMatchCount > 0);
+            // Route through the production pointer hit test; PerformClick cannot detect an obscured button.
+            host.Input.Click(clear); host.ProcessPendingWork();
+            Assert.Equal(string.Empty, search.Text); Assert.True(search.Focused);
+            Assert.False(Find<Control>(view, "SettingsSearchResults").Visible);
+            Assert.False(clear.Visible);
+            Assert.All(SettingsSearchIndex.Descendants(view).OfType<Button>().Where(button =>
+                button.AccessibleAutomationId?.StartsWith("SettingsCategory", StringComparison.Ordinal) == true), button => Assert.True(button.Visible));
+            Assert.Equal(originalSettings, JsonSerializer.Serialize(services.Settings.Current));
+        });
+    }
+
     [Fact]
     public async Task SearchNeverIndexesPrivateValuesAndResultsRemainBoundedAcrossPagingAndLocaleChange()
     {
