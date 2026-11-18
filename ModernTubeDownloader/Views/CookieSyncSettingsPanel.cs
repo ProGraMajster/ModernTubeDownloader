@@ -12,9 +12,9 @@ internal sealed class CookieSyncSettingsPanel : Panel
     private readonly AppServices services;
     private readonly ComboBox source = new() { AccessibleAutomationId = "AuthenticationSource" };
     private readonly ComboBox browser = new() { AccessibleAutomationId = "CookieBridgeBrowser" };
-    private readonly TextBox extensionId = new() { AccessibleAutomationId = "CookieBridgeExtensionId" };
+    private readonly TextBox extensionId = new AppThemeTextBox() { AccessibleAutomationId = "CookieBridgeExtensionId" };
     private readonly CheckBox consent = new DashboardToggle { AccessibleAutomationId = "CookieBridgeConsent" };
-    private readonly TextBox summary = new() { ReadOnly=true, MultiLine=true, AccessibleAutomationId="CookieProfilesStatus" };
+    private readonly TextBox summary = new AppThemeTextBox() { ReadOnly=true, MultiLine=true, AccessibleAutomationId="CookieProfilesStatus" };
     private readonly Label help = AppUi.Muted();
     private readonly Label feedback = AppUi.Muted();
     private readonly List<(Control Control, string Key)> labels = [];

@@ -5,7 +5,7 @@ using ModernTubeDownloader.Theming;
 
 namespace ModernTubeDownloader.Views;
 
-internal sealed class InformationView : UserControl
+internal sealed partial class InformationView : UserControl
 {
     private readonly AppServices services;
     private readonly bool about;
@@ -18,6 +18,7 @@ internal sealed class InformationView : UserControl
     {
         this.services = services; this.about = about; Dock = DockStyle.Fill;
         AppUi.BindBackground(this); body.Multiline = true;
+        AppUi.PreservePresentationBackground(icon);
         AppUi.Secondary(repository); AppUi.Secondary(diagnostics);
         AppUi.Secondary(setup); AppUi.Secondary(whatsNew);
         setup.AccessibleAutomationId = "InformationSetup"; whatsNew.AccessibleAutomationId = "InformationWhatsNew";
@@ -26,6 +27,7 @@ internal sealed class InformationView : UserControl
         repository.Click += (_, _) => Process.Start(new ProcessStartInfo("https://github.com/ProGraMajster/ModernTubeDownloader") { UseShellExecute = true });
         diagnostics.Click += (_, _) => Utilities.ShellService.OpenFolderForFile(services.Paths.LogDirectory);
         Controls.AddRange([icon, title, body, repository, diagnostics, setup, whatsNew]);
+        if (!about) InitializeHelp();
         SizeChanged += (_, _) => LayoutPage(); services.Localization.LanguageChanged += Changed;
         AppTypography.RegisterLayout(this, LayoutPage); RefreshText();
     }
@@ -38,10 +40,12 @@ internal sealed class InformationView : UserControl
             : services.Localization["Dashboard.HelpBody"];
         repository.Text = services.Localization["Dashboard.Repository"]; diagnostics.Text = services.Localization["Settings.OpenLogs"];
         setup.Text = services.Localization["Experience.Reopen"]; whatsNew.Text = services.Localization["Experience.WhatsNew"];
+        if (!about) RefreshHelp();
         LayoutPage();
     }
     private void LayoutPage()
     {
+        if (!about && dashboardHelp) { LayoutHelp(); return; }
         AutoScroll = true; var width = Math.Max(280, ClientSize.Width - 48);
         icon.SetBounds(24, 24, 64, 64); title.SetBounds(108, 24, Math.Max(160, width - 84), AppTypography.TextHeight(42));
         body.SetBounds(24, 112, width, AppTypography.TextHeight(210));

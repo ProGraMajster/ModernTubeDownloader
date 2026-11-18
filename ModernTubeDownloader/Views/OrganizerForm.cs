@@ -15,8 +15,8 @@ internal sealed class OrganizerForm : Form
     private readonly ExperienceScrollPanel body = new() { AutoScroll = true }, rows = new() { AutoScroll = true, AccessibleAutomationId = "OrganizerRows" };
     private readonly Label heading = AppUi.Heading("", 20), description = AppUi.Muted(), sourceLabel = AppUi.Muted(), destinationLabel = AppUi.Muted(),
         summary = AppUi.Muted(), scanSummary = AppUi.Muted(), status = AppUi.Muted(), pageLabel = AppUi.Muted(), detailHeading = AppUi.Heading("", 12), journalLabel = AppUi.Muted();
-    private readonly TextBox source = new() { AccessibleAutomationId = "OrganizerSource" }, destination = new() { AccessibleAutomationId = "OrganizerDestination" },
-        details = new() { MultiLine = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, AccessibleAutomationId = "OrganizerDetails" };
+    private readonly TextBox source = new AppThemeTextBox() { AccessibleAutomationId = "OrganizerSource" }, destination = new AppThemeTextBox() { AccessibleAutomationId = "OrganizerDestination" },
+        details = new AppThemeTextBox() { MultiLine = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, AccessibleAutomationId = "OrganizerDetails" };
     private readonly ComboBox listChoice = new() { AccessibleAutomationId = "OrganizerLists" }, filter = new() { AccessibleAutomationId = "OrganizerFilter" },
         candidateChoice = new() { AccessibleAutomationId = "OrganizerCandidates" }, journals = new() { AccessibleAutomationId = "OrganizerJournals" };
     private readonly CheckBox recursive = new() { Checked = true, AccessibleAutomationId = "OrganizerRecursive" }, requireJson = new() { Checked = true, AccessibleAutomationId = "OrganizerRequireJson" };

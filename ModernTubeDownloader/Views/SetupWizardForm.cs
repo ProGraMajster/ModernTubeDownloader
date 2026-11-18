@@ -308,7 +308,7 @@ internal sealed class SetupWizardForm : Form
     private void AddInput(string key, string id, string value, Action<string> set) => AddPath(key, id, value, set, false);
     private void AddPath(string key, string id, string value, Action<string> set, bool browse = true)
     {
-        var panel = new ExperienceCard(); var label = ExperienceVisual.Paragraph(text[key]); var input = new TextBox { Text = value, AccessibleAutomationId = id, AccessibleName = text[key] };
+        var panel = new ExperienceCard(); var label = ExperienceVisual.Paragraph(text[key]); var input = new AppThemeTextBox { Text = value, AccessibleAutomationId = id, AccessibleName = text[key] };
         AppUi.Input(input); tips.SetToolTip(input, input.Text);
         input.TextChanged += (_, _) => { set(input.Text); tips.SetToolTip(input, input.Text); Changed(); };
         var pick = new DashboardButton { AccessibleAutomationId = id + "Browse", AccessibleName = text["Settings.Browse"], Visible = browse }; DownloadsVisual.Button(pick);

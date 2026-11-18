@@ -7,10 +7,21 @@ using ModernTubeDownloader.Theming;
 
 namespace ModernTubeDownloader.Views;
 
+internal sealed record PersonalizationSearchOption(string Section, string CaptionKey, string AutomationId);
+
 /// <summary>Only the closed appearance schema is editable; no paths, credentials or executable configuration.</summary>
 internal sealed class PersonalizationSettingsPanel : Panel
 {
     private static readonly string[] Sections = ["Global", "Navigation", "Downloads", "Live", "History", "Other", "BatchImport", "Settings", "Details", "ModernDashboardShell"];
+    private static readonly string[] ColorTokens = ["Accent", "Background", "Surface", "SurfaceSecondary", "Border", "TextPrimary", "TextSecondary"];
+    // The same closed schema used by BuildFields, with names/types only. Searching
+    // never reads profile values and never creates the controls of another section.
+    internal static IReadOnlyList<PersonalizationSearchOption> SearchOptions { get; } = Array.AsReadOnly(
+        Sections.SelectMany(name => EditableProperties(typeof(AppearanceProfile).GetProperty(name)!.PropertyType)
+            .Select(property => new PersonalizationSearchOption(name, "Appearance.Field." + property.Name, "Appearance" + name + property.Name)))
+            .Concat(ColorTokens.Select(token => new PersonalizationSearchOption("Global", "Appearance.Color." + token, "AppearanceColor" + token))).ToArray());
+    private static IEnumerable<PropertyInfo> EditableProperties(Type type) => type.GetProperties()
+        .Where(property => property.PropertyType == typeof(bool) || property.PropertyType == typeof(int) || property.PropertyType.IsEnum);
     private readonly AppServices services;
     private readonly ComboBox section = new() { AccessibleAutomationId = "AppearanceSection" };
     private readonly FlowLayoutPanel commands = new() { WrapContents = true };
@@ -70,7 +81,7 @@ internal sealed class PersonalizationSettingsPanel : Panel
             var name = Sections[Math.Max(0, section.SelectedIndex)];
             var sectionProperty = typeof(AppearanceProfile).GetProperty(name)!;
             var settings = sectionProperty.GetValue(services.Appearance.Profile)!;
-            foreach (var property in settings.GetType().GetProperties().Where(p => p.PropertyType == typeof(bool) || p.PropertyType == typeof(int) || p.PropertyType.IsEnum))
+            foreach (var property in EditableProperties(sectionProperty.PropertyType))
             {
                 var row = new Panel { Height = AppTypography.TextHeight(46), Tag = property.Name }; AppUi.Surface(row);
                 var label = AppUi.Muted(services.Localization["Appearance.Field." + property.Name]);
@@ -94,16 +105,27 @@ internal sealed class PersonalizationSettingsPanel : Panel
                 }
                 input.AccessibleAutomationId = "Appearance" + name + property.Name; row.Controls.AddRange([label, input]); fields.Controls.Add(row);
             }
-            if (name == "Global") foreach (var token in new[] { "Accent", "Background", "Surface", "SurfaceSecondary", "Border", "TextPrimary", "TextSecondary" }) AddColor(token);
+            if (name == "Global") foreach (var token in ColorTokens) AddColor(token);
         }
         finally { editing = false; }
         LayoutForWidth(Width); CheckContrast();
+    }
+    internal (Control Caption, Control Input)? RevealSearchOption(PersonalizationSearchOption option)
+    {
+        if (disposed || !SearchOptions.Contains(option)) return null;
+        // Selecting the existing section is navigation, not a profile edit. Its
+        // normal handler creates and wires the canonical fields exactly once.
+        var index = Array.IndexOf(Sections, option.Section);
+        if (section.SelectedIndex != index) section.SelectedIndex = index;
+        var row = fields.Controls.FirstOrDefault(control => control.Controls.Count >= 2 &&
+            control.Controls[1].AccessibleAutomationId == option.AutomationId);
+        return row is null ? null : (row.Controls[0], row.Controls[1]);
     }
     private void AddColor(string token)
     {
         var row = new Panel { Height = AppTypography.TextHeight(46) }; AppUi.Surface(row);
         var label = AppUi.Muted(services.Localization["Appearance.Color." + token]);
-        var color = new TextBox { Text = services.Appearance.Profile.Global.Colors.GetValueOrDefault(token, Hex(AppUi.GetColor("App." + token))), AccessibleAutomationId = "AppearanceColor" + token };
+        var color = new AppThemeTextBox { Text = services.Appearance.Profile.Global.Colors.GetValueOrDefault(token, Hex(AppUi.GetColor("App." + token))), AccessibleAutomationId = "AppearanceColor" + token };
         AppUi.Input(color); var pick = new Button { Text = "…" }; var reset = new Button { Text = services.Localization["Appearance.ResetToken"] }; AppUi.Secondary(pick); AppUi.Secondary(reset);
         color.TextChanged += (_, _) => { var value = color.Text; if (value.Length == 7 && value[0] == '#' && value[1..].All(Uri.IsHexDigit)) QueueEdit(p => { p.Global.Theme = AppearanceTheme.Custom; p.Global.Colors[token] = value; }); };
         pick.Click += async (_, _) => await SafeAsync(async () => { if (FindForm() is not { } owner) return; var dialog = new ColorDialog { Color = AppUi.GetColor("App." + token) }; if (await dialog.ShowDialog(owner) == DialogResult.OK) color.Text = Hex(dialog.Color); });

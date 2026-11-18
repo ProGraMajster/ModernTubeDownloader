@@ -70,7 +70,7 @@ internal sealed class LocalePickerForm : Form
     private readonly string selected;
     private readonly Panel surface = new() { Dock = DockStyle.Fill };
     private readonly Label heading = AppUi.Heading("", 18), hint = AppUi.Muted(), count = AppUi.Muted();
-    private readonly TextBox search = new() { AccessibleAutomationId = "LocaleSearch" };
+    private readonly TextBox search = new AppThemeTextBox() { AccessibleAutomationId = "LocaleSearch" };
     private readonly ExperienceScrollPanel list = new() { AutoScroll = true, AccessibleAutomationId = "LocaleList" };
     private readonly Button close = new DashboardButton();
     private readonly List<(AppLocale Locale, Button Button)> rows = [];

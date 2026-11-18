@@ -1397,5 +1397,21 @@
   "RemoteWeb.browserLanguage": "Browsersprache",
   "History.UnavailableTitle": "Geschichte konnte nicht geladen werden",
   "History.UnavailableBody": "Die Original-History-Datei wurde beibehalten. Überprüfen Sie den Zugriff oder stellen Sie ein gültiges Backup wieder her und starten Sie dann neu. History Writes und Dateiorganisation werden blockiert, bis sie sicher gelesen werden können.",
-  "Updates.StartupAbortBlocked": "Das Aktualisierungsprogramm konnte nicht sicher beendet werden. Der Start von Downloads und das normale Beenden der Anwendung sind gesperrt. Beheben Sie das Problem mit dem noch laufenden Aktualisierungsprozess und prüfen Sie das Protokoll, bevor Sie fortfahren."
+  "Updates.StartupAbortBlocked": "Das Aktualisierungsprogramm konnte nicht sicher beendet werden. Der Start von Downloads und das normale Beenden der Anwendung sind gesperrt. Beheben Sie das Problem mit dem noch laufenden Aktualisierungsprozess und prüfen Sie das Protokoll, bevor Sie fortfahren.",
+  "Settings.SearchResults": "Matching settings: {0}",
+  "Settings.SearchLocation": "{0} · {1}",
+  "Settings.SearchClear": "Clear search",
+  "Settings.SearchResultPosition": "{0}–{1} of {2}",
+  "Experience.InstalledVersion": "Installed version: {0}",
+  "Experience.LocalNotes": "Source: reviewed notes bundled with this application. Available offline.",
+  "Experience.EnglishNotesFallback": "Release-note content is shown in English; a translation for the selected language is not bundled.",
+  "Experience.NoLocalNotes": "No notes are bundled for installed version {0}. This does not mean that this version contains no changes.",
+  "Experience.ExactReleaseNotes": "Official notes for v{0}",
+  "Help.Introduction": "Find the right workflow and open its existing tools.",
+  "Help.EnglishContentFallback": "Help topics are shown in English; a translation for the selected language is not bundled.",
+  "Settings.SearchSound": "Notification sound",
+  "Settings.SearchNotificationPresentation": "Notification presentation",
+  "Settings.SearchAuthenticationSource": "Authentication source",
+  "Settings.SearchBrowser": "Browser for synchronization",
+  "Settings.SearchExtensionId": "Browser extension identifier"
 }

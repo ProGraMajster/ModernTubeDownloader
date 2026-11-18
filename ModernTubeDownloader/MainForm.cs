@@ -135,6 +135,10 @@ public sealed partial class MainForm : Form
         helpView = new InformationView(services, false) { Visible = false };
         aboutView = new InformationView(services, true) { Visible = false };
         WireExperienceActions();
+        helpView.NavigateRequested += (_, page) => Navigate(page);
+        helpView.SettingsRequested += (_, category) => { Navigate(AppPageId.Settings); settingsView.ShowCategory(category); };
+        helpView.BatchRequested += (_, _) => _ = OpenBatchAsync();
+        helpView.OrganizerRequested += (_, _) => _ = OpenOrganizerAsync();
         content.Controls.AddRange([downloadsView, liveView, historyView, otherView, settingsView, batchView, helpView, aboutView]);
         pages[downloadsView] = AppPageId.Downloads; pages[liveView] = AppPageId.Live;
         pages[historyView] = AppPageId.History; pages[otherView] = AppPageId.Other;
@@ -333,6 +337,7 @@ public sealed partial class MainForm : Form
             if (!modern) foreach (var view in pages.Keys) DashboardVisual.RestoreTree(view);
             downloadsView.SetDashboard(modern); liveView.SetDashboard(modern);
             historyView.SetDashboard(modern); otherView.SetDashboard(modern); settingsView.SetDashboard(modern); batchView.SetDashboard(modern);
+            helpView.SetDashboard(modern);
             Text = modern ? "ModernTubeDownloader   v" + AppBranding.Version : text["App.Title"];
             AppTypography.SetDashboardPresentation(TitleBar, modern);
             AppTypography.Bind(caption, modern ? 10.5f : 12, FontStyle.Bold);

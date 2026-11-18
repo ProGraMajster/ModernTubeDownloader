@@ -19,8 +19,8 @@ internal sealed class LiveSessionDetailsForm : Form
     private readonly Label recordingHeading = AppUi.Heading("", 12), diagnosticsHeading = AppUi.Heading("", 12), filesHeading = AppUi.Heading("", 12);
     private readonly AppVectorIcon recordingIcon = new(AppIconKind.Live, 22, AppThemeTokens.Info), diagnosticsIcon = new(AppIconKind.Link, 22, AppThemeTokens.Info), filesIcon = new(AppIconKind.Folder, 22, AppThemeTokens.Info);
     private readonly DashboardFields recordingFields = new(), diagnosticsFields = new();
-    private readonly TextBox source = new() { ReadOnly = true, AccessibleAutomationId = "LiveDetailsSource" };
-    private readonly TextBox output = new() { ReadOnly = true, MultiLine = true, ScrollBars = ScrollBars.Vertical, AccessibleAutomationId = "LiveDetailsParts" };
+    private readonly TextBox source = new AppThemeTextBox() { ReadOnly = true, AccessibleAutomationId = "LiveDetailsSource" };
+    private readonly TextBox output = new AppThemeTextBox() { ReadOnly = true, MultiLine = true, ScrollBars = ScrollBars.Vertical, AccessibleAutomationId = "LiveDetailsParts" };
     private readonly Label warning = AppUi.Muted();
     private readonly DownloadsPictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom, RoundedPreview = true };
     private readonly AppVectorIcon placeholder = new(AppIconKind.Live, 38, AppThemeTokens.Info);

@@ -11,9 +11,11 @@ namespace ModernTubeDownloader.Tests;
 public sealed class DashboardThemeInputTests
 {
     [Theory]
-    [InlineData(AppThemeMode.Dark, AppThemeMode.Light)]
-    [InlineData(AppThemeMode.Light, AppThemeMode.Dark)]
-    public async Task ThemeSwitchRendersExistingInputExactlyLikeFreshInput(AppThemeMode initial, AppThemeMode target)
+    [InlineData(AppThemeMode.Dark, AppThemeMode.Light, true)]
+    [InlineData(AppThemeMode.Light, AppThemeMode.Dark, true)]
+    [InlineData(AppThemeMode.Dark, AppThemeMode.Light, false)]
+    [InlineData(AppThemeMode.Light, AppThemeMode.Dark, false)]
+    public async Task ThemeSwitchRendersExistingInputExactlyLikeFreshInput(AppThemeMode initial, AppThemeMode target, bool modern)
     {
         var root = Path.Combine(Path.GetTempPath(), "mtd-input-theme-" + Guid.NewGuid().ToString("N"));
         var paths = AppPaths.Create(root); paths.EnsureCreated();
@@ -25,7 +27,7 @@ public sealed class DashboardThemeInputTests
                 var settings = new ModernTubeDownloader.Services.SettingsService(paths, new NullAppLogger());
                 settings.Current.ThemeMode = initial;
                 using var appearance = new AppAppearanceService(settings, new NullAppLogger());
-                appearance.Profile.InterfaceMode = AppInterfaceMode.ModernDashboard;
+                appearance.Profile.InterfaceMode = modern ? AppInterfaceMode.ModernDashboard : AppInterfaceMode.Classic;
                 appearance.Profile.Global.Animations = true;
                 appearance.Initialize();
                 var panel = new Panel(); AppUi.Surface(panel);
@@ -59,6 +61,8 @@ public sealed class DashboardThemeInputTests
 
     private static TextBox Input()
     {
+        // All application editors use this native TextBox subclass. The raw
+        // framework editor's stale-cache repro is retained in the QA artifacts.
         var input = new AppThemeTextBox { Text = "00:00:02 — Theme Łódź" };
         input.SetBounds(10, 10, 540, 40); AppUi.Input(input);
         return input;

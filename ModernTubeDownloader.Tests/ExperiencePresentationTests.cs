@@ -13,7 +13,7 @@ using Path = System.IO.Path;
 namespace ModernTubeDownloader.Tests;
 
 [Collection("ModernFormsNext TestHost")]
-public sealed class ExperiencePresentationTests
+public sealed partial class ExperiencePresentationTests
 {
     [Theory]
     [InlineData(false)] [InlineData(true)]
@@ -254,10 +254,12 @@ public sealed class ExperiencePresentationTests
             {
                 newsWindow.Resize(size.Item1, size.Item2); host.ProcessPendingWork(); AssertGeometry(newsRoot, $"WhatsNew, {scale}, {theme}, {size}");
             }
-            foreach (var key in ReleaseNotesCatalog.Cards)
+            var installedNotes = Assert.IsType<InstalledReleaseNotes>(ReleaseNotesCatalog.ForInstalled(services.Experience.Version, services.Localization.Language));
+            Assert.Equal(4, installedNotes.Sections.Count);
+            foreach (var section in installedNotes.Sections)
             {
-                Assert.Contains(Descendants(newsRoot).OfType<Label>(), label => label.Text == services.Localization[key]);
-                Assert.Contains(Descendants(newsRoot).OfType<Label>(), label => label.Text == services.Localization[key + "Body"]);
+                Assert.Contains(Descendants(newsRoot).OfType<Label>(), label => label.Text == section.Title);
+                foreach (var item in section.Items) Assert.Contains(Descendants(newsRoot).OfType<Label>(), label => label.Text.Contains(item, StringComparison.Ordinal));
             }
             Assert.Contains(Descendants(newsRoot).OfType<Label>(), label => label.Text.Contains(services.Experience.Version, StringComparison.Ordinal));
             Click(host, newsRoot, "WhatsNewDone"); Pump(host, () => newsWindow.IsClosed);
@@ -459,7 +461,7 @@ public sealed class ExperiencePresentationTests
     private sealed class Fixture : IDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "mtd-experience-ui-" + Guid.NewGuid().ToString("N"));
-        public async Task<AppServices> Services(AppThemeMode theme)
+        public async Task<AppServices> Services(AppThemeMode theme, HttpClient? httpClient = null)
         {
             var paths = AppPaths.Create(Root); paths.EnsureCreated(); var settings = new SettingsService(paths, new NullAppLogger()); await settings.LoadAsync();
             settings.Current.Language = "pl"; settings.Current.ThemeMode = theme;
@@ -470,7 +472,7 @@ public sealed class ExperiencePresentationTests
             var tools = Path.Combine(Root, "fake"); Directory.CreateDirectory(tools);
             foreach (var file in Directory.EnumerateFiles(AppContext.BaseDirectory, "ModernTubeDownloader.FakeTool.*")) File.Copy(file, Path.Combine(tools, Path.GetFileName(file)));
             settings.Current.CustomDenoPath = Path.Combine(tools, "deno.exe"); File.Copy(CoreTests.FakeToolPath(), settings.Current.CustomDenoPath);
-            await settings.SaveAsync(); var services = AppServices.Create(paths); await services.Tools.Initialization; return services;
+            await settings.SaveAsync(); var services = AppServices.Create(paths, httpClient); await services.Tools.Initialization; return services;
         }
         public void Dispose() { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(Root)) Directory.Delete(Root, true); }
     }

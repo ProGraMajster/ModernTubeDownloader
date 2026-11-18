@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "releases": [
+    {
+      "version": "1.3.0-candidate.1",
+      "languages": {
+        "en": [
+          { "category": "new", "title": "New", "items": [
+            "Modern Dashboard brings Downloads, LIVE, History, Batch Import and Settings into one workspace. Classic remains available with the same queue and data.",
+            "Batch lists can use separate destination folders. The organizer plans moves of existing recordings and verified JSON sidecars, updates History paths and offers journal-based recovery and undo.",
+            "A resumable first-run wizard, a one-time Classic/Modern choice for existing profiles and explicit update preferences guide setup without replacing existing collections."
+          ] },
+          { "category": "improved", "title": "Improvements", "items": [
+            "Settings search lists exact options and reveals the selected field without indexing private values. Help offers six topics linked to the existing tools.",
+            "Collapsible playlist groups, paged queue and History views, and bounded thumbnail loading keep large collections manageable.",
+            "Downloads shows recent observed media-byte throughput with explicit KiB/s and MiB/s units. The graph and statistics share the same sampling interval; protocol overhead and unrelated network traffic are excluded.",
+            "The organizer reports scanned files, identified sources and recordings outside the imported lists, while keeping the inspector on the visible result."
+          ] },
+          { "category": "fixed", "title": "Fixes", "items": [
+            "Informational labels and icons retain their background when clicked. Focused inputs use a visible border while keeping their normal surface color.",
+            "Passive Batch refresh keeps retained controls enabled instead of repeatedly resetting the view and closing workflow dropdowns.",
+            "Unreadable queue, History and LIVE stores block unsafe writes and work admission. Unknown persisted fields and existing task identities are retained.",
+            "Failed setup or update-preference writes do not publish a successful decision. Interrupted organizer operations retain recovery evidence."
+          ] },
+          { "category": "limitations", "title": "Known limitations", "items": [
+            "This is a local release candidate, not a published stable release. Final visual acceptance and release qualification are still required.",
+            "Some independent popup and tooltip scenarios, physical 5K / 225% DPI and a long memory soak remain unqualified. Short passing tests do not replace those checks.",
+            "Private providers and authenticated accounts depend on their services and supplied credentials. An adjacent JSON file alone does not prove a recording matches an imported URL."
+          ] }
+        ],
+        "pl": [
+          { "category": "new", "title": "Nowe", "items": [
+            "Modern Dashboard łączy Pobieranie, LIVE, Historię, Batch Import i Ustawienia. Classic pozostaje dostępny i korzysta z tej samej kolejki oraz danych.",
+            "Listy Batch mogą mieć osobne foldery docelowe. Organizator planuje przenoszenie istniejących nagrań i zweryfikowanych plików JSON, aktualizuje ścieżki w Historii oraz pozwala odzyskać lub cofnąć operację na podstawie dziennika.",
+            "Wznawialny kreator pierwszego uruchomienia, jednorazowy wybór Classic/Modern dla istniejących profili i jawne ustawienia aktualizacji pomagają rozpocząć pracę bez zastępowania kolekcji."
+          ] },
+          { "category": "improved", "title": "Ulepszenia", "items": [
+            "Wyszukiwarka Ustawień pokazuje konkretne opcje i odsłania wybrane pole bez indeksowania prywatnych wartości. Pomoc zawiera sześć tematów ze skrótami do istniejących narzędzi.",
+            "Zwijane grupy playlist, stronicowanie kolejki i Historii oraz ograniczone ładowanie miniaturek ułatwiają obsługę dużych kolekcji.",
+            "Pobieranie pokazuje ostatnio zaobserwowany transfer danych multimedialnych w jednoznacznych jednostkach KiB/s i MiB/s. Wykres i statystyki korzystają z tego samego okna pomiaru; nie obejmują narzutu protokołu ani pozostałego ruchu sieciowego.",
+            "Organizator podaje liczbę przeskanowanych plików, rozpoznanych źródeł i nagrań spoza list, a inspektor opisuje widoczny wynik."
+          ] },
+          { "category": "fixed", "title": "Naprawy", "items": [
+            "Etykiety informacyjne i ikony zachowują tło po kliknięciu. Pola z fokusem mają widoczną ramkę i zachowują zwykły kolor powierzchni.",
+            "Pasywne odświeżanie Batch zachowuje aktywne kontrolki, zamiast cyklicznie odtwarzać widok i zamykać listy wyboru.",
+            "Nieczytelne magazyny kolejki, Historii i LIVE blokują niebezpieczny zapis i uruchamianie pracy. Nieznane zapisane pola oraz dotychczasowe identyfikatory zadań są zachowywane.",
+            "Błąd zapisu kreatora lub preferencji aktualizacji nie publikuje pomyślnej decyzji. Przerwane operacje organizatora zachowują dane potrzebne do odzyskania."
+          ] },
+          { "category": "limitations", "title": "Znane ograniczenia", "items": [
+            "To lokalny kandydat do wydania, a nie opublikowana wersja stabilna. Nadal wymaga końcowej akceptacji wyglądu i kwalifikacji wydania.",
+            "Niektóre niezależne scenariusze list wyboru i tooltipów, fizyczny ekran 5K / DPI 225% oraz długi test pamięci pozostają niezakwalifikowane. Krótkie zaliczone testy nie zastępują tych sprawdzeń.",
+            "Prywatne źródła i konta wymagające logowania zależą od usług oraz dostarczonych danych uwierzytelniania. Sam sąsiedni plik JSON nie dowodzi zgodności nagrania z URL-em na liście."
+          ] }
+        ]
+      }
+    }
+  ]
+}

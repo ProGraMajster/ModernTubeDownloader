@@ -14,7 +14,7 @@ internal sealed partial class BatchImportView : UserControl
     private readonly FlowLayoutPanel toolbar = new() { WrapContents = true };
     private readonly AppScrollFlowLayoutPanel rows = new() { AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, AccessibleAutomationId = "BatchRows" };
     private readonly Label heading = AppUi.Heading("", 22), status = AppUi.Muted(), pageText = AppUi.Muted();
-    private readonly TextBox path = new() { AccessibleAutomationId = "BatchFilePath" }, search = new() { AccessibleAutomationId = "BatchSearch" };
+    private readonly TextBox path = new AppThemeTextBox() { AccessibleAutomationId = "BatchFilePath" }, search = new AppThemeTextBox() { AccessibleAutomationId = "BatchSearch" };
     private readonly ComboBox quality = new() { AccessibleAutomationId = "BatchQuality" }, container = new() { AccessibleAutomationId = "BatchContainer" }, filter = new() { AccessibleAutomationId = "BatchFilter" };
     private readonly NumericUpDown workers = new() { Minimum = 1, Maximum = 8, Value = 1, AccessibleAutomationId = "BatchWorkers" };
     private readonly ProgressBar progress = new DashboardProgress { Minimum = 0, Maximum = 100, AccessibleAutomationId = "BatchAnalysisProgress" };

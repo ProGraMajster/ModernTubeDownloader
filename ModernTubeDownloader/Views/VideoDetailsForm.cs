@@ -68,7 +68,7 @@ internal sealed class VideoDetailsForm : Form
         var page = tabs.TabPages.Add(title);
         page.AccessibleAutomationId = automationId;
         AppUi.Surface(page);
-        var content = new TextBox
+        var content = new AppThemeTextBox
         {
             Dock = DockStyle.Fill,
             MultiLine = true,

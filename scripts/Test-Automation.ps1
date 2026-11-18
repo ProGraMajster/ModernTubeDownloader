@@ -4,6 +4,8 @@ param(
     [switch]$PublishedUiSmoke,
     [switch]$PublishedDashboardSmoke,
     [switch]$PublishedNoUpdate,
+    [switch]$PublishedFinalUxSmoke,
+    [switch]$PublishedFinalUxBefore,
     [switch]$TraySmoke,
     [switch]$UpdateSmoke,
     [switch]$UpdateStatesSmoke,
@@ -13,6 +15,8 @@ param(
     [switch]$OrganizerWorkflowSmoke,
     [switch]$OrganizerDiagnosticsSmoke,
     [switch]$LocalePickerSmoke,
+    [switch]$FinalUxSmoke,
+    [switch]$FinalUxPhysical,
     [switch]$HotfixSmoke,
     [switch]$RealBatchSmoke,
     [switch]$RealVodSmoke,
@@ -97,6 +101,8 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Test-NativePopupWitness.ps1')
 $script:popupWitnessStarted = $false
+if ($PublishedFinalUxBefore) { $PublishedFinalUxSmoke = $true }
+if ($PublishedFinalUxSmoke) { $PublishStartupSmoke = $true }
 if ($ExperienceExternalActivation -and $ExperienceSmoke -ne 'Resume') { throw 'ExperienceExternalActivation requires ExperienceSmoke Resume.' }
 if ($ExperienceSmoke -eq 'News') { $InterfaceMode = 'ModernDashboard' }
 if ($OrganizerDiagnosticsSmoke) { $OrganizerWorkflowSmoke = $true }
@@ -491,7 +497,7 @@ function Invoke-ExperienceSmoke {
         }
         elseif ($ExperienceSmoke -eq 'News') {
             Invoke-NodeAction (Wait-Node 'NavHelp' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
-            Invoke-NodeAction (Wait-Node 'InformationWhatsNew' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
+            Invoke-NodeAction (Wait-Node 'HelpWhatsNew' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
             $markerPath = Join-Path $dataRoot 'experience.json'
             $beforeLater = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
             if ($beforeLater.lastWhatsNewAcknowledgedVersion -eq $experienceVersion) { throw 'Read-later fixture must not already acknowledge the current version.' }
@@ -511,10 +517,10 @@ function Invoke-ExperienceSmoke {
                 beforeSha256 = $beforeLaterHash; afterSha256 = $afterLaterHash; dialogClosed = $true } |
                 ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'experience-news-later-state.json') -Encoding utf8
             # Later leaves manual access available without writing an acknowledgement.
-            Invoke-NodeAction (Wait-Node 'InformationWhatsNew' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
+            Invoke-NodeAction (Wait-Node 'HelpWhatsNew' $script:experienceMainRoot 'Enabled').snapshot $script:experienceMainRoot 'Invoke' | Out-Null
             Complete-ExperienceNews 'experience-news-manual'
             # Manual access remains possible even after acknowledging this exact version.
-            Invoke-NodeAction (Find-Node 'InformationWhatsNew' $script:experienceMainRoot) $script:experienceMainRoot 'Invoke' | Out-Null
+            Invoke-NodeAction (Find-Node 'HelpWhatsNew' $script:experienceMainRoot) $script:experienceMainRoot 'Invoke' | Out-Null
             Complete-ExperienceNews 'experience-news-reopened'
         }
         else {
@@ -1096,6 +1102,22 @@ try {
             Start-Sleep -Milliseconds 100
         } while ($readyWatch.Elapsed.TotalSeconds -lt 30)
         if ($validatedTools.Count -ne 4) { throw 'Published app did not validate custom QA tools.' }
+        if ($PublishedFinalUxSmoke) {
+            if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
+                if (-not [MtdAutomationWindowCloser]::PlaceWindow($normalProcess.MainWindowHandle, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)) { throw 'Published UX HWND placement failed.' }
+            }
+            $clientPath = Join-Path $PSScriptRoot 'Test-FinalUxNative.ps1'
+            $evidencePath = Join-Path $dataRoot 'native-ux'
+            $languagePath = Join-Path $repo 'ModernTubeDownloader/Resources/Languages'
+            $command = "& ([scriptblock]::Create([IO.File]::ReadAllText('" + $clientPath.Replace("'", "''") + "'))) -OwnedProcessId " + $normalProcess.Id +
+                " -StartUtcTicks " + $normalProcess.StartTime.ToUniversalTime().Ticks +
+                " -ApplicationPath '" + $app.Replace("'", "''") + "' -DataRoot '" + $dataRoot.Replace("'", "''") +
+                "' -EvidenceDir '" + $evidencePath.Replace("'", "''") + "' -LanguageDirectory '" + $languagePath.Replace("'", "''") + "'"
+            if ($PublishedFinalUxBefore) { $command += ' -Before' }
+            Write-Output "Owned published UX profile: $dataRoot"
+            & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command $command
+            if ($LASTEXITCODE -ne 0) { throw 'Published UX native probe failed; original evidence preserved.' }
+        }
         if ($PublishedUiSmoke) {
             $stableVersion = $buildProperties.SelectSingleNode('/Project/PropertyGroup/Version').InnerText.Trim()
             # UIA requires the desktop .NET Framework host. Invoke our reviewed local
@@ -1199,6 +1221,10 @@ try {
     $mainRoot = $roots.value[0].rootId
     $tree = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $mainRoot, '--depth', '8')
     if (-not @($tree.nodes | Where-Object { $_.node.automationId -eq 'MainWindow' }).Count) { throw 'MainWindow absent from tree.' }
+    if ($FinalUxSmoke) {
+        . (Join-Path $PSScriptRoot 'Invoke-FinalUxSmoke.ps1')
+        return
+    }
     if ($BatchWorkflowSmoke -or $LocalePickerSmoke) {
         . (Join-Path $PSScriptRoot 'Invoke-BatchOrganizerSmoke.ps1')
         return

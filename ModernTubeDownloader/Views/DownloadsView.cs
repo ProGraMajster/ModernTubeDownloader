@@ -140,7 +140,7 @@ internal sealed partial class DownloadsView : UserControl
         supportedSourcesButton.Click += (_, _) => SupportedSourcesRequested?.Invoke(this, EventArgs.Empty);
         sourceSummary = AppUi.Muted();
         sourceSummary.AccessibleAutomationId = "AnalyzedSourceSummary";
-        urlInput = new TextBox
+        urlInput = new AppThemeTextBox
         {
             AccessibleAutomationId = "DownloadUrlInput",
             Height = 48,

@@ -225,30 +225,3 @@ internal sealed class UserExperienceService
             throw new InvalidDataException("Experience.InvalidFilename");
     }
 }
-
-internal static class ReleaseNotesCatalog
-{
-    internal static bool ShouldShow(string current, string? acknowledged, string? observed)
-    {
-        if (acknowledged is not null) return CompareVersions(current, acknowledged) > 0;
-        return observed is null || CompareVersions(current, observed) >= 0;
-    }
-    private static int CompareVersions(string left, string right)
-    {
-        var a = left.Split('+')[0].Split('-', 2); var b = right.Split('+')[0].Split('-', 2);
-        if (!System.Version.TryParse(a[0], out var av) || !System.Version.TryParse(b[0], out var bv)) return 0;
-        var core = av.CompareTo(bv); if (core != 0) return core;
-        if (a.Length == 1 || b.Length == 1) return (b.Length == 1 ? 0 : 1) - (a.Length == 1 ? 0 : 1);
-        var ai = a[1].Split('.'); var bi = b[1].Split('.');
-        for (var i = 0; i < Math.Min(ai.Length, bi.Length); i++)
-        {
-            var an = long.TryParse(ai[i], out var al); var bn = long.TryParse(bi[i], out var bl);
-            var part = an && bn ? al.CompareTo(bl) : an != bn ? (an ? -1 : 1) : string.CompareOrdinal(ai[i], bi[i]);
-            if (part != 0) return part;
-        }
-        return ai.Length.CompareTo(bi.Length);
-    }
-    internal static bool Supports(string version) => version.Split('+')[0].Split('-')[0] == "1.3.0";
-    internal static readonly string[] Cards = ["Experience.NewsDashboard", "Experience.NewsCollections", "Experience.NewsSetup"];
-    internal const string OfficialUrl = "https://github.com/ProGraMajster/ModernTubeDownloader/releases";
-}

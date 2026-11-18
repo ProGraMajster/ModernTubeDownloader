@@ -14,7 +14,14 @@ internal sealed class AppThemeTextBox : TextBox
 
     private void ThemeCommitted(object? sender, ThemeChangedEventArgs e)
     {
-        if (!disposed && !Disposing && AppearancePresentation.Current.InterfaceMode == AppInterfaceMode.ModernDashboard)
+        if (!disposed && !Disposing)
             base.OnThemeChanged(EventArgs.Empty);
+    }
+
+    internal void RefreshBoundPresentation()
+    {
+        // State colors may be assigned after ThemeCommitted in the same theme
+        // dispatch. Refresh the canonical editor cache only after those bindings.
+        if (!disposed && !Disposing) base.OnThemeChanged(EventArgs.Empty);
     }
 }

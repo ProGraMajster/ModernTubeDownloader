@@ -84,7 +84,7 @@ internal sealed class UpdateSettingsPanel : Panel
         {
             using var window = new Form { Text = services.Localization["Updates.Notes"], Size = new System.Drawing.Size(820, 620) };
             AppBranding.Apply(window);
-            var content = new TextBox { Dock = DockStyle.Fill, MultiLine = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
+            var content = new AppThemeTextBox { Dock = DockStyle.Fill, MultiLine = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
                 TextAlign = ContentAlignment.TopLeft, Text = release.Notes };
             AppUi.Input(content); window.Controls.Add(content);
             await window.ShowDialog(owner);

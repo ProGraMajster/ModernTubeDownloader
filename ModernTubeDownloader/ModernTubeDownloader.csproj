@@ -42,6 +42,8 @@
     <EmbeddedResource Include="Assets\PreviewModern.png" LogicalName="ModernTubeDownloader.Assets.PreviewModern.png" />
     <EmbeddedResource Include="Resources\Languages\*.json" />
     <EmbeddedResource Include="Resources\YtDlpOptions.json" />
+    <EmbeddedResource Include="Resources\ReleaseNotes.json" />
+    <EmbeddedResource Include="Resources\HelpTopics.json" />
     <EmbeddedResource Include="WebRemote\wwwroot\*" />
   </ItemGroup>
   <Target Name="CopyNativeHostForDevelopment" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == ''">

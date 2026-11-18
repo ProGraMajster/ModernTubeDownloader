@@ -1397,5 +1397,21 @@
   "RemoteWeb.browserLanguage": "Tarayıcı dili",
   "History.UnavailableTitle": "Tarih yüklenemez",
   "History.UnavailableBody": "Orijinal tarih dosyası korunmuştur. Geçerli bir yedeklemeyi kontrol edin veya geri yükleyin, sonra yeniden başlayın. Tarih yazıyor ve dosya organizasyonu güvenli bir şekilde okuyabilene kadar bloke edilir.",
-  "Updates.StartupAbortBlocked": "Güncelleyici güvenli bir şekilde durdurulamadı. İndirmelerin başlatılması ve uygulamanın normal şekilde kapatılması engellendi. Devam etmeden önce bekleyen güncelleyici işlemiyle ilgili sorunu giderin ve günlüğü inceleyin."
+  "Updates.StartupAbortBlocked": "Güncelleyici güvenli bir şekilde durdurulamadı. İndirmelerin başlatılması ve uygulamanın normal şekilde kapatılması engellendi. Devam etmeden önce bekleyen güncelleyici işlemiyle ilgili sorunu giderin ve günlüğü inceleyin.",
+  "Settings.SearchResults": "Matching settings: {0}",
+  "Settings.SearchLocation": "{0} · {1}",
+  "Settings.SearchClear": "Clear search",
+  "Settings.SearchResultPosition": "{0}–{1} of {2}",
+  "Experience.InstalledVersion": "Installed version: {0}",
+  "Experience.LocalNotes": "Source: reviewed notes bundled with this application. Available offline.",
+  "Experience.EnglishNotesFallback": "Release-note content is shown in English; a translation for the selected language is not bundled.",
+  "Experience.NoLocalNotes": "No notes are bundled for installed version {0}. This does not mean that this version contains no changes.",
+  "Experience.ExactReleaseNotes": "Official notes for v{0}",
+  "Help.Introduction": "Find the right workflow and open its existing tools.",
+  "Help.EnglishContentFallback": "Help topics are shown in English; a translation for the selected language is not bundled.",
+  "Settings.SearchSound": "Notification sound",
+  "Settings.SearchNotificationPresentation": "Notification presentation",
+  "Settings.SearchAuthenticationSource": "Authentication source",
+  "Settings.SearchBrowser": "Browser for synchronization",
+  "Settings.SearchExtensionId": "Browser extension identifier"
 }

@@ -19,7 +19,7 @@ internal sealed partial class LiveView : UserControl
     private readonly Label heading = AppUi.Heading(string.Empty, 24);
     private readonly Label statistics = AppUi.Muted();
     private readonly Panel analysis = new();
-    private readonly TextBox url = new() { AccessibleAutomationId = "LiveUrlInput" };
+    private readonly TextBox url = new AppThemeTextBox() { AccessibleAutomationId = "LiveUrlInput" };
     private readonly Button analyze = new DashboardButton() { AccessibleAutomationId = "LiveAnalyzeButton" };
     private readonly Label title = AppUi.Heading(string.Empty, 14);
     private readonly Label message = AppUi.Muted();

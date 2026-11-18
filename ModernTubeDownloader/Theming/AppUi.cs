@@ -58,6 +58,19 @@ internal static class AppUi
         state.Refresh();
     }
 
+    // A label/icon is presentation, not a selectable surface. MFN's hover style
+    // inherits its type default, independently of the instance's normal style.
+    // Copy only the intended background; leave focus, hit testing and semantics intact.
+    internal static void PreservePresentationBackground(Control control)
+    {
+        control.Style.BackgroundColor ??= SKColors.Transparent;
+        foreach (var style in new[] { control.StyleHover, control.StyleFocused, control.StylePressed, control.StyleDisabled })
+        {
+            style.BackgroundColor = control.Style.BackgroundColor;
+            style.BackgroundBrush = control.Style.BackgroundBrush;
+        }
+    }
+
     public static void BindBorder(Control control, string token)
     {
         var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
@@ -168,12 +181,12 @@ internal static class AppUi
         Surface(control);
         control.Style.Border.Radius = 10;
         AppTypography.Bind(control, AppTextToken.Body);
-        if (control is ComboBox)
+        if (control is ComboBox or TextBox)
         {
             var state = ThemeBindings.GetValue(control, static target => new ThemeBindingState(target));
             state.BackgroundToken = null;
             state.ForegroundToken = null;
-            state.IsComboBox = true;
+            state.IsInput = true;
             control.ClearResourceReference(nameof(Control.BackgroundBrush));
             control.ClearResourceReference(nameof(Control.TextBrush));
             control.BackgroundBrush = null;
@@ -264,7 +277,7 @@ internal static class AppUi
         public string? ForegroundToken { get; set; }
         public string? BorderToken { get; set; }
         public ButtonVariant? ButtonVariant { get; set; }
-        public bool IsComboBox { get; set; }
+        public bool IsInput { get; set; }
         public bool IsCard { get; set; }
         public bool DashboardButton { get; set; }
         public bool DownloadsButton { get; set; }
@@ -275,6 +288,8 @@ internal static class AppUi
         {
             if (!target.TryGetTarget(out var control))
                 return;
+            if (control is Label or CheckBox or PictureBox)
+                PreservePresentationBackground(control);
             if (IsCard) control.Style.Border.Radius = AppearancePresentation.Current.Global.CornerRadius;
             if (BorderToken is not null) { control.Style.Border.Width = 1; control.Style.Border.Color = GetColor(BorderToken); }
             if (control is Button effectsButton)
@@ -315,12 +330,12 @@ internal static class AppUi
                     button.StyleFocused.Border.Color = GetColor(AppThemeTokens.Accent);
                 }
             }
-            if (IsComboBox)
+            if (IsInput)
             {
                 ApplyInputState(control.Style, AppThemeTokens.Surface, AppThemeTokens.Border, AppThemeTokens.TextPrimary);
-                ApplyInputState(control.StyleHover, AppThemeTokens.SurfaceHover, AppThemeTokens.Accent, AppThemeTokens.TextPrimary);
-                ApplyInputState(control.StyleFocused, AppThemeTokens.SurfaceHover, AppThemeTokens.Accent, AppThemeTokens.TextPrimary);
-                ApplyInputState(control.StylePressed, AppThemeTokens.SurfaceSecondary, AppThemeTokens.Accent, AppThemeTokens.TextPrimary);
+                ApplyInputState(control.StyleHover, AppThemeTokens.Surface, AppThemeTokens.Accent, AppThemeTokens.TextPrimary);
+                ApplyInputState(control.StyleFocused, AppThemeTokens.Surface, AppThemeTokens.Accent, AppThemeTokens.TextPrimary);
+                ApplyInputState(control.StylePressed, AppThemeTokens.Surface, AppThemeTokens.Accent, AppThemeTokens.TextPrimary);
                 ApplyInputState(control.StyleDisabled, AppThemeTokens.SurfaceSecondary, AppThemeTokens.Border, AppThemeTokens.TextDisabled);
             }
             if (InteractiveSurface is { } surface)
@@ -341,6 +356,7 @@ internal static class AppUi
                 }
                 control.BackgroundBrush = gradientBrush;
             }
+            if (IsInput && control is AppThemeTextBox editor) editor.RefreshBoundPresentation();
             control.Invalidate();
         }
 

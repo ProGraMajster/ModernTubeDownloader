@@ -10,7 +10,7 @@ internal sealed class ThumbnailToolForm : Form
     private readonly AppScrollPanel body = new() { Dock = DockStyle.Fill, AutoScroll = true };
     private readonly Panel previewCard = new();
     private readonly Label heading = AppUi.Heading("", 20), description = AppUi.Muted(), status = AppUi.Muted(), imageTitle = AppUi.Heading("", 12), dimensions = AppUi.Muted();
-    private readonly TextBox source = new() { AccessibleAutomationId = "ThumbnailSource" };
+    private readonly TextBox source = new AppThemeTextBox() { AccessibleAutomationId = "ThumbnailSource" };
     private readonly PictureBox image = new() { SizeMode = PictureBoxSizeMode.Zoom, AccessibleAutomationId = "ThumbnailPreviewImage" };
     private readonly Button load = new DashboardButton { AccessibleAutomationId = "ThumbnailLoad" }, cancel = new DashboardButton { AccessibleAutomationId = "ThumbnailCancel" },
         png = new DashboardButton { AccessibleAutomationId = "ThumbnailSavePng" }, jpeg = new DashboardButton { AccessibleAutomationId = "ThumbnailSaveJpeg" }, close = new DashboardButton { AccessibleAutomationId = "ThumbnailClose" };

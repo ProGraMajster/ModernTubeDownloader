@@ -355,6 +355,7 @@ public sealed class UserExperienceServiceTests
     }
 
     [Theory]
+    [InlineData("1.2.1", "1.3.0-candidate.1", true)]
     [InlineData("1.3.0-candidate.1", "1.3.0-candidate.1+different", false)]
     [InlineData("1.3.0-candidate.1", "1.3.0-candidate.2", true)]
     [InlineData("1.3.0-candidate.2", "1.3.0-candidate.1", false)]
@@ -368,7 +369,10 @@ public sealed class UserExperienceServiceTests
         await File.WriteAllTextAsync(fixture.Marker, JsonSerializer.Serialize(new UserExperienceState
         { ExistingProfile = true, InterfaceChoiceFamily = UserExperienceService.ChoiceFamily, LastWhatsNewAcknowledgedVersion = acknowledged }, JsonDefaults.Options));
         var service = await fixture.Open(current);
-        Assert.Equal(expected ? StartupExperience.WhatsNew : StartupExperience.None, Next(service));
+        // Version ordering and availability are separate: an unpublished/new tag
+        // must never borrow the previous candidate's bundled description.
+        Assert.Equal(expected, ReleaseNotesCatalog.ShouldShow(current, acknowledged, null));
+        Assert.Equal(expected && ReleaseNotesCatalog.Supports(current) ? StartupExperience.WhatsNew : StartupExperience.None, Next(service));
     }
 
     [Fact]

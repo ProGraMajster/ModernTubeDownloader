@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "languages": {
+    "en": [
+      { "id": "start", "title": "Getting started", "body": "Use the setup wizard to choose your interface, folders and download defaults. You can reopen it without replacing your queue or History. What's New describes the installed version." },
+      { "id": "downloads", "title": "Downloads and playlists", "body": "Paste a supported URL and analyze it before choosing quality and format. Add the selected items to the shared queue. Playlist groups can be expanded or collapsed; completed recordings remain available in History." },
+      { "id": "live", "title": "LIVE", "body": "Add a supported live-stream address, review its recording options and start or schedule it. Use Stop and save to finish a recording; a preview or metadata analysis does not itself start recording." },
+      { "id": "batch", "title": "Batch Import and Organizer", "body": "Import TXT, CSV or JSON URL lists, review duplicates and errors, and assign destination folders before queue admission. To organize existing recordings, choose the matching URL list and source folder, inspect the dry-run plan, then confirm verified moves. Keep adjacent JSON and sidecars with their recordings." },
+      { "id": "settings", "title": "Settings and updates", "body": "Search for an option or choose a settings category. Classic and Modern use the same saved preferences. Review automatic checking and installation separately; startup installation is an independent opt-in." },
+      { "id": "diagnostics", "title": "Diagnostics and documentation", "body": "When reporting a problem, include the installed version, interface, language, text scale and steps to reproduce. Review logs before sharing them: source URLs and local paths may be private. The documentation link opens the official repository in your browser." }
+    ],
+    "pl": [
+      { "id": "start", "title": "Jak zacząć", "body": "Kreator pozwala wybrać interfejs, foldery i domyślne opcje pobierania. Możesz otworzyć go ponownie bez zastępowania kolejki i Historii. Ekran „Co nowego” opisuje zainstalowaną wersję." },
+      { "id": "downloads", "title": "Pobieranie i playlisty", "body": "Wklej obsługiwany URL i przeanalizuj go przed wybraniem jakości oraz formatu. Dodaj wybrane pozycje do wspólnej kolejki. Grupy playlist można rozwijać i zwijać, a zakończone nagrania pozostają dostępne w Historii." },
+      { "id": "live", "title": "LIVE", "body": "Dodaj adres obsługiwanej transmisji, sprawdź opcje nagrania i uruchom je lub zaplanuj. Zakończ nagranie akcją zatrzymania i zapisania. Sam podgląd lub analiza metadanych nie rozpoczyna nagrywania." },
+      { "id": "batch", "title": "Batch Import i Organizator", "body": "Importuj listy URL w formacie TXT, CSV lub JSON, sprawdź duplikaty i błędy oraz przypisz foldery docelowe przed dodaniem do kolejki. Aby uporządkować istniejące nagrania, wybierz pasującą listę URL i folder źródłowy, przejrzyj plan bez przenoszenia, a potem potwierdź zweryfikowane pozycje. Zachowuj nagrania razem z sąsiednimi plikami JSON i dodatkowymi metadanymi." },
+      { "id": "settings", "title": "Ustawienia i aktualizacje", "body": "Wyszukaj konkretną opcję lub wybierz kategorię ustawień. Classic i Modern korzystają z tych samych zapisanych preferencji. Osobno sprawdź automatyczne wyszukiwanie i instalowanie aktualizacji; instalacja przy starcie wymaga oddzielnego włączenia." },
+      { "id": "diagnostics", "title": "Diagnostyka i dokumentacja", "body": "Zgłaszając problem, podaj wersję aplikacji, interfejs, język, skalę tekstu i kroki odtworzenia. Przed udostępnieniem sprawdź logi: adresy źródeł i lokalne ścieżki mogą być prywatne. Przycisk dokumentacji otwiera oficjalne repozytorium w przeglądarce." }
+    ]
+  }
+}

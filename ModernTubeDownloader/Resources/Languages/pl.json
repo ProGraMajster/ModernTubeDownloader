@@ -1397,5 +1397,21 @@
   "RemoteWeb.browserLanguage": "Język przeglądarki",
   "History.UnavailableTitle": "Nie udało się wczytać Historii",
   "History.UnavailableBody": "Oryginalny plik historii został zachowany. Sprawdź dostęp lub przywróć poprawną kopię zapasową i uruchom aplikację ponownie. Zapisy Historii oraz organizowanie plików są zablokowane do czasu bezpiecznego odczytu.",
-  "Updates.StartupAbortBlocked": "Nie udało się bezpiecznie zatrzymać aktualizatora. Uruchomienie pobierania i normalne zamknięcie aplikacji są zablokowane. Rozwiąż problem oczekującego procesu aktualizatora i sprawdź dziennik przed kontynuowaniem."
+  "Updates.StartupAbortBlocked": "Nie udało się bezpiecznie zatrzymać aktualizatora. Uruchomienie pobierania i normalne zamknięcie aplikacji są zablokowane. Rozwiąż problem oczekującego procesu aktualizatora i sprawdź dziennik przed kontynuowaniem.",
+  "Settings.SearchResults": "Pasujące ustawienia: {0}",
+  "Settings.SearchLocation": "{0} · {1}",
+  "Settings.SearchClear": "Wyczyść wyszukiwanie",
+  "Settings.SearchResultPosition": "{0}–{1} z {2}",
+  "Experience.InstalledVersion": "Zainstalowana wersja: {0}",
+  "Experience.LocalNotes": "Źródło: sprawdzone informacje dołączone do tej aplikacji. Dostępne offline.",
+  "Experience.EnglishNotesFallback": "Opis zmian jest wyświetlany po angielsku; tłumaczenie dla wybranego języka nie zostało dołączone.",
+  "Experience.NoLocalNotes": "Do zainstalowanej wersji {0} nie dołączono opisu zmian. Nie oznacza to, że ta wersja nie zawiera zmian.",
+  "Experience.ExactReleaseNotes": "Oficjalny opis wersji v{0}",
+  "Help.Introduction": "Wybierz temat i przejdź do odpowiednich narzędzi.",
+  "Help.EnglishContentFallback": "Tematy pomocy są wyświetlane po angielsku; tłumaczenie dla wybranego języka nie zostało dołączone.",
+  "Settings.SearchSound": "Dźwięk powiadomień",
+  "Settings.SearchNotificationPresentation": "Sposób wyświetlania powiadomień",
+  "Settings.SearchAuthenticationSource": "Źródło uwierzytelniania",
+  "Settings.SearchBrowser": "Przeglądarka do synchronizacji",
+  "Settings.SearchExtensionId": "Identyfikator rozszerzenia przeglądarki"
 }

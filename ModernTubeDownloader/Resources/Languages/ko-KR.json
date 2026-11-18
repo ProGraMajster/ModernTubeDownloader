@@ -1397,5 +1397,21 @@
   "RemoteWeb.browserLanguage": "한국어 (Korean)",
   "History.UnavailableTitle": "역사는 적재될 수 없었습니다",
   "History.UnavailableBody": "원래의 역사 파일은 보존되었습니다. 액세스 또는 유효한 백업을 복원, 다음 다시 시작. 역사 쓰기 및 파일 조직은 안전하게 읽을 수 때까지 차단됩니다.",
-  "Updates.StartupAbortBlocked": "업데이터를 안전하게 중지하지 못했습니다. 다운로드 시작과 애플리케이션의 정상 종료가 차단되었습니다. 계속하기 전에 대기 중인 업데이터 프로세스 문제를 해결하고 로그를 확인하세요."
+  "Updates.StartupAbortBlocked": "업데이터를 안전하게 중지하지 못했습니다. 다운로드 시작과 애플리케이션의 정상 종료가 차단되었습니다. 계속하기 전에 대기 중인 업데이터 프로세스 문제를 해결하고 로그를 확인하세요.",
+  "Settings.SearchResults": "Matching settings: {0}",
+  "Settings.SearchLocation": "{0} · {1}",
+  "Settings.SearchClear": "Clear search",
+  "Settings.SearchResultPosition": "{0}–{1} of {2}",
+  "Experience.InstalledVersion": "Installed version: {0}",
+  "Experience.LocalNotes": "Source: reviewed notes bundled with this application. Available offline.",
+  "Experience.EnglishNotesFallback": "Release-note content is shown in English; a translation for the selected language is not bundled.",
+  "Experience.NoLocalNotes": "No notes are bundled for installed version {0}. This does not mean that this version contains no changes.",
+  "Experience.ExactReleaseNotes": "Official notes for v{0}",
+  "Help.Introduction": "Find the right workflow and open its existing tools.",
+  "Help.EnglishContentFallback": "Help topics are shown in English; a translation for the selected language is not bundled.",
+  "Settings.SearchSound": "Notification sound",
+  "Settings.SearchNotificationPresentation": "Notification presentation",
+  "Settings.SearchAuthenticationSource": "Authentication source",
+  "Settings.SearchBrowser": "Browser for synchronization",
+  "Settings.SearchExtensionId": "Browser extension identifier"
 }

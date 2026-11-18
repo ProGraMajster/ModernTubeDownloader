@@ -1397,5 +1397,21 @@
   "RemoteWeb.browserLanguage": "浏览器语言",
   "History.UnavailableTitle": "无法装入历史",
   "History.UnavailableBody": "原历史档案保存完好.检查访问或恢复有效的备份, 然后重新启动 。历史写作和文件组织被屏蔽,直到可以安全阅读.",
-  "Updates.StartupAbortBlocked": "无法安全停止更新程序。下载启动和应用程序的正常退出均已被阻止。继续之前，请先解决尚未结束的更新程序进程问题，并检查日志。"
+  "Updates.StartupAbortBlocked": "无法安全停止更新程序。下载启动和应用程序的正常退出均已被阻止。继续之前，请先解决尚未结束的更新程序进程问题，并检查日志。",
+  "Settings.SearchResults": "Matching settings: {0}",
+  "Settings.SearchLocation": "{0} · {1}",
+  "Settings.SearchClear": "Clear search",
+  "Settings.SearchResultPosition": "{0}–{1} of {2}",
+  "Experience.InstalledVersion": "Installed version: {0}",
+  "Experience.LocalNotes": "Source: reviewed notes bundled with this application. Available offline.",
+  "Experience.EnglishNotesFallback": "Release-note content is shown in English; a translation for the selected language is not bundled.",
+  "Experience.NoLocalNotes": "No notes are bundled for installed version {0}. This does not mean that this version contains no changes.",
+  "Experience.ExactReleaseNotes": "Official notes for v{0}",
+  "Help.Introduction": "Find the right workflow and open its existing tools.",
+  "Help.EnglishContentFallback": "Help topics are shown in English; a translation for the selected language is not bundled.",
+  "Settings.SearchSound": "Notification sound",
+  "Settings.SearchNotificationPresentation": "Notification presentation",
+  "Settings.SearchAuthenticationSource": "Authentication source",
+  "Settings.SearchBrowser": "Browser for synchronization",
+  "Settings.SearchExtensionId": "Browser extension identifier"
 }

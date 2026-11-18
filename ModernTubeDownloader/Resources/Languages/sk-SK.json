@@ -1397,5 +1397,21 @@
   "RemoteWeb.browserLanguage": "Prehliadač",
   "History.UnavailableTitle": "História nemohla byť načítaná",
   "History.UnavailableBody": "Pôvodný súbor histórie bol zachovaný. Skontrolovať prístup alebo obnoviť platnú zálohu a potom reštartovať. História písania a organizácia súborov sú blokované, kým ich nebude možné čítať bezpečne.",
-  "Updates.StartupAbortBlocked": "Aktualizačný program sa nepodarilo bezpečne zastaviť. Spustenie sťahovania a bežné ukončenie aplikácie sú zablokované. Pred pokračovaním vyriešte problém s dosiaľ bežiacim procesom aktualizačného programu a skontrolujte denník."
+  "Updates.StartupAbortBlocked": "Aktualizačný program sa nepodarilo bezpečne zastaviť. Spustenie sťahovania a bežné ukončenie aplikácie sú zablokované. Pred pokračovaním vyriešte problém s dosiaľ bežiacim procesom aktualizačného programu a skontrolujte denník.",
+  "Settings.SearchResults": "Matching settings: {0}",
+  "Settings.SearchLocation": "{0} · {1}",
+  "Settings.SearchClear": "Clear search",
+  "Settings.SearchResultPosition": "{0}–{1} of {2}",
+  "Experience.InstalledVersion": "Installed version: {0}",
+  "Experience.LocalNotes": "Source: reviewed notes bundled with this application. Available offline.",
+  "Experience.EnglishNotesFallback": "Release-note content is shown in English; a translation for the selected language is not bundled.",
+  "Experience.NoLocalNotes": "No notes are bundled for installed version {0}. This does not mean that this version contains no changes.",
+  "Experience.ExactReleaseNotes": "Official notes for v{0}",
+  "Help.Introduction": "Find the right workflow and open its existing tools.",
+  "Help.EnglishContentFallback": "Help topics are shown in English; a translation for the selected language is not bundled.",
+  "Settings.SearchSound": "Notification sound",
+  "Settings.SearchNotificationPresentation": "Notification presentation",
+  "Settings.SearchAuthenticationSource": "Authentication source",
+  "Settings.SearchBrowser": "Browser for synchronization",
+  "Settings.SearchExtensionId": "Browser extension identifier"
 }

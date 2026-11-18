@@ -28,6 +28,7 @@ internal sealed class AppVectorIcon : UserControl
         Width = size;
         Height = size;
         Style.BackgroundColor = SKColors.Transparent;
+        AppUi.PreservePresentationBackground(this);
         Build(kind, size / 24f);
         foreach (var (shape, _) in shapes)
         {
@@ -216,6 +217,7 @@ internal sealed class AppVectorIcon : UserControl
     private void AddShape(Shape shape, bool fill = false)
     {
         shape.Style.BackgroundColor = SKColors.Transparent;
+        AppUi.PreservePresentationBackground(shape);
         shapes.Add((shape, fill));
     }
 

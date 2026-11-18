@@ -55,7 +55,7 @@ internal sealed partial class HistoryView : UserControl
 
         searchPanel = new Panel();
         AppUi.Card(searchPanel);
-        search = new TextBox { Height = 44, AccessibleAutomationId = "HistorySearch" };
+        search = new AppThemeTextBox { Height = 44, AccessibleAutomationId = "HistorySearch" };
         AppUi.Input(search);
         search.TextChanged += SearchChanged;
         searchPanel.Controls.Add(search);

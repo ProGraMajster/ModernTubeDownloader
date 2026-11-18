@@ -30,7 +30,7 @@ internal sealed partial class LiveView
             button.Click += (_, _) => { liveSource = source; ResetLivePage(); };
             liveSources.Controls.Add(button);
         }
-        liveSearch = new TextBox { AccessibleAutomationId = "LiveSearch" }; AppUi.Input(liveSearch);
+        liveSearch = new AppThemeTextBox { AccessibleAutomationId = "LiveSearch" }; AppUi.Input(liveSearch);
         liveSearch.TextChanged += (_, _) => ResetLivePage();
         liveSort = new ComboBox { AccessibleAutomationId = "LiveSort" }; AppUi.Input(liveSort);
         foreach (var key in new[] { "Live.SortNewest", "Live.SortOldest", "Dashboard.Title" }) liveSort.Items.Add(text[key]);

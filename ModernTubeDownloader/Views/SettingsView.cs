@@ -39,7 +39,7 @@ internal sealed partial class SettingsView : UserControl
     private readonly ToolTip compactTips = new();
     private readonly Dictionary<Panel, AppVectorIcon> overviewIcons = [];
     private readonly Dictionary<string, SettingsOverviewCard> overviewSummaries = [];
-    private readonly TextBox categorySearch = new() { AccessibleAutomationId = "SettingsCategorySearch", Visible = false };
+    private readonly TextBox categorySearch = new AppThemeTextBox() { AccessibleAutomationId = "SettingsCategorySearch", Visible = false };
     public void SetDashboard(bool value)
     {
         if (value && !dashboard) { restoreClassicTypography = AppTypography.CaptureRecipes(this); restoreClassicLabels = DashboardVisual.CaptureLabels(this); }
@@ -417,7 +417,7 @@ internal sealed partial class SettingsView : UserControl
 
         advancedCard = CreateSection(502, "Settings.Advanced", "Settings.AdvancedDescription");
         AddRowLabel(advancedCard, "Settings.CustomArguments", 96);
-        customArguments = new TextBox { MultiLine = true };
+        customArguments = new AppThemeTextBox { MultiLine = true };
         AppUi.Input(customArguments);
         advancedCard.Controls.Add(customArguments);
         customArgumentsHint = AppUi.Muted();
@@ -474,16 +474,7 @@ internal sealed partial class SettingsView : UserControl
             var button = new DashboardButton { AccessibleAutomationId = "SettingsCategory" + name, Width = 160, Height = 36, Margin = new Padding(0, 0, 8, 8) };
             AppUi.Secondary(button); button.Click += (_, _) => ShowCategory(name); categories.Controls.Add(button); categoryButtons[name] = button;
         }
-        AppUi.Input(categorySearch);
-        categorySearch.TextChanged += (_, _) => { FilterSettingsCategories(); UpdateLayout(); };
-        categorySearch.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode != Keys.Enter || !dashboard) return;
-            var matches = categoryButtons.Where(pair => pair.Value.Visible).ToArray();
-            if (matches.Length != 1) return;
-            e.Handled = e.SuppressKeyPress = true; ShowCategory(matches[0].Key);
-        };
-        categoryEmpty.AccessibleAutomationId = "SettingsSearchEmpty";
+        InitializeSettingsSearch();
         AppUi.BindBackground(categories); Controls.AddRange([header, categories, scroll, categorySearch, categoryEmpty]);
         SizeChanged += ViewSizeChanged;
         VisibleChanged += ViewSizeChanged;
@@ -508,6 +499,7 @@ internal sealed partial class SettingsView : UserControl
     }
     internal void ShowCategory(string category)
     {
+        ClearSettingsSearchNavigation();
         currentCategory = category;
         scroll.VerticalScrollProperties.Value = 0;
         foreach (var (card, name) in cardCategories) card.Visible = category == "All" || category == name;
@@ -541,7 +533,7 @@ internal sealed partial class SettingsView : UserControl
 
     private TextBox CreateTextBox(Panel panel)
     {
-        var control = new TextBox { Height = 36 };
+        var control = new AppThemeTextBox { Height = 36 };
         AppUi.Input(control);
         control.TextChanged += (_, _) => compactTips.SetToolTip(control, control.Text);
         panel.Controls.Add(control);
@@ -691,6 +683,7 @@ internal sealed partial class SettingsView : UserControl
         categoryEmpty.Visible = dashboard && !categoryButtons.Values.Any(button => button.Visible);
         categoryEmpty.Text = text["Settings.NoMatches"];
         categoryEmpty.Bounds = categoryEmpty.Visible ? categories.Bounds : System.Drawing.Rectangle.Empty;
+        LayoutSettingsSearch();
         var contentWidth = dashboard ? Math.Min(scroll.DisplayRectangle.Width, scroll.ClientSize.Width) : scroll.ClientSize.Width;
         // Reparenting the shared page during a shell swap briefly gives the
         // viewport zero width. Wait for its real allocation before laying out cards.
@@ -1690,6 +1683,7 @@ internal sealed partial class SettingsView : UserControl
         if (disposing)
         {
             remoteDisposed = true;
+            DisposeSettingsSearch();
             compactTips.Dispose(); typographyLayout.Dispose();
             remoteClock.Dispose();
             services.Tools.Changed -= ToolsChanged;

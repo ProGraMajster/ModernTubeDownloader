@@ -8,7 +8,9 @@ namespace ModernTubeDownloader.Views;
 internal sealed class WhatsNewForm : Form
 {
     private readonly AppServices services;
-    private readonly Label heading = AppUi.Heading("", 22), version = AppUi.Muted(), intro = AppUi.Muted(), notice = AppUi.Muted(), error = AppUi.Muted();
+    private readonly Label heading = AppUi.Heading("", 22), version = AppUi.Muted(), intro = AppUi.Muted(), notice = AppUi.Muted(), provenance = AppUi.Muted(), fallback = AppUi.Muted(), error = AppUi.Muted();
+    private readonly InstalledReleaseNotes? installedNotes;
+    private readonly Uri? officialUrl;
     private readonly Panel header = new();
     private readonly AppVectorIcon headerIcon = new(AppIconKind.Info, 36, AppThemeTokens.Info);
     private readonly ExperienceScrollPanel body = new() { AutoScroll = true };
@@ -25,21 +27,28 @@ internal sealed class WhatsNewForm : Form
         AppBranding.Apply(this); Size = new(1040, 820); MinimumSize = new(720, 560);
         Controls.Add(surface); ExperienceVisual.Surface(surface); ExperienceVisual.Surface(body); AppTypography.SetDashboardPresentation(surface, true);
         ExperienceVisual.ApplyWindow(this); DownloadsVisual.Card(header);
-        heading.Text = Text; version.Text = "v" + services.Experience.Version; intro.Text = text["Experience.NewsIntroduction"];
+        installedNotes = ReleaseNotesCatalog.ForInstalled(services.Experience.Version, text.Language);
+        officialUrl = ReleaseNotesCatalog.OfficialReleaseUrl(services.Experience.Version);
+        heading.Text = Text; version.Text = text.Get("Experience.InstalledVersion", "v" + services.Experience.Version); intro.Text = text["Experience.NewsIntroduction"];
         notice.Text = text[services.Experience.IsCandidate ? "Experience.Candidate" : "Experience.Release"];
-        heading.Multiline = version.Multiline = intro.Multiline = notice.Multiline = error.Multiline = true; AppUi.BindForeground(error, AppThemeTokens.Error);
+        provenance.Text = installedNotes is null ? text.Get("Experience.NoLocalNotes", services.Experience.Version) : text["Experience.LocalNotes"];
+        fallback.Text = installedNotes?.IsLanguageFallback == true ? text["Experience.EnglishNotesFallback"] : "";
+        provenance.AccessibleAutomationId = "WhatsNewProvenance"; fallback.AccessibleAutomationId = "WhatsNewLanguageFallback";
+        heading.Multiline = version.Multiline = intro.Multiline = notice.Multiline = provenance.Multiline = fallback.Multiline = error.Multiline = true; AppUi.BindForeground(error, AppThemeTokens.Error);
         AppUi.BindForeground(version, AppThemeTokens.Info); AppTypography.Bind(version, 10, FontStyle.Bold);
-        surface.Controls.AddRange([body, error, later, done]); body.Controls.Add(header); header.Controls.AddRange([headerIcon, heading, version, intro, notice]);
-        for (var i = 0; i < ReleaseNotesCatalog.Cards.Length; i++)
+        surface.Controls.AddRange([body, error, later, done]); body.Controls.Add(header); header.Controls.AddRange([headerIcon, heading, version, intro, notice, provenance, fallback]);
+        foreach (var section in installedNotes?.Sections ?? [])
         {
-            var key = ReleaseNotesCatalog.Cards[i]; var card = new Panel(); DownloadsVisual.Card(card);
-            var title = AppUi.Heading(text[key], 14); var description = AppUi.Muted(text[key + "Body"]); description.Multiline = true;
-            var icon = new AppVectorIcon(new[] { AppIconKind.Queue, AppIconKind.History, AppIconKind.Settings }[i], 28, AppThemeTokens.Info);
+            var card = new Panel { AccessibleAutomationId = "WhatsNewSection-" + section.Category }; DownloadsVisual.Card(card);
+            var title = AppUi.Heading(section.Title, 14); var description = AppUi.Muted(string.Join("\n\n", section.Items.Select(item => "• " + item))); description.Multiline = true;
+            var kind = section.Category switch { "new" => AppIconKind.Plus, "improved" => AppIconKind.Queue, "fixed" => AppIconKind.Check, _ => AppIconKind.Info };
+            var icon = new AppVectorIcon(kind, 28, AppThemeTokens.Info);
             card.Controls.AddRange([icon, title, description]); body.Controls.Add(card); cards.Add((card, title, description, icon));
             AppTypography.Bind(description, 10.5f);
         }
         foreach (var (button, key, id) in new[] { (appearance, "Experience.Appearance", "WhatsNewAppearance"), (updates, "Experience.UpdatePreferences", "WhatsNewUpdates"), (releases, "Experience.ReleaseNotes", "WhatsNewReleases"), (done, "Experience.GotIt", "WhatsNewDone"), (later, "Experience.Later", "WhatsNewLater") })
         { button.Text = text[key]; button.AccessibleAutomationId = id; ExperienceVisual.Action(button, button == done); }
+        releases.Text = text.Get("Experience.ExactReleaseNotes", services.Experience.Version); releases.Enabled = officialUrl is not null;
         body.Controls.AddRange([appearance, updates, releases]);
         appearance.Click += async (_, _) => await AcknowledgeAsync("Personalization");
         updates.Click += async (_, _) => await AcknowledgeAsync("Updates");
@@ -47,7 +56,8 @@ internal sealed class WhatsNewForm : Form
         later.Click += (_, _) => Close(); // Deliberately leave acknowledgement unchanged, exactly like closing with X.
         releases.Click += (_, _) =>
         {
-            try { Process.Start(new ProcessStartInfo(ReleaseNotesCatalog.OfficialUrl) { UseShellExecute = true }); }
+            if (officialUrl is null) return;
+            try { Process.Start(new ProcessStartInfo(officialUrl.AbsoluteUri) { UseShellExecute = true }); }
             catch (Exception ex) { services.Logger.Error("Opening official release notes failed.", ex); error.Text = text["Experience.LinkError"]; LayoutPage(); }
         };
         Shown += (_, _) => shown = true;
@@ -60,6 +70,8 @@ internal sealed class WhatsNewForm : Form
     private async Task AcknowledgeAsync(string? destination)
     {
         if (!shown || acknowledging) return;
+        // A missing exact record is explanatory UI, never another version's notes.
+        if (installedNotes is null) { Destination = destination; closeAllowed = true; Close(); return; }
         acknowledging = true; done.Enabled = later.Enabled = appearance.Enabled = updates.Enabled = false;
         try { await services.Experience.AcknowledgeWhatsNewAsync(); Destination = destination; closeAllowed = true; Close(); }
         catch (Exception ex) { services.Logger.Error("Release-note acknowledgement could not be saved.", ex); error.Text = services.Localization["Experience.SaveError"]; LayoutPage(); }
@@ -101,13 +113,16 @@ internal sealed class WhatsNewForm : Form
         heading.SetBounds(70, version.Bottom + 6, headerTextWidth, DashboardVisual.LabelHeight(heading, headerTextWidth, 8));
         intro.SetBounds(18, heading.Bottom + 12, Math.Max(1, width - 36), DashboardVisual.LabelHeight(intro, Math.Max(1, width - 36), 10));
         notice.SetBounds(18, intro.Bottom + 10, Math.Max(1, width - 36), DashboardVisual.LabelHeight(notice, Math.Max(1, width - 36), 16));
-        header.SetBounds(viewport.X, viewport.Y, width, notice.Bottom + 18);
+        provenance.SetBounds(18, notice.Bottom + 10, Math.Max(1, width - 36), DashboardVisual.LabelHeight(provenance, Math.Max(1, width - 36), 16));
+        fallback.SetBounds(18, provenance.Bottom + (fallback.Text.Length > 0 ? 8 : 0), Math.Max(1, width - 36),
+            fallback.Text.Length > 0 ? DashboardVisual.LabelHeight(fallback, Math.Max(1, width - 36), 16) : 0);
+        header.SetBounds(viewport.X, viewport.Y, width, fallback.Bottom + 18);
         var y = header.Bottom + 14;
         foreach (var (panel, title, description, icon) in cards)
         {
             icon.SetBounds(16, 18, 28, 28); title.Multiline = true;
             title.SetBounds(56, 14, Math.Max(1, width - 72), DashboardVisual.LabelHeight(title, Math.Max(1, width - 72), 3));
-            description.SetBounds(56, title.Bottom + 8, Math.Max(1, width - 72), DashboardVisual.LabelHeight(description, Math.Max(1, width - 72), 30));
+            description.SetBounds(56, title.Bottom + 8, Math.Max(1, width - 72), DashboardVisual.LabelHeight(description, Math.Max(1, width - 72), 120));
             panel.SetBounds(viewport.X, y, width, description.Bottom + 18); y = panel.Bottom + 12;
         }
         var x = viewport.X; var line = AppTypography.TextHeight(42);

@@ -1397,5 +1397,21 @@
   "RemoteWeb.browserLanguage": "Browser language",
   "History.UnavailableTitle": "History could not be loaded",
   "History.UnavailableBody": "The original history file has been preserved. Check access or restore a valid backup, then restart. History writes and file organization are blocked until it can be read safely.",
-  "Updates.StartupAbortBlocked": "The updater could not be stopped safely. Download startup and normal application exit are blocked. Resolve the pending updater process and inspect the log before continuing."
+  "Updates.StartupAbortBlocked": "The updater could not be stopped safely. Download startup and normal application exit are blocked. Resolve the pending updater process and inspect the log before continuing.",
+  "Settings.SearchResults": "Matching settings: {0}",
+  "Settings.SearchLocation": "{0} · {1}",
+  "Settings.SearchClear": "Clear search",
+  "Settings.SearchResultPosition": "{0}–{1} of {2}",
+  "Experience.InstalledVersion": "Installed version: {0}",
+  "Experience.LocalNotes": "Source: reviewed notes bundled with this application. Available offline.",
+  "Experience.EnglishNotesFallback": "Release-note content is shown in English; a translation for the selected language is not bundled.",
+  "Experience.NoLocalNotes": "No notes are bundled for installed version {0}. This does not mean that this version contains no changes.",
+  "Experience.ExactReleaseNotes": "Official notes for v{0}",
+  "Help.Introduction": "Find the right workflow and open its existing tools.",
+  "Help.EnglishContentFallback": "Help topics are shown in English; a translation for the selected language is not bundled.",
+  "Settings.SearchSound": "Notification sound",
+  "Settings.SearchNotificationPresentation": "Notification presentation",
+  "Settings.SearchAuthenticationSource": "Authentication source",
+  "Settings.SearchBrowser": "Browser for synchronization",
+  "Settings.SearchExtensionId": "Browser extension identifier"
 }

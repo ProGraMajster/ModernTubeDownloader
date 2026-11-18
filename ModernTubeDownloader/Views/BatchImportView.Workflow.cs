@@ -11,8 +11,8 @@ internal sealed partial class BatchImportView
     private readonly Panel destinationCard = new() { AccessibleAutomationId = "BatchDestinationCard" };
     private readonly ComboBox workflowMode = new() { AccessibleAutomationId = "BatchWorkflowMode" };
     private readonly ComboBox sessionChoice = new() { AccessibleAutomationId = "BatchSessionChoice" };
-    private readonly TextBox destinationRoot = new() { AccessibleAutomationId = "BatchDestinationRoot" };
-    private readonly TextBox listName = new() { AccessibleAutomationId = "BatchListName" };
+    private readonly TextBox destinationRoot = new AppThemeTextBox() { AccessibleAutomationId = "BatchDestinationRoot" };
+    private readonly TextBox listName = new AppThemeTextBox() { AccessibleAutomationId = "BatchListName" };
     private readonly CheckBox listSubfolder = new() { AccessibleAutomationId = "BatchListSubfolder" };
     private readonly Button destinationBrowse = new DashboardButton { AccessibleAutomationId = "BatchDestinationBrowse" };
     private readonly Button destinationSave = new DashboardButton { AccessibleAutomationId = "BatchDestinationSave" };

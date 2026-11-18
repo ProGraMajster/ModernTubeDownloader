@@ -8,7 +8,7 @@ internal sealed partial class DashboardInspector
     private readonly Panel recordStatus = new();
     private readonly AppVectorIcon recordStatusIcon = new(AppIconKind.Check, 16);
     private readonly Label recordStatusLabel = AppUi.Muted(), recordPathLabel = AppUi.Muted();
-    private readonly TextBox recordPath = new() { ReadOnly = true, AccessibleAutomationId = "InspectorOutputPath" };
+    private readonly TextBox recordPath = new AppThemeTextBox() { ReadOnly = true, AccessibleAutomationId = "InspectorOutputPath" };
     private string? recordStatusKey;
 
     private void CreateRecordDetails()
