@@ -85,7 +85,69 @@ function Save-ProcessOutput($Child) {
     [IO.File]::WriteAllText(($Child.prefix + '.stderr.txt'), $Child.stderr.GetAwaiter().GetResult(), $utf8)
     Save-Json ($Child.prefix + '.exit.json') @{ exitCode = $Child.process.ExitCode; observedUtc = [DateTime]::UtcNow.ToString('O') }
 }
+function Initialize-OwnedProcessIdentity {
+    if ('PublishedHelperProcessIdentity.Native' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+namespace PublishedHelperProcessIdentity
+{
+    public sealed class Snapshot
+    {
+        public int Pid { get; set; }
+        public long StartUtcTicks { get; set; }
+        public string ImagePath { get; set; }
+    }
+
+    public static class Native
+    {
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        private static extern uint GetProcessId(SafeProcessHandle process);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetProcessTimes(SafeProcessHandle process,
+            out long creation, out long exit, out long kernel, out long user);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryFullProcessImageNameW(SafeProcessHandle process,
+            uint flags, StringBuilder imagePath, ref uint size);
+
+        public static Snapshot Read(SafeProcessHandle process)
+        {
+            uint pid = GetProcessId(process);
+            if (pid == 0) throw new Win32Exception(Marshal.GetLastWin32Error(), "GetProcessId failed.");
+            long creation, exit, kernel, user;
+            if (!GetProcessTimes(process, out creation, out exit, out kernel, out user))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "GetProcessTimes failed.");
+            uint size = 32768;
+            var imagePath = new StringBuilder((int)size);
+            if (!QueryFullProcessImageNameW(process, 0, imagePath, ref size))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "QueryFullProcessImageNameW failed.");
+            return new Snapshot
+            {
+                Pid = checked((int)pid),
+                StartUtcTicks = DateTime.FromFileTimeUtc(creation).Ticks,
+                ImagePath = imagePath.ToString()
+            };
+        }
+    }
+}
+'@
+}
+function Get-OwnedProcessIdentity([Diagnostics.Process]$Process) {
+    # The handle belongs to Process.Start and remains bound to that kernel process
+    # object. Image queries may fail after exit. MainModule/Process.Path can expose ntdll.dll
+    # while the new process loader is still initializing its module list.
+    return [PublishedHelperProcessIdentity.Native]::Read($Process.SafeHandle)
+}
 function Start-OwnedProcess([string]$Executable, [string[]]$Arguments, [string]$WorkingDirectory, [string]$Prefix) {
+    Initialize-OwnedProcessIdentity
     $expectedPath = [IO.Path]::GetFullPath($Executable)
     Assert-Condition ([IO.File]::Exists($expectedPath)) "Executable missing: $expectedPath"
     $start = [Diagnostics.ProcessStartInfo]::new($expectedPath)
@@ -101,7 +163,7 @@ function Start-OwnedProcess([string]$Executable, [string[]]$Arguments, [string]$
     Assert-Condition ($childProcess.Start()) "Process did not start: $expectedPath"
     $child = [pscustomobject]@{
         process = $childProcess; prefix = $Prefix
-        identity = [pscustomobject]@{ pid = $childProcess.Id; startUtcTicks = $null; path = $expectedPath; observedPath = $null }
+        identity = [pscustomobject]@{ pid = $childProcess.Id; startUtcTicks = $null; path = $expectedPath; observedPath = $null; imageQuery = 'QueryFullProcessImageNameW'; imageQueryState = 'Pending'; imageQueryError = $null }
         stdout = $childProcess.StandardOutput.ReadToEndAsync()
         stderr = $childProcess.StandardError.ReadToEndAsync()
     }
@@ -109,20 +171,21 @@ function Start-OwnedProcess([string]$Executable, [string[]]$Arguments, [string]$
     $script:caseChildren.Add($child)
     try {
         $child.identity.startUtcTicks = $childProcess.StartTime.ToUniversalTime().Ticks
-        $observed = Get-Process -Id $childProcess.Id -ErrorAction SilentlyContinue
+        $observed = $null
+        try { $observed = Get-OwnedProcessIdentity $childProcess }
+        catch {
+            # A negative helper can exit before its image is queried. Preserve
+            # that completed-child boundary; no termination right is granted.
+            if (-not $childProcess.HasExited) { throw }
+            $child.identity.imageQueryState = 'ExitedBeforeImageQuery'
+            $child.identity.imageQueryError = $_.Exception.Message
+        }
         if ($observed) {
-            try {
-                # A negative NativeHost probe can finish between the lookup and
-                # querying its path. Completed children need no termination right.
-                if (-not $childProcess.HasExited) {
-                    $actualPath = $observed.Path
-                    if ($actualPath) {
-                        $child.identity.observedPath = [IO.Path]::GetFullPath($actualPath)
-                        Assert-Condition ($child.identity.observedPath -ieq $expectedPath) 'Started process executable identity mismatch.'
-                    }
-                    Assert-Condition ($observed.StartTime.ToUniversalTime().Ticks -eq $child.identity.startUtcTicks) 'Started process timestamp identity mismatch.'
-                }
-            } finally { $observed.Dispose() }
+            $child.identity.observedPath = [IO.Path]::GetFullPath($observed.ImagePath)
+            Assert-Condition ($observed.Pid -eq $child.identity.pid) 'Started process PID identity mismatch.'
+            Assert-Condition ($child.identity.observedPath -ieq $expectedPath) 'Started process executable identity mismatch.'
+            Assert-Condition ($observed.StartUtcTicks -eq $child.identity.startUtcTicks) 'Started process timestamp identity mismatch.'
+            $child.identity.imageQueryState = 'Verified'
         }
     } finally { Save-Json ($Prefix + '.identity.json') $child.identity }
     return $child
@@ -133,21 +196,24 @@ function Wait-OwnedExit($Child) {
 }
 function Stop-OwnedIfRunning($Child) {
     if ($Child.process.HasExited) { Save-ProcessOutput $Child; return }
-    # Never terminate by PID alone, enumerate other processes, or kill a process
-    # tree. Missing/changed identity fails closed and is a qualification failure.
-    $current = Get-Process -Id $Child.identity.pid -ErrorAction SilentlyContinue
-    if (-not $current) { Wait-OwnedExit $Child; return }
-    try {
-        $observedPath = $current.Path
-        Assert-Condition ($null -ne $Child.identity.startUtcTicks -and $observedPath -and
-            $current.StartTime.ToUniversalTime().Ticks -eq $Child.identity.startUtcTicks -and
-            [IO.Path]::GetFullPath($observedPath) -ieq $Child.identity.path) 'Cannot prove ownership; refusing to stop the process.'
-        $current.Kill()
-        Assert-Condition ($Child.process.WaitForExit(5000)) 'Owned helper did not exit after termination.'
-        Save-Json ($Child.prefix + '.terminated.json') @{ reason = 'Fixture cleanup after an unfinished helper'; identity = $Child.identity }
+    # Read and terminate through the original bound handle, never reopen by PID,
+    # enumerate other processes, or kill a process tree. Fail closed on mismatch.
+    try { $current = Get-OwnedProcessIdentity $Child.process }
+    catch {
+        if (-not $Child.process.HasExited) { throw }
         Save-ProcessOutput $Child
-        throw 'An owned process was still running at case completion and required termination.'
-    } finally { $current.Dispose() }
+        return
+    }
+    Assert-Condition ($Child.identity.imageQueryState -eq 'Verified' -and
+        $null -ne $Child.identity.startUtcTicks -and $current.ImagePath -and
+        $current.Pid -eq $Child.identity.pid -and
+        $current.StartUtcTicks -eq $Child.identity.startUtcTicks -and
+        [IO.Path]::GetFullPath($current.ImagePath) -ieq $Child.identity.path) 'Cannot prove ownership; refusing to stop the process.'
+    $Child.process.Kill()
+    Assert-Condition ($Child.process.WaitForExit(5000)) 'Owned helper did not exit after termination.'
+    Save-Json ($Child.prefix + '.terminated.json') @{ reason = 'Fixture cleanup after an unfinished helper'; identity = $Child.identity }
+    Save-ProcessOutput $Child
+    throw 'An owned process was still running at case completion and required termination.'
 }
 function New-GatedParent([string]$CaseDirectory) {
     $ready = Join-Path $CaseDirectory 'parent.ready'

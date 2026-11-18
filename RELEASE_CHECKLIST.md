@@ -1,119 +1,190 @@
 # ModernTubeDownloader release checklist
 
-## 1.3.0 candidate — final qualification, not publication approval
+## Current follow-up — speed telemetry and Organizer diagnostics, 2026-11-18
 
-Updated 2026-11-17. This section supersedes the historical 1.2.1 checklist **for the
-1.3.0 candidate only**. Prior outcomes below remain historical. Work stays on the
-isolated dashboard branch and Draft PR #3. Main checkout, existing installations,
-profiles, other worktrees and the framework source are outside the test scope.
+Frozen product source: **`5d7536b944d4c34d3540c174f1a41e608948fba8`**.
+**GO for owner manual acceptance; NO-GO for publication.** The older `8d9a3b0` ZIP
+and its full-suite results below predate these speed and Organizer changes;
+they do **not** qualify this source or provide its manual candidate package.
+Earlier sections are retained as historical evidence, including references to
+their then-current candidate. Draft PR #3 remains draft; no merge, tag, release
+or NuGet publication is authorized.
 
-The starting source for this round is `c71a8fdedbe670deee8c69bb41618be359a73ca4`.
-A checked source-review item is not an executed product test. Test results and package
-hashes belong to the exact source recorded in the
-[release readiness ledger](docs/1.3.0-RELEASE-READINESS.md) and
-[scenario matrix](docs/1.3.0-SCENARIO-MATRIX.md); the older `4fd7155` package and CI
-must not qualify this candidate. The current decision is **NO-GO pending the gates
-below**, not an independent authorization to publish.
+`S17` means repository-relative `artifacts/speed-organizer-20261117`.
 
-### Identity, history and publication boundaries
+- [x] Correct current download rate from observed payload-byte deltas and a
+  monotonic clock. Keep completed-job bytes between chart ticks; return to zero
+  during idle. Use explicit binary units, including MiB/s, and localized help
+  distinguishing payload rate from Task Manager network traffic/Mbps.
+- [x] Keep elapsed chart spacing honest; clear stale Downloads history after a
+  hidden-view interval or a missed sampling tick. Do not invent prior transfer
+  bytes from resumed files, loaded queue records or a lone terminal report.
+- [x] Real retained yt-dlp loopback probe reproduces the averaging mismatch:
+  a 12.00 MiB/s recent interval reported 3.72 MiB/s through `progress.speed`.
+  Synthetic transfer bytes are not playable-media or OS-network qualification.
+  Evidence: `S17/SPEED-INVESTIGATION.md` and `speed-local-variable-probe`.
+- [x] **103/103 targeted tests PASS**, then **18/18 final clock/telemetry tests
+  PASS**, zero failed/skipped. These sets overlap; do not add them as 121 unique
+  tests. Evidence: `S17/tests-targeted/targeted.trx` and
+  `S17/tests-transfer-final/transfer-final.trx`.
+- [x] Organizer native workflow PASS after correcting its UI observer:
+  synthetic 122-row list, 59 media/JSON pairs, one match and 58 unrelated pairs;
+  selection/details, paging and unchanged source hashes verified. Earlier
+  failed attempts remain retained. `S17/native-organizer-ui-observer.log`.
+- [x] Downloads native review PASS: five canonical records, FakeTool byte
+  progress/file, admission pause retaining active transfer, durable completion
+  and actual idle **0 B/s**. `S17/native-transfer-idle.log`; screenshots and
+  capture manifest in `S17/native-transfer-final`.
+- [x] Frozen `5d7536b` full local validation: **1486/1486 Debug, 1486/1486 Release,
+  93/93 JavaScript PASS**, zero failed/skipped and zero build warnings/errors;
+  Build-Release exit 0 and **816 package entries**. `S17/final-build-release.log`
+  and `full-validation-summary.json`. Host suspend/resume interrupted Release
+  between November 17 20:46 and November 18 17:33 local time; completed assertions
+  qualify functionality, not elapsed performance or continuous soak.
+  Native power-event evidence remains in `S17/host-power-events.json`.
+- [x] New self-contained candidate ZIP: **144825513 bytes**, SHA256
+  **f643041c4a214ab8dd480f8a03f91e8fd7aa8a711a8637f5e30c9160e00b1d53**;
+  managed DLL **8C3CD93A174A515718A6C085C698618069527A387B86CB6112F4D6BD81253172**.
+  `S17/candidate-final.json`; ZIP in `S17/final-package/release`.
+- [x] New extracted production dashboard **PASS**, external UIA, both shells/all
+  routes, Batch1300/cross-page60, persisted inspector/settings, TextScale125/reset
+  and graceful shutdown. `S17/published-dashboard-final.log`; synthetic QA tools.
+- [x] New empty-profile production journey **3/3 PASS, 42.8505495 seconds** total:
+  real tool provisioning, durable draft/six steps/Modern/What's New/restart,
+  22 History/Downloads actions and three original exit codes 0.
+  `S17/published-experience-final/result.json`. Total time includes provisioning;
+  not a startup benchmark, power-loss or installation test.
+- [x] Published NativeHost/Updater corrected qualification **6/6 PASS**, exit 0:
+  `S17/published-helpers-kernel-image/summary.json` and matching log. Initial
+  **5/6 PASS, 1 FAIL** remains in `S17/published-helpers-final/summary.json`. The locked-DLL
+  fixture failed before updater execution when early-loader `Get-Process.Path`
+  returned an unexpected image identity; an owned child required termination.
+  Kernel-bound `QueryFullProcessImageName` now reads the retained process handle.
+  The 14-record proof retains normal/early-exit and identity-rejection/cleanup
+  checks without delayed retries; original failed qualification is not relabeled.
+- [x] Updated isolated manual launcher pins the new package/DLL and is parser-checked:
+  `S17/Run-Isolated-Candidate.ps1`, `manual-launcher-static-check.json` and
+  `manual-acceptance.md`. **Launcher execution/owner acceptance NOT EXECUTED**;
+  handoff is ready for owner review. `S17/handoff-package-check.json`
+  confirms ZIP/EXE/DLL unchanged after native tests; `S17/screenshots.md` indexes
+  new production setup/What's New/restart and Organizer/Downloads captures.
+- [ ] Both required remote workflows terminal SUCCESS for the final review head:
+  **PENDING**. Earlier green CI is not transferred to this head.
+- [ ] Remaining controlled popup/tooltip, physical 5K/225% and owner acceptance
+  gates remain as documented below. Long soak remains **DEFERRED / NOT EXECUTED**.
 
-- [x] SOURCE REVIEW: central Product/Informational version is `1.3.0-candidate.1`;
-  Assembly/File version is `1.3.0.0`; framework pin remains
-  `7bf58d06d795d7298c86d9bf9471bbfb46852bab`. No promotion or pin change in this review.
-- [x] SOURCE REVIEW: tag-only Release rejects candidate suffixes, requires `v$Version`,
-  and verifies tag commit = checkout HEAD = `GITHUB_SHA`; public-release notes are required.
-  The stable updater accepts only an exact public `vX.Y.Z` release and expected assets;
-  it does not install a candidate from a beta channel. Candidate-to-corresponding-stable
-  comparison uses Product version, independently of Assembly version.
-- [ ] Resolve the current reachable-history privacy/hygiene failure without scanner
-  exclusions, shallow-history concealment or weakening assertions. Preserve original
-  evidence outside Git; obtain owner approval before any public-history rewrite,
-  force-push or replacement-PR operation. Current documentation cleanup alone is not
-  proof that reachable-history scanning passes.
-- [ ] Freeze reviewed candidate sources and record the exact SHA, framework pin and
-  current dirty-state provenance for every final run. Both required push/PR CI runs
-  must be terminal SUCCESS for that exact SHA.
-- [ ] Separate owner decision before stable-version promotion, merge of PR #3,
-  tag `v1.3.0`, GitHub Release or any NuGet publication. None is authorized here.
+See the [readiness ledger](docs/1.3.0-RELEASE-READINESS.md) and
+[scenario matrix](docs/1.3.0-SCENARIO-MATRIX.md) for the separate evidence boundaries.
 
-### Data and exposed workflow qualification
+## Historical 8d9 candidate qualification — retained below
 
-- [ ] Fresh profile: six-step setup, interrupt/reopen, explicit Classic/Modern choice,
-  language/folders/formats, What's New/Later/acknowledgment and Help/About.
-- [ ] Synthetic 1.2.1 migration: preserve canonical IDs, cookies/metadata bytes and
-  unknown JSON values through real service load/save/restart; settings-policy migration
-  must preserve disabled checks, Skip/Later and existing preferences. Verify the
-  once-only interface choice separately from service-only marker tests.
-- [ ] Re-run the narrow extension-data regressions added in this round: queue/History
-  organizer move/undo/reopen, LIVE legacy source/destination retry and conflict,
-  Batch committed row journal/manifest snapshots, nested settings/update-state values,
-  and unchanged known range/format equality. These tests are implemented, not yet
-  recorded as executed at this checklist update.
-- [ ] Organizer synthetic copies: exact provider/URL/ID, adjacent and central JSON,
-  subtitle/thumbnail companions, missing/ambiguous evidence refusal, collision,
-  move/History/queue commit, undo and interrupted recovery. Record original and final
-  hashes. Do not claim a private collection, physical disk-full or device-unplug test.
-- [ ] VOD/playlist: actual queue, distinct IDs, selected group entries, pause/restart,
-  output JSON and History; separately verify one legal short public source with real
-  ffprobe and bounded decode. FakeTool process results remain synthetic evidence.
-- [ ] LIVE: upcoming/active/completed, stop-and-save, controlled disconnection/partial
-  preservation and independent ownership; real-provider coverage recorded separately.
-- [ ] Batch: TXT/CSV/JSON/clipboard/multifile, rejected/duplicate/auth rows,
-  manual/automatic workflow, per-list destinations, idempotence and retained popup
-  through real analysis/transfer completion. Use 122/2750 plus a narrow 10000 case;
-  retain original FAIL and identify INTERFERED/INCONCLUSIVE focus conditions.
-- [ ] Malformed/locked store, controlled write failure, pending work, activation and
-  shutdown: preserve original bytes, drain owned processes, prevent unsafe installation.
-- [ ] Updater: automatic check/download + InstallOnExit for new profiles; preserved
-  legacy opt-out/Skip/Later; independent InstallAtStartup remains OFF unless selected.
-  VOD/LIVE/Batch/organizer work must defer startup installation. Execute the real
-  external updater only against a disposable synthetic installation, verifying ZIP,
-  checksum, parent identity/commit, transaction journal and rollback. Do not update
-  the existing installation or represent injected failures as actual power loss.
-- [ ] Bounded integration smoke: loopback Web Remote pairing/auth, NativeHost/URI,
-  opt-in synthetic cookies, tool availability, tray/notifications and localization.
-  Provider acceptance is not evidence of a visible OS toast or private-account access.
+## 1.3.0 candidate — GO for owner manual acceptance, NO-GO for publication
 
-### Native usability and candidate package
+Updated 2026-11-17. This section applies only to the current 1.3.0 candidate; all
+1.2.1 and earlier sections below remain unchanged historical records. Work remains
+in the isolated dashboard branch and Draft PR #3. No merge, stable promotion, tag,
+GitHub Release or NuGet publication is authorized by the results below.
 
-- [ ] Re-run only unresolved QualitySelector 20-cycle, tooltip 150%, Batch quality and
-  completion-popup scenarios with foreground/active/focus ownership and exact popup
-  witnesses. Observe correct deliberate deactivation separately. Preserve old FAILs;
-  a Batch filter PASS does not qualify the independent quality selector.
-- [ ] Verify real sidebar geometry at PL/EN/DE/JA and 100/150/200% TextScale, including
-  narrow windows and keyboard focus; do not hide overflow while clipping actions.
-- [ ] Six screens plus setup/upgrade/What's New: inspect actual HWND screenshots and
-  list remaining reference differences for owner visual acceptance. Do not claim
-  pixel-perfect or physical Windows DPI from logical TextScale tests.
-- [ ] After source freeze: one full `scripts/Build-Release.ps1` validation with Debug,
-  Release, JavaScript, warnings-as-errors, NativeHost/Updater publish, package/privacy
-  and reachable-history hygiene. Record failures and counts without summing overlapping
-  targeted runs. Do not run heavy native suites concurrently in the same desktop.
-- [ ] Produce the local `ModernTubeDownloader-1.3.0-candidate.1-win-x64.zip`, symbols
-  and SHA-256 file with the clean pinned framework. Check assembly/product identities,
-  LICENSE/NOTICE/dependency license inventory, release documentation and no profiles,
-  cookies, test logs, private screenshots or Debug automation endpoints.
-- [ ] Extract that exact candidate into a new disposable location, use its production
-  EXE without the semantic bridge, and verify startup, main flows and graceful exit.
-  Record ZIP checksum and extraction identity; do not reuse earlier package evidence.
-- [ ] Record unsigned-binary/SmartScreen behavior only if actually observed. Explain
-  signing policy and owner-distribution implications without claiming a signature or
-  categorizing unsigned status as a new critical defect absent project policy.
-- [ ] Present final candidate, evidence and a GO/NO-GO decision **for owner manual
-  acceptance**, with product blockers separate from consciously unqualified limits.
-  Publication requires a subsequent explicit owner instruction.
+Qualified product source: **8d9a3b084ca1fdcd4838c693aed19361a7849104**.
+The final harness/documentation review commit still requires **both exact-head
+push and PR CI results**; they are **PENDING at document freeze**. Do not transfer
+earlier green CI or source/package results to a later commit. The parent records
+terminal CI in artifacts/final-rc-20261117/ci-final.json and PR #3.
 
-Consciously unqualified unless separately evidenced: physical 5K/Windows 225% DPI,
-all provider/account/browser combinations, the unavailable private collection, real
-power failure/device removal, and native-speaker review of all 16 locales.
-**Two-hour soak: DEFERRED / NOT EXECUTED**; no arbitrary duration gate and no short
-smoke relabeled as full soak. A newly reproduced freeze or data-loss defect remains a
-release blocker regardless of these deferred limits.
+Evidence root E17 is repository-relative artifacts/final-rc-20261117.
+See the [current readiness ledger](docs/1.3.0-RELEASE-READINESS.md),
+[scenario matrix](docs/1.3.0-SCENARIO-MATRIX.md) and
+[final candidate report](docs/1.3.0-FINAL-RELEASE-CANDIDATE-REPORT.md).
+A checked item qualifies only its stated test boundary.
+
+### Identity, storage and build gates
+
+- [x] Candidate identity remains 1.3.0-candidate.1; Assembly/File version 1.3.0.0;
+  central framework pin 7bf58d06d795d7298c86d9bf9471bbfb46852bab unchanged.
+  No framework source modification, NuGet publication or stable-version promotion.
+- [x] Current package and reachable-history hygiene checks pass with retained original
+  failures and approved history-repair evidence. No scanner exemption is used to
+  qualify the candidate. E17/final-build-release-isolated.log and hygiene records.
+- [x] Full 8d9 local gate: **1467/1467 Debug, 1467/1467 Release, 93/93 JavaScript**;
+  zero failed/skipped tests. NativeHost/Updater publication and **816 package entries**
+  pass. Configuration/targeted counts overlap and are not added as unique scenarios.
+- [x] Executed service/filesystem/process contracts include migration and unknown-JSON
+  preservation, canonical identities, Batch journal/restart/idempotence, Organizer
+  recovery/undo, malformed/locked stores, shutdown and updater policy boundaries.
+  Full TRX and the 319-case migration subset are evidence of their actual assertions,
+  not the unavailable private collection or physical storage/power-failure tests.
+- [ ] Both required remote workflows must be terminal SUCCESS for the final review
+  commit. Any later source change requires scoped revalidation and its own CI.
+- [ ] Separate owner authorization and release gates before stable promotion, PR #3
+  merge, v1.3.0 tag, public Release or any NuGet publication.
+
+### Executed workflows and limits
+
+- [x] Fresh production package journey: genuinely empty isolated profile, actual tool
+  provisioning, Draft/Complete/Restart **3/3 PASS in 47.58 seconds**, no preseeded
+  settings or Debug semantic bridge. Six steps, Modern choice, folder persistence,
+  What's New acknowledgement and nonrepetition are verified. Native Close is not
+  power loss; the UI selects NotifyOnly before completion, so no install is qualified.
+  E17/published-experience-process-corrected/result.json. Both earlier client/harness
+  failures remain preserved, including the watchdog-exit result.
+- [x] Functional native matrix: **14/14 terminal PASS** for six screens, Organizer/Batch,
+  playlist120, LIVE stop/save, update states, Web Remote pairing, external request,
+  Classic upgrade choice and one real public VOD. Most lanes use synthetic fixtures
+  and FakeTool; the public VOD separately verifies real probe/decode/History.
+  E17/functional-native/results.json and individual logs retain those boundaries.
+- [x] Controlled Batch PL122 and DE2750 filter-popup workflows PASS through analysis
+  and three selected FakeTool transfers, retained controls/popup, three unique completed
+  IDs/files and unchanged journal. Original interfered/failed attempts are preserved.
+  These precommit working-tree observations do not qualify independent QualitySelector.
+- [x] Large-collection runs **2/2 PASS**: 2750 History/2617 queue and 10000/10000,
+  canonical identities across seven pages, bounded History cards/cache and final
+  zero tracked thumbnail resources. Current thumbnail SHA256 audit confirms
+  **2750/2750 and 10000/10000 distinct contents**. E17/performance-comparison.md
+  separates UIA time from render work; whole-renderer/control counts are NOT RECORDED.
+  Older2750 visited fewer pages. No causal speedup or 7.5GB-before/after claim.
+- [x] Published helper executables **6/6 PASS** against disposable synthetic installs:
+  no-arguments host, parent gate, locked DLL, checksum and startup commit absent/present.
+  E17/published-helpers-final. This does not update the existing installation or
+  qualify real browser registration, account access or post-update main-app launch.
+- [ ] Independent QualitySelector20, controlled deactivation, tooltip150 and JA10000
+  popup scenarios remain **NOT QUALIFIED**. Foreign foreground is INTERFERED;
+  activation refusal before measurement is INCONCLUSIVE. Preserve all original
+  exit-1 results; do not substitute Batch filter or performance PASS.
+- [ ] Owner verifies final visual/reference fidelity, sidebar/keyboard behavior and
+  PL/EN/DE/JA TextScale100/150/200 on the intended machine. Existing native captures
+  do not establish pixel-perfect agreement, every locale or physical Windows DPI.
+- [ ] Real OS registration/toasts/tray/logon/browser acceptance, physical 5K/225% DPI,
+  all provider/account combinations, real device removal/power failure and
+  native-speaker review remain unqualified unless separately evidenced.
+
+### Exact local candidate and manual handoff
+
+- [x] Local self-contained win-x64 candidate ZIP, symbols and checksum produced;
+  package inventory/privacy gate passes. ZIP has **144821138 bytes** and SHA256
+  **64ff78e38444f3bc28ab9779db25d3601d65bf41296bd92c313894c7e41edddb**.
+  Path: E17/final-package-isolated/release/ModernTubeDownloader-1.3.0-candidate.1-win-x64.zip.
+  Earlier 92c2/4fd7155 package hashes do not qualify this package.
+- [x] That extracted production package passes external UIA dashboard checks:
+  one process, Classic/Modern routes, Batch1300/cross-page60, queue paging,
+  actual SelectionItem/Value/Invoke inspector actions and clean exit, with
+  synthetic QA tools and no Debug automation endpoint. E17/published-dashboard-final.log.
+  Fresh real provisioning is separately covered by the first-run result above.
+- [x] An owner manual-acceptance candidate and explicit evidence/limitations are
+  prepared. The owned profile/copy and QA registration guards are not a Windows
+  security sandbox and do not certify all system integration behavior.
+- [ ] Owner manual acceptance is still required; keep original profiles/logs and
+  report any reproducible freeze, data loss or visual defect. GO for this manual
+  handoff is not publication approval.
+- [ ] Record actual signature/SmartScreen behavior only when observed. Neither a
+  package test nor lack of a prompt proves signing or clean-PC acceptance.
+
+**Long soak: DEFERRED / NOT EXECUTED** by explicit instruction. No short smoke is
+relabeled as soak and no arbitrary duration run is introduced. A real reproduced
+freeze or data-loss regression remains a blocker despite deferred qualification.
 
 Draft distribution text: [1.3.0 release notes](docs/releases/v1.3.0.md).
-The source/runtime scope and Batch before/after evidence remain in the linked ledgers;
-new final outcomes are added only after execution, not by checking prospective boxes.
-
+Final publication remains **NO-GO** until the separate review, acceptance and owner
+authorization gates are resolved.
 
 ## Final 1.2.1 — patch release
 
