@@ -134,6 +134,20 @@ public sealed class ThumbnailToolTests : IDisposable
         await Assert.ThrowsAsync<InvalidDataException>(() => service.ReadRecentAsync());
     }
 
+    [Fact]
+    public void CleanupDiagnosticsDoNotSuppressALockedFileFailure()
+    {
+        Directory.CreateDirectory(root);
+        var file = Path.Combine(root, "fixture.lock");
+        using var held = new FileStream(file, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+        var error = Assert.Throws<IOException>(Dispose);
+        Assert.IsType<IOException>(error.InnerException);
+        Assert.Contains($"currentPid={Environment.ProcessId}", error.Message, StringComparison.Ordinal);
+        Assert.Contains("fixture.lock", error.Message, StringComparison.Ordinal);
+        Assert.Contains("RestartManager owners=", error.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(file));
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> action) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => action(request, cancellationToken);
@@ -153,5 +167,33 @@ public sealed class ThumbnailToolTests : IDisposable
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         protected override void Dispose(bool disposing) { if (disposing) inner.Dispose(); base.Dispose(disposing); }
     }
-    public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    public void Dispose()
+    {
+        if (!Directory.Exists(root)) return;
+        try
+        {
+            Directory.Delete(root, true);
+        }
+        catch (IOException error)
+        {
+            // Observe a failing cleanup once, without retrying deletion or
+            // suppressing the original exception. Owners are a point-in-time
+            // observation; "none-reported" does not disprove a transient lock.
+            string diagnostics;
+            try
+            {
+                diagnostics = string.Join(Environment.NewLine,
+                    Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                        .Take(32)
+                        .Select(file => $"file={file}; RestartManager owners={FileLockDiagnostics.Owners(file)}"));
+            }
+            catch (Exception diagnosticError)
+            {
+                diagnostics = $"Lock observation unavailable: {diagnosticError.GetType().Name}: {diagnosticError.Message}";
+            }
+            throw new IOException(
+                $"Thumbnail fixture cleanup failed; utc={DateTimeOffset.UtcNow:O}; root={root}; currentPid={Environment.ProcessId}; " +
+                $"originalHResult=0x{error.HResult:X8}; retained-file observations (at most 32):{Environment.NewLine}{diagnostics}", error);
+        }
+    }
 }
