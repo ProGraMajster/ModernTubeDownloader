@@ -7,11 +7,13 @@ param(
     [Parameter(Mandatory)][string]$DataRoot,
     [Parameter(Mandatory)][string]$LanguageDirectory,
     [Parameter(Mandatory)][Alias('EvidenceDirectory')][string]$EvidenceDir,
-    [switch]$Before
+    [switch]$Before,
+    [switch]$ExperienceLaterOnly
 )
 # External production UIA + HWND-directed messages. This is NOT physical input,
 # foreground acceptance, taskbar qualification, or a substitute for pixel review.
 $ErrorActionPreference = 'Stop'
+if ($Before -and $ExperienceLaterOnly) { throw 'The baseline cannot qualify the changed release-note journey.' }
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) { throw 'Use Windows PowerShell 5.' }
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Drawing
 Add-Type -ReferencedAssemblies System.Drawing @'
@@ -30,6 +32,7 @@ public sealed class FinalUxNative : IDisposable {
     [StructLayout(LayoutKind.Sequential)] struct Message { public IntPtr hwnd; public uint message; public UIntPtr wParam; public IntPtr lParam; public uint time; public Point point; public uint unused; }
     [StructLayout(LayoutKind.Sequential)] struct GuiInfo { public int size; public uint flags; public IntPtr active, focus, capture, menuOwner, moveSize, caret; public Rect caretRect; }
     public sealed class Event { public string utc; public uint kind; public long hwnd; public uint pid; public int objectId, childId; }
+    public sealed class Frame { public Rect Bounds; public string RasterSha256; }
     delegate bool WindowCallback(IntPtr hwnd, IntPtr state);
     delegate void EventCallback(IntPtr hook, uint kind, IntPtr hwnd, int objectId, int childId, uint thread, uint time);
     [DllImport("kernel32.dll", SetLastError=true)] static extern SafeWaitHandle OpenProcess(uint access, bool inherit, int pid);
@@ -77,14 +80,34 @@ public sealed class FinalUxNative : IDisposable {
     public IntPtr[] Windows() { Validate(); var result=new List<IntPtr>(); EnumWindows((h,s)=>{ uint p; GetWindowThreadProcessId(h,out p); if(p==(uint)pid && IsWindowVisible(h)) result.Add(h); return true; },IntPtr.Zero); return result.ToArray(); }
     public static uint Owner(IntPtr hwnd) { uint p; GetWindowThreadProcessId(hwnd,out p); return p; }
     public long Focus(IntPtr hwnd) { ValidateWindow(hwnd); uint p; var thread=GetWindowThreadProcessId(hwnd,out p); var info=new GuiInfo {size=Marshal.SizeOf(typeof(GuiInfo))}; if(!GetGUIThreadInfo(thread,ref info)) throw new Win32Exception(); return info.focus.ToInt64(); }
-    public Rect Capture(IntPtr hwnd,string path) {
+    public Frame Capture(IntPtr hwnd,string path) {
         ValidateWindow(hwnd); var previous=SetThreadDpiAwarenessContext(new IntPtr(-4));
         try { Rect rect; if(!GetWindowRect(hwnd,out rect) || rect.Right<=rect.Left || rect.Bottom<=rect.Top) throw new InvalidOperationException("Empty owned window.");
-            using(var bitmap=new Bitmap(rect.Right-rect.Left,rect.Bottom-rect.Top)) using(var graphics=Graphics.FromImage(bitmap)) {
-                var dc=graphics.GetHdc(); try { if(!PrintWindow(hwnd,dc,2)) throw new InvalidOperationException("PrintWindow failed."); } finally { graphics.ReleaseHdc(dc); }
+            using(var bitmap=new Bitmap(rect.Right-rect.Left,rect.Bottom-rect.Top,System.Drawing.Imaging.PixelFormat.Format32bppArgb)) {
+                using(var graphics=Graphics.FromImage(bitmap)) {
+                    var dc=graphics.GetHdc(); try { if(!PrintWindow(hwnd,dc,2)) throw new InvalidOperationException("PrintWindow failed."); } finally { graphics.ReleaseHdc(dc); }
+                }
                 ValidateWindow(hwnd); bitmap.Save(path,System.Drawing.Imaging.ImageFormat.Png);
-            } return rect;
+                return new Frame { Bounds=rect, RasterSha256=RasterHash(bitmap) };
+            }
         } finally { SetThreadDpiAwarenessContext(previous); }
+    }
+    static string RasterHash(Bitmap bitmap) {
+        // Hash the original captured BGRA pixels, not PNG encoder metadata.
+        // Row-wise hashing avoids another window-sized allocation and ignores
+        // stride padding. Neither the bitmap nor the saved frame is altered.
+        var data=bitmap.LockBits(new Rectangle(0,0,bitmap.Width,bitmap.Height),System.Drawing.Imaging.ImageLockMode.ReadOnly,System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        try {
+            using(var hash=System.Security.Cryptography.SHA256.Create()) {
+                var row=new byte[checked(bitmap.Width*4)];
+                for(int y=0;y<bitmap.Height;y++) {
+                    Marshal.Copy(IntPtr.Add(data.Scan0,checked(y*data.Stride)),row,0,row.Length);
+                    hash.TransformBlock(row,0,row.Length,row,0);
+                }
+                hash.TransformFinalBlock(new byte[0],0,0);
+                return BitConverter.ToString(hash.Hash).Replace("-","");
+            }
+        } finally { bitmap.UnlockBits(data); }
     }
     public Point Pointer(IntPtr hwnd,uint message,int screenX,int screenY) {
         ValidateWindow(hwnd); var previous=SetThreadDpiAwarenessContext(new IntPtr(-4));
@@ -117,7 +140,7 @@ $script:FinalUxState.watch = [Diagnostics.Stopwatch]::StartNew()
 $script:FinalUxState.native = $null; $script:FinalUxState.errorText = $null; $script:FinalUxState.interrupted = $false; $script:FinalUxState.main = $null
 $script:FinalUxState.initialForeground = [FinalUxNative]::GetForegroundWindow().ToInt64()
 $script:FinalUxState.lastForeground = $script:FinalUxState.initialForeground
-$phase = if ($Before) { 'BEFORE' } else { 'AFTER' }
+$phase = if ($Before) { 'BEFORE' } elseif ($ExperienceLaterOnly) { 'AFTER-LATER-BEFORE-RESTART' } else { 'AFTER' }
 $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
 [IO.Directory]::CreateDirectory($EvidenceDir) | Out-Null
 if ((Test-Path -LiteralPath (Join-Path $EvidenceDir 'native-result.json')) -or (Test-Path -LiteralPath (Join-Path $EvidenceDir 'native-events.jsonl'))) { throw 'Evidence directory already contains a run; use a new directory.' }
@@ -188,11 +211,57 @@ function File-Hash([string]$Path) {
     if (-not [IO.File]::Exists($Path)) { return $null }; $stream=[IO.File]::OpenRead($Path); $hash=[Security.Cryptography.SHA256]::Create()
     try { return [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-','') } finally { $hash.Dispose(); $stream.Dispose() }
 }
-function Capture($Window,[string]$Name) {
+function Read-Experience {
+    # One shared-read snapshot: do not block an atomic acknowledgement replace.
+    $stream=[IO.File]::Open((Join-Path $DataRoot 'experience.json'),[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    $memory=[IO.MemoryStream]::new(); $hash=[Security.Cryptography.SHA256]::Create()
+    try {
+        $stream.CopyTo($memory); $bytes=$memory.ToArray()
+        return @{state=([Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF) | ConvertFrom-Json); sha256=[BitConverter]::ToString($hash.ComputeHash($bytes)).Replace('-','')}
+    } finally { $hash.Dispose(); $memory.Dispose(); $stream.Dispose() }
+}
+function Assert-LaterUnchanged($BeforeState,[string]$Action) {
+    $after=Read-Experience
+    if ($after.sha256 -ne $BeforeState.sha256 -or
+        $after.state.lastWhatsNewAcknowledgedVersion -ne $BeforeState.state.lastWhatsNewAcknowledgedVersion -or
+        $after.state.deferredWhatsNewVersion -ne $BeforeState.state.deferredWhatsNewVersion) {
+        throw 'Later changed the durable experience ledger or acknowledged the installed version.'
+    }
+    Record $Action @{beforeSha256=$BeforeState.sha256; afterSha256=$after.sha256; acknowledgedVersion=$after.state.lastWhatsNewAcknowledgedVersion; deferredVersion=$after.state.deferredWhatsNewVersion}
+}
+function Capture($Window,[string]$Name,[int]$MaximumMilliseconds=12000) {
+    if ($MaximumMilliseconds -lt 1 -or $MaximumMilliseconds -gt 12000) { throw 'Capture deadline must stay within the existing 12-second readiness limit.' }
     Check-Events; $path=Join-Path $EvidenceDir ($Name+'.png'); if ([IO.File]::Exists($path)) { throw "Capture already exists: $Name" }
-    $timer=[Diagnostics.Stopwatch]::StartNew(); $rect=$script:FinalUxState.native.Capture([IntPtr]$Window.Current.NativeWindowHandle,$path)
-    Record 'capture' @{file=[IO.Path]::GetFileName($path); width=$rect.Right-$rect.Left; height=$rect.Bottom-$rect.Top; sha256=(File-Hash $path); durationMs=$timer.Elapsed.TotalMilliseconds; hwnd=$Window.Current.NativeWindowHandle; foreground=[FinalUxNative]::GetForegroundWindow().ToInt64()}
-    Check-Events
+    $frames=Join-Path (Join-Path $EvidenceDir 'capture-frames') $Name
+    if ([IO.Directory]::Exists($frames)) { throw "Capture frames already exist: $Name" }
+    [void][IO.Directory]::CreateDirectory($frames)
+    $timer=[Diagnostics.Stopwatch]::StartNew(); $previous=$null; $consecutive=0; $number=0
+    while ($timer.Elapsed.TotalMilliseconds -lt $MaximumMilliseconds) {
+        Check-Events; $frameTimer=[Diagnostics.Stopwatch]::StartNew(); $number++
+        $framePath=Join-Path $frames ('{0:D4}.png' -f $number)
+        $frame=$script:FinalUxState.native.Capture([IntPtr]$Window.Current.NativeWindowHandle,$framePath); $rect=$frame.Bounds
+        $key='{0},{1},{2},{3}:{4}' -f $rect.Left,$rect.Top,$rect.Right,$rect.Bottom,$frame.RasterSha256
+        $consecutive=if ($key -eq $previous) { $consecutive+1 } else { 1 }; $previous=$key
+        $sha256=File-Hash $framePath
+        Record 'capture.frame' @{name=$Name; frame=$number; file=('capture-frames/'+$Name+'/'+[IO.Path]::GetFileName($framePath)); rasterSha256=$frame.RasterSha256; sha256=$sha256; bounds=@($rect.Left,$rect.Top,$rect.Right,$rect.Bottom); consecutiveIdentical=$consecutive; durationMs=$frameTimer.Elapsed.TotalMilliseconds; elapsedMs=$timer.Elapsed.TotalMilliseconds}
+        Check-Events
+        if ($timer.Elapsed.TotalMilliseconds -ge $MaximumMilliseconds) { break }
+        if ($consecutive -ge 3) {
+            # Select an existing raw frame byte-for-byte; no re-encode, blending,
+            # crop, suppression of application updates or animation changes.
+            [IO.File]::Copy($framePath,$path,$false)
+            if ((File-Hash $path) -ne $sha256) { throw 'Selected screenshot differs from its retained raw frame.' }
+            Record 'capture' @{file=[IO.Path]::GetFileName($path); width=$rect.Right-$rect.Left; height=$rect.Bottom-$rect.Top; sha256=$sha256; rasterSha256=$frame.RasterSha256; selectedFrame=$number; framesRetained=$number; consecutiveIdentical=$consecutive; cadenceMs=50; maximumMs=$MaximumMilliseconds; durationMs=$timer.Elapsed.TotalMilliseconds; hwnd=$Window.Current.NativeWindowHandle; foreground=[FinalUxNative]::GetForegroundWindow().ToInt64()}
+            Check-Events
+            if ($timer.Elapsed.TotalMilliseconds -ge $MaximumMilliseconds) { throw "NOT QUALIFIED: $Name exceeded its $MaximumMilliseconds ms capture deadline; retained frames are diagnostic only." }
+            return
+        }
+        # Bounded sampling cadence, not a fixed wait standing in for readiness.
+        $remaining=$MaximumMilliseconds-$timer.Elapsed.TotalMilliseconds
+        $pause=[int][Math]::Ceiling([Math]::Min($remaining,[Math]::Max(0,50-$frameTimer.Elapsed.TotalMilliseconds)))
+        if ($pause -gt 0) { Start-Sleep -Milliseconds $pause }
+    }
+    throw "NOT QUALIFIED: $Name did not reach three consecutive identical rasters within $MaximumMilliseconds ms; all $number raw frames were retained."
 }
 function Label-Now([string]$Caption) {
     $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$Caption)
@@ -247,6 +316,21 @@ try {
     $labels=Get-Content -LiteralPath $languageFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
     $stores=@{}; foreach ($name in @('settings.json','queue.json','history.json')) { $stores[$name]=File-Hash (Join-Path $DataRoot $name) }
     Wait-Condition { $script:FinalUxState.main=Window-Now 'MainWindow'; $null -ne $script:FinalUxState.main } 'MainWindow absent.'
+    if (-not $Before) {
+        $installedVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path ([IO.Path]::GetDirectoryName($ApplicationPath)) 'ModernTubeDownloader.dll')).ProductVersion.Split('+')[0]
+        $experienceBefore=Read-Experience
+        if ([string]::IsNullOrWhiteSpace($installedVersion) -or
+            $experienceBefore.state.lastObservedVersion -ne $installedVersion -or
+            $experienceBefore.state.lastWhatsNewAcknowledgedVersion -ne '1.2.1' -or
+            $experienceBefore.state.deferredWhatsNewVersion -eq $installedVersion) { throw 'Expected an unacknowledged, non-deferred installed-version fixture.' }
+        $script:FinalUxState.news=$null
+        Wait-Condition { $script:FinalUxState.news=Window-Now 'WhatsNewWindow'; $null -ne $script:FinalUxState.news } 'Automatic unacknowledged release notes did not open.'
+        Capture $script:FinalUxState.news '00-whats-new-automatic'
+        Invoke $script:FinalUxState.news 'WhatsNewLater'
+        Wait-Condition { $null -eq (Window-Now 'WhatsNewWindow') -and $script:FinalUxState.main.Current.IsEnabled } 'Automatic Later did not restore the main window.'
+        Assert-LaterUnchanged $experienceBefore 'notes.automatic-later.unchanged'
+    }
+    if (-not $ExperienceLaterOnly) {
     Invoke $script:FinalUxState.main 'NavDownloads'
     Label-States 'Downloads.QueueEmptyTitle' '01-downloads-empty'
     Label-States 'Dashboard.SpeedChart' '02-speed-title'
@@ -266,7 +350,9 @@ try {
         if (-not $target) { throw 'Canonical LanguageSelector absent before reveal.' }
         $timer=[Diagnostics.Stopwatch]::StartNew()
         Native-Call 'uia.invoke.SettingsSearchResult0' { $result.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() } | Out-Null
-        Capture $script:FinalUxState.main '09-settings-language-highlight'
+        $highlightRemaining=[int][Math]::Floor(3500-$timer.Elapsed.TotalMilliseconds)
+        if ($highlightRemaining -le 0) { throw 'NOT QUALIFIED: native round-trip exceeded the highlight lifetime; screenshot cannot prove highlight.' }
+        Capture $script:FinalUxState.main '09-settings-language-highlight' -MaximumMilliseconds $highlightRemaining
         if ($timer.Elapsed.TotalMilliseconds -ge 3500) { throw 'NOT QUALIFIED: native round-trip exceeded the highlight lifetime; screenshot cannot prove highlight.' }
         if (-not $target.Current.HasKeyboardFocus -or $target.Current.IsOffscreen) { throw 'Search did not reveal and focus the canonical language control.' }
         Record 'search.reveal' @{nativeRoundTripMs=$timer.Elapsed.TotalMilliseconds; target='LanguageSelector'; focused=$true}
@@ -287,6 +373,17 @@ try {
         Capture $script:FinalUxState.news '12-whats-new-bundled'
         Record 'notes.source' @{source='embedded-manifest'; noOnlineLinkInvoked=$true; networkIsolation='NOT PROVIDED BY THIS HARNESS'}
         Invoke $script:FinalUxState.news 'WhatsNewLater'; Wait-Condition { $null -eq (Window-Now 'WhatsNewWindow') } 'Later did not close WhatsNew.'
+        Assert-LaterUnchanged $experienceBefore 'notes.manual-later.unchanged'
+        Invoke $script:FinalUxState.main 'HelpWhatsNew'
+        $script:FinalUxState.news=$null; Wait-Condition { $script:FinalUxState.news=Window-Now 'WhatsNewWindow'; $null -ne $script:FinalUxState.news } 'Manual notes could not be reopened after Later.'
+        Invoke $script:FinalUxState.news 'WhatsNewDone'
+        Wait-Condition { $saved=Read-Experience; $null -eq (Window-Now 'WhatsNewWindow') -and $saved.state.lastWhatsNewAcknowledgedVersion -eq $installedVersion -and $saved.state.lastObservedVersion -eq $installedVersion } 'Done did not durably acknowledge exactly the installed version.'
+        $acknowledged=Read-Experience
+        if ($acknowledged.sha256 -eq $experienceBefore.sha256 -or $acknowledged.state.deferredWhatsNewVersion -ne $experienceBefore.state.deferredWhatsNewVersion) { throw 'Explicit acknowledgement did not change the ledger as expected.' }
+        Record 'notes.done.persisted' @{installedVersion=$installedVersion; acknowledgedVersion=$acknowledged.state.lastWhatsNewAcknowledgedVersion; sha256=$acknowledged.sha256}
+    }
+    }
+    if (-not $Before) {
         foreach ($name in $stores.Keys) { if ((File-Hash (Join-Path $DataRoot $name)) -ne $stores[$name]) { throw "Read-only UX actions changed $name." } }
         Record 'stores.unchanged' @('settings.json','queue.json','history.json')
     }

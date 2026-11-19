@@ -1002,6 +1002,11 @@ elseif ($ExperienceSmoke -eq 'News') {
     $experienceState = @{ schemaVersion = 1; existingProfile = $true; setup = 2; interfaceChoiceFamily = '1.3'; lastObservedVersion = $experienceVersion;
         lastWhatsNewAcknowledgedVersion = '1.2.1'; deferredWhatsNewVersion = $experienceVersion }
 }
+elseif ($PublishedFinalUxSmoke -and -not $PublishedFinalUxBefore) {
+    # Qualify Later against a genuinely older acknowledgement, including the
+    # next startup. A current ACK would conceal an accidental write by Later.
+    $experienceState.lastWhatsNewAcknowledgedVersion = '1.2.1'
+}
 # Every other smoke represents an already-onboarded isolated QA user. This is a
 # persisted test fixture, not a production flag which suppresses the new journeys.
 $experienceState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'experience.json') -Encoding utf8
@@ -1103,20 +1108,45 @@ try {
         } while ($readyWatch.Elapsed.TotalSeconds -lt 30)
         if ($validatedTools.Count -ne 4) { throw 'Published app did not validate custom QA tools.' }
         if ($PublishedFinalUxSmoke) {
-            if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
-                if (-not [MtdAutomationWindowCloser]::PlaceWindow($normalProcess.MainWindowHandle, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)) { throw 'Published UX HWND placement failed.' }
-            }
-            $clientPath = Join-Path $PSScriptRoot 'Test-FinalUxNative.ps1'
-            $evidencePath = Join-Path $dataRoot 'native-ux'
-            $languagePath = Join-Path $repo 'ModernTubeDownloader/Resources/Languages'
-            $command = "& ([scriptblock]::Create([IO.File]::ReadAllText('" + $clientPath.Replace("'", "''") + "'))) -OwnedProcessId " + $normalProcess.Id +
-                " -StartUtcTicks " + $normalProcess.StartTime.ToUniversalTime().Ticks +
-                " -ApplicationPath '" + $app.Replace("'", "''") + "' -DataRoot '" + $dataRoot.Replace("'", "''") +
-                "' -EvidenceDir '" + $evidencePath.Replace("'", "''") + "' -LanguageDirectory '" + $languagePath.Replace("'", "''") + "'"
-            if ($PublishedFinalUxBefore) { $command += ' -Before' }
             Write-Output "Owned published UX profile: $dataRoot"
-            & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command $command
-            if ($LASTEXITCODE -ne 0) { throw 'Published UX native probe failed; original evidence preserved.' }
+            function Invoke-PublishedFinalUxProbe([switch]$LaterOnly) {
+                $mainHwnd = [MtdAutomationWindowCloser]::FindOwnMainWindow($normalProcess.Id)
+                if ($mainHwnd -eq [IntPtr]::Zero) { throw 'Published UX main HWND is absent.' }
+                if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
+                    if (-not [MtdAutomationWindowCloser]::PlaceWindow($mainHwnd, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)) { throw 'Published UX HWND placement failed.' }
+                }
+                $clientPath = Join-Path $PSScriptRoot 'Test-FinalUxNative.ps1'
+                $evidencePath = Join-Path $dataRoot $(if ($LaterOnly) { 'native-ux-later' } else { 'native-ux' })
+                $languagePath = Join-Path $repo 'ModernTubeDownloader/Resources/Languages'
+                $command = "& ([scriptblock]::Create([IO.File]::ReadAllText('" + $clientPath.Replace("'", "''") + "'))) -OwnedProcessId " + $normalProcess.Id +
+                    " -StartUtcTicks " + $normalProcess.StartTime.ToUniversalTime().Ticks +
+                    " -ApplicationPath '" + $app.Replace("'", "''") + "' -DataRoot '" + $dataRoot.Replace("'", "''") +
+                    "' -EvidenceDir '" + $evidencePath.Replace("'", "''") + "' -LanguageDirectory '" + $languagePath.Replace("'", "''") + "'"
+                if ($PublishedFinalUxBefore) { $command += ' -Before' }
+                if ($LaterOnly) { $command += ' -ExperienceLaterOnly' }
+                & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command $command
+                if ($LASTEXITCODE -ne 0) { throw 'Published UX native probe failed; original evidence preserved.' }
+            }
+            if (-not $PublishedFinalUxBefore) {
+                Invoke-PublishedFinalUxProbe -LaterOnly
+                $firstPid = $normalProcess.Id
+                $firstStartTicks = $normalProcess.StartTime.ToUniversalTime().Ticks
+                $laterStatePath = Join-Path $dataRoot 'experience.json'
+                $laterHash = (Get-FileHash -LiteralPath $laterStatePath -Algorithm SHA256).Hash
+                if (-not $normalProcess.CloseMainWindow() -or -not $normalProcess.WaitForExit(30000) -or $normalProcess.ExitCode -ne 0) { throw 'Later qualification did not shut down cleanly before restart.' }
+                if ((Get-FileHash -LiteralPath $laterStatePath -Algorithm SHA256).Hash -ne $laterHash) { throw 'Shutdown after Later mutated the experience ledger.' }
+                $normalProcess.Dispose(); $normalProcess = $null
+                # Same profile, same package, no fixture rewrite between processes.
+                $normalProcess = Start-Process -FilePath $app -PassThru -WindowStyle Hidden
+                if (-not $normalProcess.WaitForInputIdle(30000) -or $normalProcess.HasExited) { throw 'Published UX restart did not reach the UI loop.' }
+                Wait-MainWindow $normalProcess
+                Wait-Bridge $normalProcess.Id $false
+                if ((Get-FileHash -LiteralPath $laterStatePath -Algorithm SHA256).Hash -ne $laterHash) { throw 'Restart after Later mutated the experience ledger before acknowledgement.' }
+                @{ previousProcessId = $firstPid; previousStartUtcTicks = $firstStartTicks; processId = $normalProcess.Id;
+                    startUtcTicks = $normalProcess.StartTime.ToUniversalTime().Ticks; unchangedExperienceSha256 = $laterHash;
+                    profileReused = $true; fixtureRewritten = $false } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'native-ux-restart.json') -Encoding utf8
+            }
+            Invoke-PublishedFinalUxProbe
         }
         if ($PublishedUiSmoke) {
             $stableVersion = $buildProperties.SelectSingleNode('/Project/PropertyGroup/Version').InnerText.Trim()
