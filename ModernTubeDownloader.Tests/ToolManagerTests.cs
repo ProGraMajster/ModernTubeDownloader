@@ -215,6 +215,44 @@ public sealed class ToolManagerTests
         Assert.Equal(oldPath, lease.ExecutablePath);
     }
 
+    [Fact]
+    public async Task LastLeaseDisposalWaitsForPendingActivationAndPersistence()
+    {
+        await using var harness = await ToolHarness.CreateAsync();
+        await harness.Manager.Initialization;
+        await using var lease = await harness.Manager.AcquireAsync(ExternalToolKind.YtDlp);
+        harness.SetYtDlpRelease("v2-owned", "yt-v2-owned");
+        await harness.Manager.CheckForUpdatesAsync();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.Validator.BeforeValidation = async kind =>
+        {
+            if (kind != ExternalToolKind.YtDlp) return;
+            entered.TrySetResult();
+            await release.Task;
+        };
+        var disposal = lease.DisposeAsync().AsTask();
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.False(disposal.IsCompleted);
+            release.SetResult();
+            await disposal.WaitAsync(TimeSpan.FromSeconds(3));
+            var persisted = await AtomicJsonFile.ReadAsync<ToolManagerState>(harness.Paths.ToolStateFile);
+            Assert.Equal("v2-owned", persisted!.YtDlp!.ReleaseIdentity);
+            Assert.Null(persisted.PendingYtDlp);
+            Assert.False(File.Exists(harness.Paths.ToolStateFile + ".tmp"));
+        }
+        finally
+        {
+            release.TrySetResult();
+            await disposal;
+            // Also drain the existing serial gate on the pre-fix/red path, where
+            // disposal did not own activation. Do not race fixture deletion.
+            await harness.Manager.CheckForUpdatesAsync();
+        }
+    }
+
     private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
     {
         using var cancellation = new CancellationTokenSource(timeout);
@@ -350,10 +388,12 @@ public sealed class ToolManagerTests
     private sealed class FakeValidator : IToolBinaryValidator
     {
         public List<ExternalToolKind> ValidatedKinds { get; } = [];
+        public Func<ExternalToolKind, Task>? BeforeValidation { get; set; }
 
         public async Task<string> ValidateAsync(ExternalToolKind kind, string executablePath, string? ffprobePath, CancellationToken cancellationToken = default)
         {
             ValidatedKinds.Add(kind);
+            if (BeforeValidation is { } before) await before(kind);
             var value = await File.ReadAllTextAsync(executablePath, cancellationToken);
             if (value.Contains("invalid", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Synthetic binary validation failure.");
             if (kind == ExternalToolKind.Ffmpeg)

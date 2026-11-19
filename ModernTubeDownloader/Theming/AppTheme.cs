@@ -14,6 +14,7 @@ public static class AppThemeTokens
     public const string Background = "App.Background";
     public const string Surface = "App.Surface";
     public const string SurfaceSecondary = "App.SurfaceSecondary";
+    public const string RowSelected = "App.RowSelected";
     public const string SurfaceHover = "App.SurfaceHover";
     public const string Border = "App.Border";
     public const string TextPrimary = "App.TextPrimary";
@@ -47,6 +48,9 @@ public sealed class AppAppearanceService : IDisposable
     private bool initialized;
     private readonly AppearanceProfileStore? profiles;
     public AppearanceProfile Profile { get; private set; } = new();
+    private bool classicRecovery;
+    public AppInterfaceMode InterfaceMode => classicRecovery ? AppInterfaceMode.Classic : Profile.InterfaceMode;
+    public void ForceClassicForSession() { classicRecovery = true; if (initialized) ApplyCurrent(false); }
 
     public AppAppearanceService(SettingsService settings, IAppLogger logger, string? profileFile = null)
     {
@@ -60,14 +64,20 @@ public sealed class AppAppearanceService : IDisposable
     }
 
     public event EventHandler? ModeChanged;
+    // The single window owner can prepare presentation off-window. Scope completion
+    // runs before persistence and also on failure; it never owns services or storage.
+    internal Func<IDisposable?>? BeginPresentationUpdate { get; set; }
     public async Task ApplyProfileAsync(AppearanceProfile profile)
     {
         var elapsed = Stopwatch.StartNew();
-        Profile = profile.Copy();
-        AppearancePresentation.Current = Profile;
-        if (Profile.Global.Theme != AppearanceTheme.Custom) settings.Current.ThemeMode = (AppThemeMode)(int)Profile.Global.Theme;
-        ApplyCurrent(animated: false); AppTypography.SetScale(Profile.Typography.AppTextScale); UpdateSystemMonitoring();
-        ModeChanged?.Invoke(this, EventArgs.Empty);
+        using (BeginPresentationUpdate?.Invoke())
+        {
+            Profile = profile.Copy();
+            AppearancePresentation.Current = Profile;
+            if (Profile.Global.Theme != AppearanceTheme.Custom) settings.Current.ThemeMode = (AppThemeMode)(int)Profile.Global.Theme;
+            ApplyCurrent(animated: false); AppTypography.SetScale(Profile.Typography.AppTextScale); UpdateSystemMonitoring();
+            ModeChanged?.Invoke(this, EventArgs.Empty);
+        }
         logger.Info($"Appearance UI apply completed in {elapsed.Elapsed.TotalMilliseconds:F1} ms before persistence.");
         if (profiles is not null) await profiles.SaveAsync(Profile);
     }
@@ -75,8 +85,11 @@ public sealed class AppAppearanceService : IDisposable
     {
         var elapsed = Stopwatch.StartNew();
         if (percent is < 80 or > 200) throw new ArgumentOutOfRangeException(nameof(percent));
-        Profile.Typography.AppTextScale = percent; AppTypography.SetScale(percent);
-        ModeChanged?.Invoke(this, EventArgs.Empty);
+        using (BeginPresentationUpdate?.Invoke())
+        {
+            Profile.Typography.AppTextScale = percent; AppTypography.SetScale(percent);
+            ModeChanged?.Invoke(this, EventArgs.Empty);
+        }
         logger.Info($"Text scale UI apply completed in {elapsed.Elapsed.TotalMilliseconds:F1} ms before persistence.");
         if (profiles is not null) await profiles.SaveAsync(Profile);
     }
@@ -102,13 +115,16 @@ public sealed class AppAppearanceService : IDisposable
 
     public async Task SetModeAsync(AppThemeMode mode)
     {
-        settings.Current.ThemeMode = mode;
-        Profile.Global.Theme = (AppearanceTheme)(int)mode;
-        AppearancePresentation.Current = Profile;
-        ApplyCurrent(animated: true);
-        UpdateSystemMonitoring();
-        // Subscribers own native controls; publish before the asynchronous file continuation.
-        ModeChanged?.Invoke(this, EventArgs.Empty);
+        using (BeginPresentationUpdate?.Invoke())
+        {
+            settings.Current.ThemeMode = mode;
+            Profile.Global.Theme = (AppearanceTheme)(int)mode;
+            AppearancePresentation.Current = Profile;
+            ApplyCurrent(animated: true);
+            UpdateSystemMonitoring();
+            // Subscribers own native controls; publish before the asynchronous file continuation.
+            ModeChanged?.Invoke(this, EventArgs.Empty);
+        }
         await settings.SaveAsync().ConfigureAwait(false);
         if (profiles is not null) await profiles.SaveAsync(Profile);
     }
@@ -136,7 +152,7 @@ public sealed class AppAppearanceService : IDisposable
 
     private void Apply(ThemeVariant variant, bool animated)
     {
-        var definition = variant == ThemeVariant.Dark ? CreateDarkTheme() : CreateLightTheme();
+        var definition = InterfaceMode == AppInterfaceMode.ModernDashboard ? CreateDashboardTheme(variant) : variant == ThemeVariant.Dark ? CreateDarkTheme() : CreateLightTheme();
         if (Profile.Global.Theme == AppearanceTheme.Custom)
         {
             var mapping = new Dictionary<string, string[]> {
@@ -155,7 +171,10 @@ public sealed class AppAppearanceService : IDisposable
         {
             Transition = new ThemeTransitionOptions
             {
-                Enabled = animated && Profile.Global.Animations,
+                // MFN color-transition frames repaint without invalidating TextBox's cached
+                // shaped text. Commit Modern themes atomically so existing inputs retain
+                // readable target colors; preserve Classic's established transition policy.
+                Enabled = animated && Profile.Global.Animations && InterfaceMode != AppInterfaceMode.ModernDashboard,
                 Duration = TimeSpan.FromMilliseconds(AppearancePresentation.AnimationMilliseconds(220)),
                 Easing = ThemeEasing.EaseInOut,
                 RespectReducedMotion = true
@@ -234,6 +253,39 @@ public sealed class AppAppearanceService : IDisposable
             navigation: "#131B28",
             navigationHover: "#202B3C",
             navigationSelected: "#293A63");
+
+    private static ThemeDefinition CreateDashboardTheme(ThemeVariant variant)
+    {
+        var dark = variant == ThemeVariant.Dark;
+        var theme = CreateTheme(dark ? DarkThemeId : LightThemeId, "Modern Dashboard", dark ? BuiltInThemes.DarkThemeId : BuiltInThemes.LightThemeId,
+            variant, dark ? "#0D161D" : "#F2F5F8", dark ? "#121C24" : "#FAFBFD", dark ? "#1C2935" : "#E9EFF5",
+            dark ? "#243746" : "#DCE8F4", dark ? "#273847" : "#CBD7E3", dark ? "#F2F6FA" : "#172637",
+            dark ? "#B6C4D3" : "#4F6378", dark ? "#91A1B5" : "#53677B", "#006FEA", "#0071E6", "#075DC4",
+            dark ? "#38D996" : "#087E52", dark ? "#FFB548" : "#926000", dark ? "#FF5D6C" : "#BA2438", dark ? "#48A6FF" : "#0965C7",
+            dark ? "#0F1925" : "#E7EEF6", dark ? "#203249" : "#D8E5F3", dark ? "#173E6C" : "#CFE3FC");
+        Set(theme, AppThemeTokens.AccentText, "#FFFFFF"); Set(theme, ThemeTokens.Colors.PrimaryText.Name, "#FFFFFF");
+        Set(theme, "Legacy.ForegroundColorOnAccent", dark ? "#F2F6FA" : "#172637");
+        Set(theme, "Legacy.AccentColor2", "#076DE2");
+        Set(theme, AppThemeTokens.RowSelected, dark ? "#1A2B3A" : "#DDEBFA");
+        return theme;
+    }
+
+    private static void AddDownloadsPalette(ThemeDefinition theme, ThemeVariant variant)
+    {
+        // Setup and other explicitly styled native dialogs may open while Classic
+        // is still selected. Publish the existing additive Downloads tokens in
+        // both shells; Classic controls keep their own App/Legacy bindings.
+        var dark = variant == ThemeVariant.Dark;
+        Set(theme, DownloadsVisual.Background, dark ? "#10171D" : "#F2F5F8");
+        Set(theme, DownloadsVisual.BackgroundEnd, dark ? "#0F171E" : "#EDF2F7");
+        Set(theme, DownloadsVisual.Panel, dark ? "#151E26" : "#FAFBFD");
+        Set(theme, DownloadsVisual.PanelEnd, dark ? "#161F26" : "#F4F7FA");
+        Set(theme, DownloadsVisual.Selected, dark ? "#182635" : "#E4EFFB");
+        Set(theme, DownloadsVisual.SelectedEnd, dark ? "#192736" : "#DDEBFA");
+        Set(theme, DownloadsVisual.Border, dark ? "#263440" : "#CBD7E3");
+        Set(theme, DownloadsVisual.ButtonTop, dark ? "#202934" : "#F0F4F8");
+        Set(theme, DownloadsVisual.ButtonEnd, dark ? "#212B36" : "#E8EEF5");
+    }
 
     private static ThemeDefinition CreateTheme(
         string id,
@@ -315,6 +367,7 @@ public sealed class AppAppearanceService : IDisposable
         Set(theme, AppThemeTokens.Navigation, navigation);
         Set(theme, AppThemeTokens.NavigationHover, navigationHover);
         Set(theme, AppThemeTokens.NavigationSelected, navigationSelected);
+        Set(theme, AppThemeTokens.RowSelected, variant == ThemeVariant.Dark ? "#172B42" : "#DDEBFA");
         Set(theme, AppThemeTokens.NavigationSelectedText, variant == ThemeVariant.Dark ? "#FFFFFF" : textPrimary);
 
         theme.Corners["Card"] = 16;
@@ -322,6 +375,7 @@ public sealed class AppAppearanceService : IDisposable
         theme.Corners["Input"] = 10;
         theme.Spacing["Page"] = 24;
         theme.Spacing["Section"] = 16;
+        AddDownloadsPalette(theme, variant);
         return theme;
     }
 

@@ -1,5 +1,15 @@
 # Architecture
 
+## Optional shell presentation (1.3.0 candidate)
+
+`MainForm` remains the process/integration boundary. `AppShellHost` replaces only
+chrome and reparents the same page controls between Classic and Modern Dashboard.
+`AppServices.Create`, QueueProcessor, LiveRecordingScheduler, tray, notifications,
+IPC and Web Remote retain one owner and one lifetime. `AppPageId` is the shared
+navigation target. Both Batch hosts use one `BatchImportView` implementation.
+Appearance schema 2, session-only Classic recovery and responsive presentation
+are documented in [MODERN_DASHBOARD_UI.md](MODERN_DASHBOARD_UI.md).
+
 ## Boundaries
 
 ### 1.2.1 storage safety boundary

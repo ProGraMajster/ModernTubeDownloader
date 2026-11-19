@@ -74,10 +74,11 @@ public sealed class YtDlpDownloadService(YtDlpProcessRunner runner, SettingsServ
         ]);
 
         string? reportedFile = null;
+        var transfer = new DownloadTransferEstimator();
         void HandleLine(string line)
         {
             if (YtDlpProgressParser.TryParse(line, out var parsed))
-                progress?.Report(parsed);
+                progress?.Report(transfer.Observe(parsed));
             else if (line.StartsWith(FilePrefix, StringComparison.Ordinal))
                 reportedFile = line[FilePrefix.Length..].Trim();
         }

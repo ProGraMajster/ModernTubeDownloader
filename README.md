@@ -4,39 +4,35 @@
 
 A Windows desktop application for analyzing, downloading and recording media through [yt-dlp](https://github.com/yt-dlp/yt-dlp), with a native [ModernFormsNext](https://github.com/ProGraMajster/ModernFormsNext) interface.
 
-**[Download v1.2.1 for Windows x64](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.2.1)** · [Changelog](CHANGELOG.md) · [Supported sources](SUPPORTED_SOURCES.md)
+**[ModernTubeDownloader 1.3.0 for Windows x64](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.3.0)** · [Release notes](docs/releases/v1.3.0.md) · [Changelog](CHANGELOG.md) · [Polskie podsumowanie](docs/releases/v1.3.0.pl.md)
 
-Stable release target: **1.2.1**. Published assets and workflow results are authoritative on
-the release page. Historical releases remain unchanged. See [cookie synchronization](COOKIE_SYNC.md),
-[release checklist](RELEASE_CHECKLIST.md) and [yt-dlp feature audit/roadmap](YTDLP_FEATURE_GAP_AUDIT.md).
+The official release page is authoritative for published assets and publication state.
+See [supported sources](SUPPORTED_SOURCES.md), [cookie synchronization](COOKIE_SYNC.md),
+and the [release checklist](RELEASE_CHECKLIST.md) for operational boundaries.
 
-## New in 1.2.1
+## New in 1.3.0
 
-This stability/performance patch adds storage-safe queue pause/recovery, bounded notification
-fallback/lifetime and friendly streaming Batch JSON envelopes. Large Batch handoffs run off
-the UI context; queue rendering uses 50-card pages, filtered actions, cancellation and
-advisory progress/size/transfer estimates. See [Batch import](BATCH_IMPORT.md) and the
-[historical hotfix qualification](HOTFIX_1_2_1_CANDIDATE_1_REPORT.md).
-Source builds pin the committed MFN notification hotfix in
-[PR #271](https://github.com/ProGraMajster/ModernFormsNext/pull/271), based on current master.
-The exact committed pin is retained for this patch; no framework merge/publication is implied.
+- Optional **Modern Dashboard** across Downloads, LIVE, History, Batch Import, Other
+  and Settings. Classic remains available; both interfaces share the same runtime,
+  queue, sessions, History and settings. Choose in setup or Settings → Personalization;
+  `--classic-ui` provides session-only recovery.
+- Collapsible playlist groups, retained bounded queue/History rows and a bounded
+  thumbnail cache improve large-collection presentation without discarding entries.
+- **Batch Import & Download**, durable per-list destinations and phased progress
+  extend the existing manual preparation workflow. Automatic preparation respects
+  the global queue's paused state.
+- An **existing-recording organizer** previews verified media/JSON/sidecar moves,
+  updates canonical paths, refuses overwrites and supports explicit recovery/undo.
+- Resumable setup, a one-time existing-profile choice, sixteen locale catalogs,
+  precise Settings search, practical Help and exact-version **What's New** with
+  official GitHub content, cache and bundled offline notes.
+- New profiles default to verified automatic updates at safe exit; existing explicit
+  preferences remain preserved. Manual-startup installation is a separate optional setting.
 
-### Retained from 1.2.0
-
-Adds [tray/autostart](TRAY_AND_STARTUP.md), [SHA-verified application updates](UPDATES.md),
-Other/[Batch import](BATCH_IMPORT.md), [versioned appearance profiles and text scaling](PERSONALIZATION.md),
-and eleven categorized Settings pages. End users of the self-contained ZIP need no
-framework checkout. Text scaling is separate from Windows DPI; two framework composite
-controls have the [known typography limits](#known-limitations) described below.
-
-- Tray supports restore, queue pause/resume, LIVE navigation and work-aware exit confirmation.
-  Windows autostart/hidden start is opt-in and registration repair is explicit.
-- Application updates use stable GitHub Releases, SHA-256 verification and a separate
-  wait-for-exit installer with backup/rollback; media-tool updates remain independent.
-- Other opens Batch import: TXT/CSV/JSON preparation, bounded analysis, paging/filtering,
-  saved sessions and explicit handoff to the existing queue.
-- Personalization adds live 80–200% text scaling, presets, semantic colors, per-page
-  presentation options and validated JSON profile import/export/reset.
+Read the [migration guide](ONBOARDING.md) and [known limitations](#known-limitations).
+Historical evidence remains in the [scenario matrix](docs/1.3.0-SCENARIO-MATRIX.md)
+and [readiness ledger](docs/1.3.0-RELEASE-READINESS.md); a recorded earlier result does
+not qualify a later binary or an untested physical environment.
 
 ## Features
 
@@ -50,7 +46,7 @@ controls have the [known typography limits](#known-limitations) described below.
 - **Browser integration:** PL/EN unpacked Chrome/Edge extension with universal HTTP/HTTPS toolbar and page/link context-menu handoff. YouTube video/Short/playlist/LIVE buttons retain their centered quality modal. Desktop yt-dlp checks support; new LIVE recordings and generic playlists require desktop confirmation/selection.
 - **Web Remote:** PL/EN/Auto mobile-friendly LAN queue controls and LIVE status/actions, one-time short pairing codes, HttpOnly sessions and optional explicit HTTPS. Numeric Hours/Minutes/Seconds range input avoids mobile colon-keyboard problems. Remote adds remain YouTube-scoped.
 - **Managed tools:** automatic installation, validation and update checks for yt-dlp, FFmpeg/ffprobe and Deno; advanced custom-executable overrides.
-- **Appearance:** Polish/English and Light/Dark/System themes, shared application branding and responsive scrolling.
+- **Appearance:** sixteen interface locale catalogs, Light/Dark/System themes, shared branding, 80–200% logical text scaling and responsive scrolling. Full native-speaker review of every locale remains incomplete.
 - **Optional system notifications:** independently configurable Downloads/LIVE events, bounded progress updates, privacy mode, cached thumbnails, safe actions and automatic Windows backend selection. OS policy can prevent display even when submission succeeds.
 - **Opt-in browser cookies:** user-selected HTTPS domains or metadata-only Custom selection, standalone Native Messaging, DPAPI storage, exclusive None/Manual/Synced sources and attempt-owned Netscape jars. With JIT consent, an authentication failure requests a fresh accepted snapshot and allows exactly one automatic retry. Account/session validity remains source-dependent.
 
@@ -58,7 +54,7 @@ controls have the [known typography limits](#known-limitations) described below.
 
 Windows 10/11 **x64**, and internet access to install the tools on first start. The self-contained ZIP includes .NET 10: no separate .NET or manual yt-dlp/FFmpeg/Deno installation is required.
 
-1. Download `ModernTubeDownloader-1.2.1-win-x64.zip` from [Releases](https://github.com/ProGraMajster/ModernTubeDownloader/releases).
+1. Download `ModernTubeDownloader-1.3.0-win-x64.zip` and its `.sha256` from [the official release](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.3.0), and compare SHA-256.
 2. Extract it to a writable folder. Do not run it from inside the ZIP.
 3. Run `ModernTubeDownloader.exe`.
 
@@ -69,8 +65,11 @@ This release is not code-signed. Windows may display an unknown-publisher/SmartS
 ## Updates
 
 Settings → Application updates checks stable releases. Choose Notify only,
-Auto-download or Install on exit; installation waits for real shutdown and preserves
-local data. Verify published checksums; they are not code signing. See [UPDATES.md](UPDATES.md).
+Auto-download or Install on exit; installation waits for safe shutdown and preserves
+local data. New profiles default to Install on exit; existing disabled checks, confirmed
+preferences, Skip and Later remain respected. Installation at manual foreground startup
+is independent and off by default. Verify published checksums; they are not code signing.
+See [UPDATES.md](UPDATES.md) and [setup/migration](ONBOARDING.md).
 
 ## Tray & startup
 
@@ -81,8 +80,10 @@ requires confirmation before exit. See [TRAY_AND_STARTUP.md](TRAY_AND_STARTUP.md
 ## Other / Batch Import
 
 Other → Batch Import prepares TXT/CSV/JSON URL lists with bounded analysis, statuses,
-filters, pages and saved sessions. Review ready rows and explicitly add them to the
-existing queue. See [BATCH_IMPORT.md](BATCH_IMPORT.md).
+filters, pages and saved sessions. Review and submit manually, or explicitly choose
+Import & Download. Each list can retain its own destination. See [BATCH_IMPORT.md](BATCH_IMPORT.md).
+The [organizer](FILE_ORGANIZER_SAFETY.md) matches existing recordings by verified identity
+and previews moves with JSON/companions; a filename match alone never authorizes a move.
 
 ## Personalization
 
@@ -93,7 +94,7 @@ or authentication. See [PERSONALIZATION.md](PERSONALIZATION.md).
 ### Text size
 
 Choose 80–200% live application text size or reset to 100%. This does not change
-Windows DPI or stretch icons/images. See the composite-control limits below.
+Windows DPI or stretch icons/images; logical-scale tests do not qualify a physical display.
 
 ## Downloads
 
@@ -129,20 +130,25 @@ SponsorBlock is off by default. **Mark requires explicit MKV** and is the suppor
 
 ## Known limitations
 
-- Text scaling: some tab labels and numeric editors do not fully follow global scaling
-  due to ModernFormsNext [#204](https://github.com/ProGraMajster/ModernFormsNext/issues/204)
-  and [#205](https://github.com/ProGraMajster/ModernFormsNext/issues/205). These are accepted
-  post-1.2 follow-ups, not crashes; no framework workaround is included.
-- Polski: niektóre etykiety kart i edytory liczb nie podążają w pełni za globalnym
-  skalowaniem tekstu z powodu ograniczeń ModernFormsNext #204/#205. Poprawa jest planowana
-  po osobnych naprawach frameworka; ten hotfix nie zmienia tych kontrolek.
+- **Confirmed, accepted for 1.3.0:** [ModernFormsNext #534](https://github.com/ProGraMajster/ModernFormsNext/issues/534)
+  can make a maximized window cover the persistently visible Windows taskbar or show
+  an incorrect strip. Use a restored, non-maximized window; taskbar auto-hide may help.
+- Some independent popup/tooltip/focus scenarios and physical 5K at Windows 225% DPI
+  remain **NOT QUALIFIED**. A long-duration memory/leak soak was **NOT EXECUTED**.
+  These qualification gaps are distinct from the confirmed maximization issue.
+- All sixteen locale catalogs have not received full native-speaker review. Help and
+  bundled release notes include PL/EN; official GitHub notes are English with a visible fallback.
+- The organizer requires reliable source identity, excludes completed LIVE parts and
+  does not repair corrupt journals. Retained interrupted staging files require review;
+  concurrent external editing of files being organized is unsupported.
 - yt-dlp/site behavior can change; extractor availability is not an all-URL/all-feature guarantee. DRM circumvention is not implemented.
 - FromStart depends on retained source fragments and is Experimental. Real upcoming/natural-end behavior is source-dependent; scheduled monitoring needs the app running.
 - Resume depends on matching formats, source/protocol and yt-dlp support. An unexplained terminated yt-dlp process can become Failed/Unknown and require explicit Retry; retained partial data is preserved.
 - Custom ranges cannot combine with subtitles or SponsorBlock; Remove cannot combine with subtitles. Active LIVE excludes these VOD post-processing options.
 - Missing subtitle languages or embedding failures produce warnings without discarding completed media. No automatic media transcoding, part concatenation or channel expansion.
-- Exhaustive DPI/scale/page/theme, login/tray soak, clean-PC update and multi-source Batch,
-  physical-device and native picker matrices remain post-1.2 QA, not universal compatibility claims.
+- Exhaustive device/source/native-picker coverage and physical disk removal/power-loss
+  tests are not claimed. Synthetic fixture and injected-failure results do not establish
+  another computer's performance or universal compatibility.
 
 ## Supported services
 
@@ -152,19 +158,22 @@ Use Supported services to search the runtime catalog from the selected yt-dlp ex
 
 Settings, VOD queue, LIVE sessions, history, metadata/thumbnail caches, `logs/`, crash diagnostics and `Tools/` live under `%LOCALAPPDATA%\ModernTubeDownloader`. Opt-in encrypted cookie profiles and public native manifests use `Auth/`; temporary user-only credential jars use `Auth/tmp/` and are removed at the operation boundary or safe abandoned-jar cleanup. Temporary media defaults to the current user's Downloads/ModernTubeDownloader/Temp folder; final media uses Settings' output directory.
 
-There is no application-owned telemetry or account requirement. Network activity includes application/tool GitHub release metadata/downloads, yt-dlp's media services/CDNs and optional SponsorBlock requests, and metadata thumbnail retrieval. Application update checks can be disabled in Settings. Appearance, Updates and Batch data stay in the application's local data directory. Web Remote listens only when explicitly enabled. Third-party services/tools have their own terms and privacy policies.
+There is no application-owned telemetry or account requirement. Network activity includes application/tool GitHub release metadata/downloads, exact-version release notes when What's New is opened, yt-dlp's media services/CDNs and optional SponsorBlock requests, and metadata thumbnail retrieval. Application update checks can be disabled in Settings. Appearance, Updates, Batch and the bounded release-notes cache stay in the application's local data directory. Web Remote listens only when explicitly enabled. Third-party services/tools have their own terms and privacy policies.
 
 Logs are local and redact common credential/URL data. Known auth values are scrubbed before process callbacks/errors and metadata output; header/cookie/password/authorization metadata fields are removed recursively. Optional JSON sidecars retain other original metadata and can still include source URLs/account-related details: review them and logs before sharing. This is not a guarantee against every unknown upstream secret or forensic recovery.
 
 ## Build from source
 
-Requires the .NET 10 SDK and Node.js for JavaScript tests. The current ModernFormsNext pin is `8d8a7679779608b4edbee7dc687c13e3b1a611d9` ([notification hotfix PR #271](https://github.com/ProGraMajster/ModernFormsNext/pull/271)), based on master `18f47b085a59e65eb611e3fd1d38e8dffa3fb19c` fetched 2026-10-15. The pin includes the reviewed notification fix, so no uncommitted framework patch is needed. No framework source is copied into this repository:
+Requires the .NET 10 SDK and Node.js for JavaScript tests. The central ModernFormsNext
+pin is `7bf58d06d795d7298c86d9bf9471bbfb46852bab`, shared by development, CI and release
+packaging. Use that exact clean checkout; no uncommitted framework patch is needed or
+copied into this repository:
 
 ```powershell
 git clone https://github.com/ProGraMajster/ModernTubeDownloader.git
 cd ModernTubeDownloader
 git clone --no-checkout https://github.com/ProGraMajster/ModernFormsNext.git .mfn-master-worktree
-git -C .mfn-master-worktree checkout --detach 8d8a7679779608b4edbee7dc687c13e3b1a611d9
+git -C .mfn-master-worktree checkout --detach 7bf58d06d795d7298c86d9bf9471bbfb46852bab
 dotnet restore .\ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj
 dotnet build .\ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj -c Debug -m:1 /p:UseSharedCompilation=false
 ```

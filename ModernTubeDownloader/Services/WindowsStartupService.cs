@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using ModernTubeDownloader.Infrastructure;
 using System.Text.RegularExpressions;
 
 namespace ModernTubeDownloader.Services;
@@ -20,12 +21,28 @@ public sealed class CurrentUserStartupRegistration : IStartupRegistration
         using var key = Registry.CurrentUser.OpenSubKey(KeyPath);
         return key?.GetValue(ValueName) as string;
     }
-    public void Write(string command)
+    public void Write(string command) => Write(command, WriteCurrentUser, IsolatedQaProfile.SuppressCurrentSystemRegistration);
+
+    internal static void Write(string command, Action<string> write, Func<bool> suppress)
+    {
+        IsolatedQaProfile.DemandSystemRegistrationAllowed(suppress);
+        write(command);
+    }
+
+    private static void WriteCurrentUser(string command)
     {
         using var key = Registry.CurrentUser.CreateSubKey(KeyPath, true);
         key.SetValue(ValueName, command, RegistryValueKind.String);
     }
-    public void Delete()
+    public void Delete() => Delete(DeleteCurrentUser, IsolatedQaProfile.SuppressCurrentSystemRegistration);
+
+    internal static void Delete(Action delete, Func<bool> suppress)
+    {
+        IsolatedQaProfile.DemandSystemRegistrationAllowed(suppress);
+        delete();
+    }
+
+    private static void DeleteCurrentUser()
     {
         using var key = Registry.CurrentUser.OpenSubKey(KeyPath, true);
         key?.DeleteValue(ValueName, false);

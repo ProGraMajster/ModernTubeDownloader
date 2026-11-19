@@ -16,7 +16,8 @@ try {
     }
     foreach ($required in @('ModernTubeDownloader.exe', 'ModernTubeDownloader.dll', 'ModernFormsNext.dll', 'ModernTubeDownloader.Authentication.dll',
         'native-host/ModernTubeDownloader.NativeHost.exe', 'native-host/ModernTubeDownloader.NativeHost.dll',
-        'updater/ModernTubeDownloader.Updater.exe', 'updater/ModernTubeDownloader.Updater.dll', 'UPDATES.md', 'TRAY_AND_STARTUP.md', 'BATCH_IMPORT.md', 'PERSONALIZATION.md', 'COOKIE_SYNC.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md')) {
+        'updater/ModernTubeDownloader.Updater.exe', 'updater/ModernTubeDownloader.Updater.dll', 'UPDATES.md', 'TRAY_AND_STARTUP.md', 'BATCH_IMPORT.md', 'PERSONALIZATION.md', 'COOKIE_SYNC.md',
+        'ONBOARDING.md', 'FILE_ORGANIZER_SAFETY.md', 'STARTUP_UPDATE_POLICY.md', 'LOCALIZATION_COVERAGE.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md')) {
         if ($required -notin $names) { throw "Missing package entry: $required" }
     }
     Write-Output "Package hygiene PASS: $($names.Count) entries."

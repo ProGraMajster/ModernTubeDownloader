@@ -1,6 +1,25 @@
 # Current status
 
-## Release 1.2.1 — 2026-10-18
+## Optional Modern Dashboard — local 1.3.0-candidate.1
+
+Development branch: `feature/modern-dashboard-ui`, based on `558ec43`. No stable
+release promotion. Classic is the migration default; both shells share the same
+AppServices and page instances. Source, responsiveness and qualification details:
+[MODERN_DASHBOARD_UI.md](MODERN_DASHBOARD_UI.md). All six Modern pages have been
+rebuilt from the supplied references, including native presentation primitives,
+aligned History with real date/type filters, compact Batch metrics, grouped
+inspectors and horizontal Settings categories. Classic and the shared runtime
+remain available. Owner visual acceptance is pending; no pixel-perfect claim.
+MFN #272 is mitigated in dashboard labels through public DrawText; upstream
+composite typography #204/#205 and physical high-DPI qualification remain separate.
+The unchanged updater deadline regression in
+[issue #4](https://github.com/ProGraMajster/ModernTubeDownloader/issues/4) remains open;
+no timeout/assertion was weakened. Exact-run results, comparison images and
+branch-isolation evidence are recorded locally in
+`MODERN_DASHBOARD_VISUAL_REBUILD_REPORT.md` and `artifacts/dashboard-visual/`.
+These large, machine-specific artifacts are excluded from publication/package data.
+
+## Historical master release 1.2.1 — 2026-10-18
 
 Patch release target: **1.2.1**, assembly/file version **1.2.1.0**, Classic UI only.
 The owner authorizes master push, terminal exact-head CI, annotated tag and the existing

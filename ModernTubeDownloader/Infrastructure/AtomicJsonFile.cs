@@ -5,20 +5,35 @@ namespace ModernTubeDownloader.Infrastructure;
 
 internal static class AtomicJsonFile
 {
-    private static readonly SemaphoreSlim WriteGate = new(1, 1);
+    private static readonly SemaphoreSlim IoGate = new(1, 1);
 
     public static async Task<T?> ReadAsync<T>(string path, CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(path))
-            return default;
-
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
-        return await JsonSerializer.DeserializeAsync<T>(stream, JsonDefaults.Options, cancellationToken).ConfigureAwait(false);
+        // Windows replacement can fail while a reader holds the destination,
+        // even with delete sharing. Use the existing publication gate for the
+        // complete read lifetime, closing its handle before a writer proceeds.
+        await IoGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // File.Exists hides access errors and directories behind `false`.
+            // Only a genuinely absent path is a new store; consumers must see
+            // other I/O failures so their recovery latches protect the profile.
+            FileStream stream;
+            try { stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true); }
+            catch (FileNotFoundException) { return default; }
+            catch (DirectoryNotFoundException) { return default; }
+            await using (stream)
+                return await JsonSerializer.DeserializeAsync<T>(stream, JsonDefaults.Options, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            IoGate.Release();
+        }
     }
 
     public static async Task WriteAsync<T>(string path, T value, CancellationToken cancellationToken = default)
     {
-        await WriteGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await IoGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var directory = Path.GetDirectoryName(path) ?? throw new InvalidOperationException("The file has no directory.");
@@ -35,7 +50,7 @@ internal static class AtomicJsonFile
         }
         finally
         {
-            WriteGate.Release();
+            IoGate.Release();
         }
     }
 
@@ -44,7 +59,7 @@ internal static class AtomicJsonFile
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(json);
 
-        await WriteGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await IoGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         string? temporaryPath = null;
         try
         {
@@ -74,7 +89,7 @@ internal static class AtomicJsonFile
             {
                 try { File.Delete(temporaryPath); } catch { }
             }
-            WriteGate.Release();
+            IoGate.Release();
         }
     }
 }

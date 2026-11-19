@@ -54,7 +54,7 @@ public sealed class TypographyTests
         finally { AppTypography.SetScale(100); }
     }
     [Theory]
-    [InlineData("{\"schemaVersion\":2}")]
+    [InlineData("{\"schemaVersion\":3}")]
     [InlineData("{\"typography\":{\"appTextScale\":201}}")]
     [InlineData("{\"script\":\"evil\"}")]
     [InlineData("{\"typography\":null}")]

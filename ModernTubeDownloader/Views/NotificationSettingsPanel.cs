@@ -38,7 +38,7 @@ internal sealed class NotificationSettingsPanel : Panel
         Controls.AddRange([heading, description, status, advanced, diagnostic]);
         foreach (var property in typeof(NotificationSettings).GetProperties().Where(property => property.PropertyType == typeof(bool)))
         {
-            var check = new CheckBox { AccessibleAutomationId = "Notification" + property.Name };
+            var check = new DashboardToggle { AccessibleAutomationId = "Notification" + property.Name };
             AppUi.BindForeground(check); check.Style.BackgroundColor = SKColors.Transparent;
             Bind(check, "Notification.Preference." + property.Name);
             checks.Add((check, property)); Controls.Add(check);

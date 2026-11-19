@@ -7,10 +7,21 @@ using ModernTubeDownloader.Theming;
 
 namespace ModernTubeDownloader.Views;
 
+internal sealed record PersonalizationSearchOption(string Section, string CaptionKey, string AutomationId);
+
 /// <summary>Only the closed appearance schema is editable; no paths, credentials or executable configuration.</summary>
 internal sealed class PersonalizationSettingsPanel : Panel
 {
-    private static readonly string[] Sections = ["Global", "Navigation", "Downloads", "Live", "History", "Other", "BatchImport", "Settings", "Details"];
+    private static readonly string[] Sections = ["Global", "Navigation", "Downloads", "Live", "History", "Other", "BatchImport", "Settings", "Details", "ModernDashboardShell"];
+    private static readonly string[] ColorTokens = ["Accent", "Background", "Surface", "SurfaceSecondary", "Border", "TextPrimary", "TextSecondary"];
+    // The same closed schema used by BuildFields, with names/types only. Searching
+    // never reads profile values and never creates the controls of another section.
+    internal static IReadOnlyList<PersonalizationSearchOption> SearchOptions { get; } = Array.AsReadOnly(
+        Sections.SelectMany(name => EditableProperties(typeof(AppearanceProfile).GetProperty(name)!.PropertyType)
+            .Select(property => new PersonalizationSearchOption(name, "Appearance.Field." + property.Name, "Appearance" + name + property.Name)))
+            .Concat(ColorTokens.Select(token => new PersonalizationSearchOption("Global", "Appearance.Color." + token, "AppearanceColor" + token))).ToArray());
+    private static IEnumerable<PropertyInfo> EditableProperties(Type type) => type.GetProperties()
+        .Where(property => property.PropertyType == typeof(bool) || property.PropertyType == typeof(int) || property.PropertyType.IsEnum);
     private readonly AppServices services;
     private readonly ComboBox section = new() { AccessibleAutomationId = "AppearanceSection" };
     private readonly FlowLayoutPanel commands = new() { WrapContents = true };
@@ -31,7 +42,7 @@ internal sealed class PersonalizationSettingsPanel : Panel
         AppUi.Input(section); AppUi.Primary(previewButton); warning.Multiline = true;
         preview.Controls.AddRange([previewText, previewButton, previewProgress]);
         Controls.AddRange([title, commands, section, fields, preview, warning]);
-        foreach (var name in new[] { "Default", "Compact", "Large", "Minimal" }) Add("Preset." + name, () => ApplyAsync(AppearanceProfile.Preset(name)));
+        foreach (var name in new[] { "Default", "Compact", "Large", "Minimal", "ModernDashboard" }) Add("Preset." + name, () => ApplyAsync(AppearanceProfile.Preset(name)));
         Add("Import", ImportAsync); Add("Export", ExportAsync);
         Add("ResetSection", () => ConfirmResetAsync(false)); Add("ResetAll", () => ConfirmResetAsync(true));
         section.SelectedIndexChanged += (_, _) => { if (!editing) BuildFields(); };
@@ -70,7 +81,7 @@ internal sealed class PersonalizationSettingsPanel : Panel
             var name = Sections[Math.Max(0, section.SelectedIndex)];
             var sectionProperty = typeof(AppearanceProfile).GetProperty(name)!;
             var settings = sectionProperty.GetValue(services.Appearance.Profile)!;
-            foreach (var property in settings.GetType().GetProperties().Where(p => p.PropertyType == typeof(bool) || p.PropertyType == typeof(int) || p.PropertyType.IsEnum))
+            foreach (var property in EditableProperties(sectionProperty.PropertyType))
             {
                 var row = new Panel { Height = AppTypography.TextHeight(46), Tag = property.Name }; AppUi.Surface(row);
                 var label = AppUi.Muted(services.Localization["Appearance.Field." + property.Name]);
@@ -94,16 +105,27 @@ internal sealed class PersonalizationSettingsPanel : Panel
                 }
                 input.AccessibleAutomationId = "Appearance" + name + property.Name; row.Controls.AddRange([label, input]); fields.Controls.Add(row);
             }
-            if (name == "Global") foreach (var token in new[] { "Accent", "Background", "Surface", "SurfaceSecondary", "Border", "TextPrimary", "TextSecondary" }) AddColor(token);
+            if (name == "Global") foreach (var token in ColorTokens) AddColor(token);
         }
         finally { editing = false; }
         LayoutForWidth(Width); CheckContrast();
+    }
+    internal (Control Caption, Control Input)? RevealSearchOption(PersonalizationSearchOption option)
+    {
+        if (disposed || !SearchOptions.Contains(option)) return null;
+        // Selecting the existing section is navigation, not a profile edit. Its
+        // normal handler creates and wires the canonical fields exactly once.
+        var index = Array.IndexOf(Sections, option.Section);
+        if (section.SelectedIndex != index) section.SelectedIndex = index;
+        var row = fields.Controls.FirstOrDefault(control => control.Controls.Count >= 2 &&
+            control.Controls[1].AccessibleAutomationId == option.AutomationId);
+        return row is null ? null : (row.Controls[0], row.Controls[1]);
     }
     private void AddColor(string token)
     {
         var row = new Panel { Height = AppTypography.TextHeight(46) }; AppUi.Surface(row);
         var label = AppUi.Muted(services.Localization["Appearance.Color." + token]);
-        var color = new TextBox { Text = services.Appearance.Profile.Global.Colors.GetValueOrDefault(token, Hex(AppUi.GetColor("App." + token))), AccessibleAutomationId = "AppearanceColor" + token };
+        var color = new AppThemeTextBox { Text = services.Appearance.Profile.Global.Colors.GetValueOrDefault(token, Hex(AppUi.GetColor("App." + token))), AccessibleAutomationId = "AppearanceColor" + token };
         AppUi.Input(color); var pick = new Button { Text = "…" }; var reset = new Button { Text = services.Localization["Appearance.ResetToken"] }; AppUi.Secondary(pick); AppUi.Secondary(reset);
         color.TextChanged += (_, _) => { var value = color.Text; if (value.Length == 7 && value[0] == '#' && value[1..].All(Uri.IsHexDigit)) QueueEdit(p => { p.Global.Theme = AppearanceTheme.Custom; p.Global.Colors[token] = value; }); };
         pick.Click += async (_, _) => await SafeAsync(async () => { if (FindForm() is not { } owner) return; var dialog = new ColorDialog { Color = AppUi.GetColor("App." + token) }; if (await dialog.ShowDialog(owner) == DialogResult.OK) color.Text = Hex(dialog.Color); });
@@ -117,7 +139,10 @@ internal sealed class PersonalizationSettingsPanel : Panel
     }
     private async Task ConfirmResetAsync(bool all)
     {
-        if (await SystemMessageBox.ShowAsync(FindForm(), services.Localization["Appearance.ResetConfirm"], services.Localization["Appearance.Title"], MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        if (FindForm() is not { } owner) return;
+        using var confirmation = AppMessageBox.Confirmation(services.Localization["Appearance.Title"], services.Localization["Appearance.ResetConfirm"],
+            services.Localization[all ? "Appearance.ResetAll" : "Appearance.ResetSection"], services.Localization["Common.Cancel"], "AppearanceReset");
+        if (await confirmation.ShowDialog(owner) != DialogResult.Yes) return;
         var profile = services.Appearance.Profile.Copy(); if (all) profile = new(); else profile.ResetSection(Sections[Math.Max(0, section.SelectedIndex)]); await ApplyAsync(profile);
     }
     private async Task ImportAsync()
@@ -134,12 +159,21 @@ internal sealed class PersonalizationSettingsPanel : Panel
     }
     public void LayoutForWidth(int width)
     {
-        Width = width; var line = AppTypography.TextHeight(46); var commandHeight = AppTypography.TextHeight(46) * (int)Math.Ceiling(8d / Math.Max(1, (width - 48) / 198));
+        // Construction and shell reparenting can precede the usable card allocation.
+        if (width <= 48) return;
+        Width = width; var line = AppTypography.TextHeight(46); var commandHeight = AppTypography.TextHeight(46) * (int)Math.Ceiling(9d / Math.Max(1, (width - 48) / 198));
         title.SetBounds(24, 18, width - 48, AppTypography.TextHeight(32));
-        foreach (var button in labels.Keys) { button.Height = AppTypography.TextHeight(38); button.Width = Math.Min(width - 48, AppTypography.TextHeight(190)); }
-        // Width-dependent wrap count includes the text-scaled command buttons.
-        commandHeight = (int)Math.Ceiling(8d / Math.Max(1, (width - 48) / (Math.Min(width - 48, AppTypography.TextHeight(190)) + 8))) * line;
-        commands.SetBounds(24, title.Bottom + 10, width - 48, commandHeight); section.SetBounds(24, commands.Bottom + 8, width - 48, AppTypography.TextHeight(38));
+        // Commit one consistent wrap geometry; laying out after each individual button
+        // resize lets FlowLayout measure a mixture of old and new command widths.
+        commands.SuspendLayout();
+        try
+        {
+            foreach (var button in labels.Keys) { button.Height = AppTypography.TextHeight(38); button.Width = Math.Min(width - 48, AppTypography.TextHeight(190)); }
+            commandHeight = (int)Math.Ceiling(9d / Math.Max(1, (width - 48) / (Math.Min(width - 48, AppTypography.TextHeight(190)) + 8))) * line;
+            commands.SetBounds(24, title.Bottom + 10, width - 48, commandHeight);
+        }
+        finally { commands.ResumeLayout(true); }
+        section.SetBounds(24, commands.Bottom + 8, width - 48, AppTypography.TextHeight(38));
         fields.SetBounds(24, section.Bottom + 12, width - 48, fields.Controls.Count * line);
         var y = 0; foreach (var row in fields.Controls) { row.SetBounds(0, y, fields.Width, line); var c = row.Controls.ToArray(); var left = Math.Max(200, fields.Width / 2); c[0].SetBounds(0, 0, left - 10, line - 4); c[1].SetBounds(left, 0, Math.Max(100, fields.Width - left), line - 6); if (c.Length > 2) { c[1].Width = Math.Max(100, fields.Width - left - 156); c[2].SetBounds(c[1].Right + 4, 0, 42, line - 6); c[3].SetBounds(c[2].Right + 4, 0, 106, line - 6); } y += line; }
         preview.SetBounds(24, fields.Bottom + 12, width - 48, AppTypography.TextHeight(116)); previewText.SetBounds(16, 12, preview.Width - 32, AppTypography.TextHeight(28)); previewButton.SetBounds(16, previewText.Bottom + 6, Math.Min(340, preview.Width - 32), AppTypography.TextHeight(38)); previewProgress.SetBounds(16, previewButton.Bottom + 12, preview.Width - 32, 8);

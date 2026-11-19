@@ -2,6 +2,17 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const directory=path.join(__dirname,'../ModernTubeDownloader/WebRemote/wwwroot');
 const source=fs.readFileSync(path.join(directory,'i18n.js'),'utf8');
 function create(preference,languages){const values=new Map(preference?[['mtdRemoteLanguage',preference]]:[]);const context=vm.createContext({navigator:{languages},localStorage:{getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)}});vm.runInContext(source,context);return {i18n:context.MTDRemoteI18n,values}}
+test('desktop registry catalog supports regional preferences, browser fallback and translated errors',()=>{
+  const directory=path.join(__dirname,'../ModernTubeDownloader/Resources/Languages');
+  const codes=fs.readdirSync(directory).filter(file=>file.endsWith('.json')).map(file=>file.slice(0,-5));
+  assert.equal(codes.length,16);assert.ok(codes.includes('de-DE'));assert.ok(codes.includes('ja-JP'));
+  const resources=Object.fromEntries(codes.map(code=>[code,Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(path.join(directory,code+'.json'),'utf8'))).filter(([key])=>key.startsWith('RemoteWeb.')).map(([key,value])=>[key.slice(10),value]))]));
+  const page=create('de-DE',['ja-JP']);
+  assert.equal(page.i18n.installCatalog({locales:codes.map(code=>({code,nativeName:code})),resources}),true);
+  assert.equal(page.i18n.language,'de-DE');assert.equal(page.i18n.t('pairing-invalid'),resources['de-DE']['pairing-invalid']);
+  page.i18n.select('browser');assert.equal(page.i18n.language,'ja-JP');
+  assert.equal(page.i18n.installCatalog({locales:[{code:'de-DE',nativeName:'Deutsch'}],resources:{'de-DE':{}}}),false);
+});
 test('Follow app is default; browser mode, legacy Auto and persisted overrides remain explicit',()=>{
   const follow=create(null,['pl-PL']);
   assert.equal(follow.i18n.preference,'app');

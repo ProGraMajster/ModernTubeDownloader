@@ -5,8 +5,11 @@ namespace ModernTubeDownloader.Batch;
 
 public enum BatchEntryStatus { Pending, Validating, Analyzing, Ready, Duplicate, Unsupported, AuthRequired, AddedToQueue, Downloading, Completed, Failed, Skipped, Cancelled }
 public enum BatchFilter { All, Ready, Errors, Duplicates, Unsupported, AuthRequired, Queued, Completed }
+public enum BatchWorkflowPhase { Prepared, Analyzing, Queueing, WaitingForQueue, Downloading, Finalizing, Completed, Paused, Cancelled, Attention }
 public sealed class BatchImportEntry
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
     public int Ordinal { get; set; }
     public string Url { get; set; } = "";
@@ -24,10 +27,18 @@ public sealed class BatchImportEntry
     public double? DurationSeconds { get; set; }
     public bool Removed { get; set; }
     public long Revision { get; set; }
-    public BatchImportEntry Copy() => (BatchImportEntry)MemberwiseClone();
+    public BatchImportEntry Copy()
+    {
+        var copy = (BatchImportEntry)MemberwiseClone();
+        copy.AdditionalData = JsonExtensionFields.Copy(AdditionalData);
+        copy.Range = Range.PersistenceCopy();
+        return copy;
+    }
 }
 public sealed class BatchImportSession
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public int SchemaVersion { get; set; } = 1;
     public Guid Id { get; set; } = Guid.NewGuid();
     public string FileName { get; set; } = "";
@@ -37,7 +48,28 @@ public sealed class BatchImportSession
     public int AnalysisWorkers { get; set; } = 1;
     public bool Paused { get; set; } = true;
     public int ImportedCount { get; set; }
+    public string? SourceFingerprint { get; set; }
+    public string? OutputDirectory { get; set; }
+    public string? OutputRoot { get; set; }
+    public string? ListName { get; set; }
+    public bool CreateListSubfolder { get; set; }
+    public bool DestinationConfirmed { get; set; } = true;
+    public bool AutomaticRequested { get; set; }
+    public BatchWorkflowPhase WorkflowPhase { get; set; }
     [JsonIgnore] internal object Sync { get; } = new();
+    [JsonIgnore] internal SemaphoreSlim ReconciliationGate { get; } = new(1, 1);
+    [JsonIgnore] internal SemaphoreSlim MetadataWriteGate { get; } = new(1, 1);
+    [JsonIgnore] internal bool PendingPhaseCommit { get; set; }
+    [JsonIgnore] internal long PresentationRevision;
+    internal BatchImportSession MetadataSnapshot()
+    {
+        lock (Sync)
+        {
+            var copy = (BatchImportSession)MemberwiseClone();
+            copy.AdditionalData = JsonExtensionFields.Copy(AdditionalData);
+            return copy;
+        }
+    }
     [JsonIgnore] internal List<BatchImportEntry> Entries { get; } = [];
     [JsonIgnore] internal Dictionary<Guid, BatchImportEntry> ById { get; } = [];
     public IReadOnlyList<BatchImportEntry> Snapshot() { lock (Sync) return Entries.Where(entry => !entry.Removed).Select(entry => entry.Copy()).ToArray(); }

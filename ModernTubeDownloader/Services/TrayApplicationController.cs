@@ -37,7 +37,7 @@ internal sealed class TrayApplicationController : IDisposable
 
     public bool Available => icon?.Visible == true;
     public Func<Form, IDisposable?>? RegisterDialog { get; set; }
-    public bool HasActiveWork => services.WebRemote.IsRunning || services.Queue.NotificationSnapshot().Any(item =>
+    public bool HasActiveWork => services.Batch.IsAnalyzing || services.WebRemote.IsRunning || services.Queue.NotificationSnapshot().Any(item =>
         item.Status is DownloadStatus.Queued or DownloadStatus.Waiting or DownloadStatus.DownloadingVideo or
             DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing) ||
         services.Live.Snapshot().Any(item => item.IsActive || item.State is LiveSessionState.Pending or LiveSessionState.WaitingForLive);

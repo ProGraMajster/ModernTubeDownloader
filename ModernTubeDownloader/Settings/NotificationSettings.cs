@@ -6,6 +6,8 @@ public enum NotificationPresentation { Normal, CenterOnly }
 /// <summary>Persisted user intent; native support/permission are queried independently.</summary>
 public sealed class NotificationSettings
 {
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public bool Enabled { get; set; } = true;
     public bool PrivacyMode { get; set; }
     public bool ShowThumbnails { get; set; } = true;

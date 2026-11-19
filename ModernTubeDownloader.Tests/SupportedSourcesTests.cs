@@ -231,7 +231,7 @@ public sealed class SupportedSourcesUiTests
         var list = Find(form, "SupportedSourcesList");
         Assert.Equal(12, list.Controls.Count);
         Assert.All(list.Controls.OfType<Panel>(), panel => Assert.Equal(panel.Width - 16, panel.Controls[0].Width));
-        var input = Assert.IsType<TextBox>(Find(form, "SupportedSourcesSearch"));
+        var input = Assert.IsType<AppThemeTextBox>(Find(form, "SupportedSourcesSearch"));
         input.Text = "Platform4999"; host.ProcessPendingWork(); Assert.Single(list.Controls);
         Assert.False(Find(form, "SupportedSourcesOpenButton").Visible);
         Assert.Equal("SupportedSourcesWindow", form.AccessibilityObject.AutomationId);

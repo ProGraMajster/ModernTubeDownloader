@@ -36,7 +36,7 @@ public sealed record QueueProgressSummary(int Total, int Completed, int Failed, 
         // Deliberately conservative: no subtraction of a different stream's byte
         // counter; excludes merge/remux/retries and is explicitly labelled approximate.
         var seconds = speed > 0 ? (double)remaining / speed : double.NaN;
-        TimeSpan? eta = settled == rows.Length ? TimeSpan.Zero : !paused && !remainingUnknown &&
+        TimeSpan? eta = rows.Length == 0 ? null : settled == rows.Length ? TimeSpan.Zero : !paused && !remainingUnknown &&
             double.IsFinite(seconds) && seconds is >= 0 and < 31_536_000 ? TimeSpan.FromSeconds(seconds) : null;
         return new(rows.Length, completed, failed, settled, rows.Length == 0 ? 0 : 100 * progress / rows.Length,
             (long)Math.Min(bytes, long.MaxValue), unknown, eta);

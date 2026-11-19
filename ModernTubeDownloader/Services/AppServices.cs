@@ -9,6 +9,8 @@ public sealed class AppServices : IDisposable
 {
     private bool disposed;
     private readonly HttpClient httpClient;
+    private int workStarted;
+    public bool WorkStarted => Volatile.Read(ref workStarted) != 0;
 
     private AppServices(
         AppPaths paths,
@@ -50,6 +52,7 @@ public sealed class AppServices : IDisposable
     public QueueProcessor Processor { get; }
     public HistoryService History { get; }
     public ThumbnailCacheService Thumbnails { get; }
+    public ThumbnailToolService ThumbnailTool { get; private set; } = null!;
     public SystemNotificationCoordinator? Notifications { get; private set; }
     public LiveSessionService Live { get; private set; } = null!;
     public LiveRecordingScheduler LiveScheduler { get; private set; } = null!;
@@ -58,18 +61,26 @@ public sealed class AppServices : IDisposable
     public SourceCheckService SourceCheck { get; private set; } = null!;
     public ApplicationUpdateService Updates { get; private set; } = null!;
     public ModernTubeDownloader.Batch.BatchImportService Batch { get; private set; } = null!;
+    public ModernTubeDownloader.Organizer.DownloadOrganizerService Organizer { get; private set; } = null!;
+    internal UserExperienceService Experience { get; private set; } = null!;
+    internal GitHubReleaseNotesService ReleaseNotes { get; private set; } = null!;
 
     public static AppServices Create(
         AppPaths paths,
         HttpClient? httpClient = null,
         IToolReleaseSource? releaseSource = null,
         IToolBinaryValidator? toolValidator = null,
-        ModernFormsNext.Notifications.ISystemNotificationService? notifications = null)
+        ModernFormsNext.Notifications.ISystemNotificationService? notifications = null,
+        bool deferWorkStart = false)
     {
+        using var createTiming = PerformanceDiagnostics.Measure("services.create");
         paths.EnsureCreated();
         var logger = new FileAppLogger(paths.LogDirectory);
+        var experience = UserExperienceService.OpenAsync(paths, logger, AppBranding.Version).GetAwaiter().GetResult();
         var settings = new SettingsService(paths, logger);
-        settings.LoadAsync().GetAwaiter().GetResult();
+        using (PerformanceDiagnostics.Measure("settings.load")) settings.LoadAsync().GetAwaiter().GetResult();
+        if (experience.State.ExistingProfile && !experience.SettingsExisted) settings.PreserveLegacyUpdatePolicyWithoutSettings();
+        else if (!experience.State.ExistingProfile && !experience.SettingsExisted) settings.Current.Updates.PolicyVersion = 1;
         var localization = new LocalizationService(settings.Current.Language);
         var appearance = new AppAppearanceService(settings, logger, Path.Combine(paths.RootDirectory, "appearance.json"));
         var processRunner = new AsyncProcessRunner(logger);
@@ -85,16 +96,23 @@ public sealed class AppServices : IDisposable
         var ytDlpRunner = new YtDlpProcessRunner(processRunner, tools, logger, authentication);
         var metadata = new YtDlpMetadataService(ytDlpRunner, settings, logger);
         var history = new HistoryService(paths, logger);
-        history.LoadAsync().GetAwaiter().GetResult();
+        using (PerformanceDiagnostics.Measure("history.load")) history.LoadAsync().GetAwaiter().GetResult();
         var queueStore = new QueuePersistenceService(paths, logger);
         var liveStore = new LiveSessionPersistenceService(paths, logger);
-        liveStore.MigrateLegacyQueueAsync(settings).GetAwaiter().GetResult();
-        var live = new LiveSessionService(liveStore, settings, logger);
-        live.LoadAsync().GetAwaiter().GetResult();
+        // A damaged shared History makes this a diagnostic runtime. Do not
+        // migrate/normalize otherwise valid stores before recovery and reopen.
+        using (PerformanceDiagnostics.Measure("live.migrate"))
+            if (!history.LoadFailed) liveStore.MigrateLegacyQueueAsync(settings).GetAwaiter().GetResult();
+        var live = new LiveSessionService(liveStore, settings, logger, () => !history.LoadFailed);
+        using (PerformanceDiagnostics.Measure("live.load")) live.LoadAsync().GetAwaiter().GetResult();
         var storageSafety = new QueueStorageSafety(directories: () =>
             [paths.RootDirectory, paths.AuthenticationDirectory, settings.Current.TemporaryDirectory, settings.Current.FinalOutputDirectory]);
-        var queue = new DownloadQueueService(queueStore, logger, settings, storageSafety);
-        queue.LoadAsync().GetAwaiter().GetResult();
+        var queue = new DownloadQueueService(queueStore, logger, settings, storageSafety, () => !history.LoadFailed);
+        using (PerformanceDiagnostics.Measure("queue.load")) queue.LoadAsync().GetAwaiter().GetResult();
+        if (live.LoadFailed)
+            storageSafety.Report(new IOException("LIVE storage could not be loaded; preserve original data before recovery."), persistence: true);
+        if (history.LoadFailed)
+            storageSafety.Report(new IOException("History could not be loaded; preserve original data and reopen after recovery."), persistence: true);
         var ffmpeg = new FfmpegService(processRunner, tools, logger);
         var downloader = new DownloadJobExecutor(paths, settings, ytDlpRunner, metadata, ffmpeg, history, logger, storageSafety);
         var processor = new QueueProcessor(queue, downloader, settings, logger);
@@ -103,6 +121,9 @@ public sealed class AppServices : IDisposable
             new YtDlpLiveAvailabilityProbe(metadata), settings, logger);
         var thumbnails = new ThumbnailCacheService(paths, logger, () => settings.Current.DownloadThumbnail);
         var services = new AppServices(paths, logger, settings, localization, appearance, tools, metadata, queue, processor, history, thumbnails, httpClient);
+        services.Experience = experience;
+        services.ReleaseNotes = new(paths, httpClient, logger);
+        services.ThumbnailTool = new(metadata.AnalyzeAsync, thumbnails, paths, logger);
         services.Live = live;
         services.Updates = new ApplicationUpdateService(paths, settings, httpClient, logger);
         services.Authentication = authentication;
@@ -113,31 +134,72 @@ public sealed class AppServices : IDisposable
                 thumbnails.GetCachedNotificationPath);
             services.Notifications.Attach(queue, live);
         }
-        processor.Start();
-        liveScheduler.Start();
+        if (PerformanceDiagnostics.Enabled)
+        {
+            PerformanceDiagnostics.Set("history.records", history.Snapshot().Count);
+            PerformanceDiagnostics.Set("queue.records", queue.Snapshot().Count);
+            PerformanceDiagnostics.BitmapBytes = () => thumbnails.DecodedBytes + Views.ThumbnailImageBinding.OwnedBytes;
+            PerformanceDiagnostics.SampleSources = () =>
+            {
+                PerformanceDiagnostics.Set("thumbnail.cachedBytes", thumbnails.CachedBytes);
+                PerformanceDiagnostics.Set("thumbnail.cachedCount", thumbnails.CachedCount);
+                PerformanceDiagnostics.Set("thumbnail.pending", thumbnails.PendingCount);
+                PerformanceDiagnostics.Set("thumbnail.active", thumbnails.ActiveLoads);
+                PerformanceDiagnostics.Set("thumbnail.displayCopiesBytes", Views.ThumbnailImageBinding.OwnedBytes);
+            };
+        }
         tools.Start();
         services.Sources = new SupportedSourcesService(tools, processRunner, logger);
         services.SourceCheck = new SourceCheckService(metadata, logger);
         services.Batch = new(new ModernTubeDownloader.Batch.BatchSessionStore(Path.Combine(paths.RootDirectory, "Batch")),
-            services.SourceCheck.CheckAsync, queue, settings, logger);
+            services.SourceCheck.CheckAsync, queue, settings, logger, completedHistoryIds: () => history.LoadFailed
+                ? throw new IOException("History could not be loaded; Batch completion evidence is unavailable.")
+                : history.Snapshot().Where(entry => !entry.WasLiveRecording && entry.Status == "Completed")
+                    .Select(entry => entry.QueueItemId).ToHashSet());
+        using (PerformanceDiagnostics.Measure("batch.initialize")) services.Batch.InitializeAsync().GetAwaiter().GetResult();
+        services.Organizer = new(paths, history, queue, settings, logger);
         services.Updates.UpdatePrepared += (_, version) => services.Notifications?.UpdateReady(version);
         services.Batch.AnalysisCompleted += (_, counts) => services.Notifications?.BatchCompleted(counts.Analyzed, counts.Total);
         services.WebRemote = new WebRemoteHost(services);
-        services.WebRemote.ReconcileAsync().GetAwaiter().GetResult();
+        if (!deferWorkStart) services.StartWorkAsync().GetAwaiter().GetResult();
         return services;
+    }
+
+    /// <summary>One canonical admission point; startup updates finish before these workers are admitted.</summary>
+    public async Task StartWorkAsync()
+    {
+        if (History.LoadFailed) return;
+        if (Interlocked.Exchange(ref workStarted, 1) != 0) return;
+        Processor.Start();
+        LiveScheduler.Start();
+        using (PerformanceDiagnostics.Measure("remote.initialize")) await WebRemote.ReconcileAsync().ConfigureAwait(false);
     }
 
     public async Task ShutdownAsync()
     {
-        await Updates.StopAsync().ConfigureAwait(false);
-        await Batch.StopAsync().ConfigureAwait(false);
-        if (Notifications is not null) await Notifications.DisposeAsync().ConfigureAwait(false);
-        await WebRemote.StopAsync().ConfigureAwait(false);
-        await Task.WhenAll(Processor.StopAsync(), LiveScheduler.StopAsync()).ConfigureAwait(false);
-        await Tools.StopAsync().ConfigureAwait(false);
-        await Queue.SaveAsync().ConfigureAwait(false);
-        await Settings.SaveAsync().ConfigureAwait(false);
-        await History.SaveAsync().ConfigureAwait(false);
+        // A failed journal/checkpoint must still drain every process owner. Keep
+        // the failure observable so an updater cannot treat this as a clean exit.
+        var failures = new List<Exception>();
+        async Task Drain(string name, Func<Task> stop)
+        {
+            try { await stop().ConfigureAwait(false); }
+            catch (Exception error)
+            {
+                Logger.Error($"Shutdown stage {name} failed; remaining owners will still be stopped.", error);
+                failures.Add(error);
+            }
+        }
+        await Drain("updates", Updates.StopAsync).ConfigureAwait(false);
+        await Drain("batch", Batch.StopAsync).ConfigureAwait(false);
+        await Drain("organizer", Organizer.StopAsync).ConfigureAwait(false);
+        if (Notifications is not null) await Drain("notifications", () => Notifications.DisposeAsync().AsTask()).ConfigureAwait(false);
+        await Drain("remote", WebRemote.StopAsync).ConfigureAwait(false);
+        await Drain("workers", () => Task.WhenAll(Processor.StopAsync(), LiveScheduler.StopAsync())).ConfigureAwait(false);
+        await Drain("tools", Tools.StopAsync).ConfigureAwait(false);
+        if (!Queue.IsReadOnly) await Drain("queue checkpoint", () => Queue.SaveAsync()).ConfigureAwait(false);
+        if (!Settings.LoadFailed) await Drain("settings checkpoint", () => Settings.SaveAsync()).ConfigureAwait(false);
+        if (!History.LoadFailed) await Drain("history checkpoint", () => History.SaveAsync()).ConfigureAwait(false);
+        if (failures.Count != 0) throw new AggregateException("Application shutdown preserved one or more storage/service failures.", failures);
     }
 
     public void Dispose()
@@ -149,6 +211,7 @@ public sealed class AppServices : IDisposable
         WebRemote.Dispose();
         Updates.Dispose();
         Batch.Dispose();
+        Organizer.Dispose();
         Thumbnails.Dispose();
         Processor.Dispose();
         LiveScheduler.Dispose();

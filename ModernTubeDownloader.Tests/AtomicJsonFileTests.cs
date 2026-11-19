@@ -11,6 +11,13 @@ public sealed class AtomicJsonFileTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public async Task DirectoryAtStorePathDoesNotSilentlyBecomeAnAbsentStore()
+    {
+        Directory.CreateDirectory(root);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => AtomicJsonFile.ReadAsync<object>(root));
+    }
+
+    [Fact]
     public async Task ConcurrentWritesToSameDestinationRemainAtomic()
     {
         var path = Path.Combine(root, "metadata", "same-video.json");

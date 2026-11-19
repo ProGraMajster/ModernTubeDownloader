@@ -12,12 +12,27 @@ public static class BatchImportParser
 {
     public const int MaximumEntries = 250_000;
     public const long MaximumFileBytes = 256_000_000;
+    public const int MaximumClipboardBytes = 8 * 1024 * 1024;
     public static async IAsyncEnumerable<BatchRawEntry> ParseAsync(string file, [EnumeratorCancellation] CancellationToken token = default)
     {
         var format = Path.GetExtension(file).ToLowerInvariant();
         if (format is not (".txt" or ".csv" or ".json")) throw new InvalidDataException("Batch.Error.Format");
         await using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
         if (stream.Length > MaximumFileBytes) throw new InvalidDataException("Batch.Error.Size");
+        await foreach (var row in ParseStreamAsync(stream, format, token)) yield return row;
+    }
+
+    public static async IAsyncEnumerable<BatchRawEntry> ParseTextAsync(string text, [EnumeratorCancellation] CancellationToken token = default)
+    {
+        token.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(text)) throw new InvalidDataException("Batch.Error.ClipboardEmpty");
+        if (Encoding.UTF8.GetByteCount(text) > MaximumClipboardBytes) throw new InvalidDataException("Batch.Error.ClipboardSize");
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(text), writable: false);
+        await foreach (var row in ParseStreamAsync(stream, ".txt", token)) yield return row;
+    }
+
+    private static async IAsyncEnumerable<BatchRawEntry> ParseStreamAsync(Stream stream, string format, [EnumeratorCancellation] CancellationToken token)
+    {
         await using var bounded = new BatchInputStream(stream, json: format == ".json", csv: format == ".csv");
         var count = 0;
         IAsyncEnumerable<BatchRawEntry> rows = format switch { ".txt" => Txt(bounded, token), ".csv" => Csv(bounded, token), _ => Json(bounded, token) };

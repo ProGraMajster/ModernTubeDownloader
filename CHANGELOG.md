@@ -1,5 +1,148 @@
 # Changelog
 
+## 1.3.0
+
+Detailed [English release notes](docs/releases/v1.3.0.md) and a
+[Polish summary](docs/releases/v1.3.0.pl.md) describe installation, migration and
+limitations. Changes below are relative to 1.2.1. The official release page records
+the actual publication time and published assets.
+
+### Added
+
+- Optional Modern Dashboard for Downloads, LIVE, History, Batch Import, Other and
+  Settings, with shared native navigation, inspectors, status widgets and themed
+  controls. Classic remains available; both shells share one runtime and stores.
+- Runtime shell selection and a session-only `--classic-ui` recovery switch.
+  New profiles choose in setup; saved existing choices are not silently replaced.
+- Collapsible playlist groups over canonical queue jobs, with admitted-job/status
+  counts, preserved child identities/order, reveal, retry and confirmed removal of
+  completed records without deleting their files. Expansion is session-only.
+- Batch Import & Download chains the existing parser, metadata analysis and queue
+  admission. Durable phases, multi-file preparation and per-list destinations retain
+  independent sessions, accepted paths and stable job IDs across restart/retry.
+  Automatic preparation never silently resumes the global paused queue.
+- A five-phase Batch progress presenter distinguishes loading, analysis, admission,
+  download and finalization, with real counts and unknown/approximate values identified.
+- Existing-recording organizer: dry-run, explicit selection, URL/provider/media-ID
+  proof, per-list folders, no-overwrite moves, preserved JSON/subtitle/image companions,
+  canonical History/queue path updates, durable recovery and guarded undo.
+  Verified central metadata may be copied; its original remains in the central store.
+- Resumable six-step first-run wizard, one-time existing-profile interface/update-policy
+  choice, explicit Skip and manual reopening. Upgrade choice leaves folders, quality,
+  authentication and collection data in their existing services.
+- Shared searchable language picker with local vector region cues and fourteen
+  additional locale catalogs: German, French, Spanish, Italian, Brazilian Portuguese,
+  Dutch, Czech, Slovak, Russian, Hungarian, Turkish, Japanese, Korean and Simplified
+  Chinese. English/Polish IDs remain compatible; all sixteen catalogs are not claimed
+  to have complete native-speaker review.
+- Search for specific Settings options with category context, keyboard navigation,
+  reveal and highlight, without indexing private input values.
+- Six Help topics linked to existing pages, diagnostics, setup and tools; Polish/English
+  content and explicit English fallback for other interface languages.
+- Version-specific What's New with four categories, reviewed local English/Polish
+  fallback and asynchronous official GitHub Release retrieval for the exact installed
+  tag. Bounded persistent cache/conditional requests, safe text rendering and source
+  labels do not replace the updater or acknowledge notes automatically.
+- Separate optional installation at manual foreground startup, off by default;
+  bounded preflight, work/recovery deferral and a per-request durable commitment.
+- Thumbnail preview/export to PNG/JPEG and recent exports through the existing
+  metadata/image pipeline, with no-overwrite output and independent history-save status.
+
+### Improved
+
+- Modern Downloads uses compact real-task rows, an option inspector and observed
+  transfer/storage/process widgets. Paged preview retains playlist selection and
+  presents actual chosen quality/container information.
+- Modern queue presentation retains at most 40 visible rows, including playlist
+  headers, and reuses compatible controls. Classic keeps its pre-existing 50-job pages.
+  Neither pagination nor grouping caps, renumbers or reorders the canonical queue.
+- History builds no hidden per-record card tree at startup. Cancellable filtering runs
+  off the UI thread, with retained 40-row pages in both shells. Modern adds date-range,
+  sort and media-type filters, an inspector and row actions over the complete data.
+- Thumbnail cache is bounded to 32 MiB decoded storage, four concurrent loads and
+  512-pixel display images. Caller-owned copies, obsolete-callback disposal and explicit
+  window-tree ownership release bitmap bindings, controls, subscriptions and timers.
+  Cache limits are not whole-process/native-renderer memory guarantees.
+- Modern LIVE adds active/recent projection, source/text filtering, sorting, bounded
+  40-session pages and structured session details. The existing independent scheduler,
+  recording admission, Stop and save, reconnect and recovery remain authoritative.
+- Other exposes working Batch/recent-operation, organizer, thumbnail and diagnostics
+  actions. Settings, inspectors, wizard and sidebar use measured viewport-aware layouts
+  at large logical text sizes, including 200% sidebar text without horizontal scrolling.
+- Batch completion tracking continues with the page closed and after restart. Explicit
+  retry reuses failed canonical IDs and accepted destinations. Multi-file selection is
+  validated before admission; completed History supplies durable completion evidence.
+- New profiles default to automatic stable checks, verified download and installation
+  on safe exit. Existing disabled checks, confirmed policy, skipped versions and Later
+  deferrals are preserved; ambiguous legacy policy requests an explicit decision.
+- Compatible unknown JSON fields round-trip through queue, History, LIVE, Batch and
+  nested options. Onboarding does not rewrite collection IDs or cookie stores.
+- Browser integration, NativeHost, Web Remote, notifications and managed media tools
+  retain their existing services/consent boundaries. Source builds consistently use
+  ModernFormsNext `7bf58d06d795d7298c86d9bf9471bbfb46852bab` and .NET 10.
+
+### Fixed
+
+- Passive Batch refresh and actual metadata completion retain unchanged rows and
+  workflow/list controls rather than cycling the whole layout and closing ComboBoxes.
+  Failed journal writes refresh retained state without a fabricated successful commit
+  or duplicate queue admission. Real progress remains enabled.
+- Recent download throughput uses observed media-byte deltas and elapsed time. Graph
+  and summary share a canonical sampling interval; resumed counters, counter resets,
+  terminal phases and missing UI ticks do not invent bytes or uninterrupted history.
+  Explicit KiB/s/MiB/s labels distinguish payload rate from OS process/network figures.
+- Informational labels/icons retain surface colors after clicking; focused inputs use
+  a border. Theme changes update read-only text caches, retain Downloads drawer/drafts
+  and restore Settings geometry across shell reattachment.
+- Typography refresh tolerates callback-driven child replacement/reparenting. Tool
+  records publish on the UI dispatcher. Settings search Enter does not also toggle
+  the revealed option. Measured startup-setting height no longer recursively alternates
+  through SizeChanged into a native stack overflow.
+- Empty queues and not-yet-admitted Batch lists no longer report a zero transfer ETA
+  as an estimate for unfinished work.
+- Failed queue/History/LIVE loads preserve original bytes and block unsafe writes/work
+  admission; damaged identities are not replaced with invented GUIDs. Legacy LIVE
+  migration preserves unknown evidence and rejects conflicting source records.
+- Small JSON reads and atomic publication share the existing I/O gate to avoid
+  overlapping open-file replacement during Batch completion on Windows.
+- Torn final Batch journal records are preserved before valid-prefix recovery;
+  corruption inside a journal fails closed. Clearing completed jobs does not erase
+  their Batch identity or cause retry to admit duplicates.
+- Organizer diagnostics distinguish scanned files, identified sources and recordings
+  outside imported lists. Inspector selection follows the visible result. Unrelated
+  or conflicting JSON is not promoted into identity evidence.
+- Organizer move/recovery/undo reject active outputs, blocked stores, changed content,
+  conflicting IDs and occupied paths, retaining the last verified file copy. History
+  only publishes a relocated record after its atomic save succeeds.
+- Failed setup, language or update-policy saves do not publish successful decisions.
+  Incomplete journey markers do not classify a legacy profile as new. Unreadable
+  settings/update state cannot be overwritten with defaults.
+- Update initialization is serialized with policy changes and restores staged-package
+  notifications. Rollback continues past unchanged/locked destinations and preserves
+  incomplete recovery evidence. Shutdown drains remaining owners after checkpoint errors.
+
+### Known issues and qualification boundaries
+
+- **Accepted confirmed issue:** [ModernFormsNext #534](https://github.com/ProGraMajster/ModernFormsNext/issues/534)
+  affects maximization against a persistently visible Windows taskbar. Use a restored,
+  non-maximized window; taskbar auto-hide may help. No framework workaround is included.
+- Some independent popup/tooltip/focus scenarios remain **NOT QUALIFIED**. Physical
+  5K/225% DPI is not qualified for this release. The long memory/leak soak was **NOT
+  EXECUTED**. Targeted successful runs do not turn those omissions into PASS.
+- All sixteen languages have not received complete native-speaker editorial review.
+  Bundled Help/notes provide PL/EN; remote official release text is English.
+- Source availability and private/authenticated media depend on upstream services and
+  valid access/cookies. Existing LIVE FromStart, SponsorBlock Remove, keyframe/range,
+  subtitle and browser integration limits remain; no all-source guarantee is made.
+- Organizer identity must be proved; filenames and an arbitrary adjacent JSON are not
+  enough. Completed LIVE parts are excluded. Corrupt journals require investigation;
+  interrupted staging evidence is retained. History/queue updates are separately
+  atomic and recovered through the journal, not a cross-filesystem transaction.
+- Synthetic fixtures/fault injection are not physical power-loss/disk-removal tests or
+  measurements from another user's computer. No full device/accessibility/pixel-perfect
+  certification, Authenticode signature, browser-store or NuGet publication is claimed.
+
+
 ## 1.2.1 — 2026-10-18
 
 Stability/performance patch; Classic UI and the existing download/LIVE ownership remain.

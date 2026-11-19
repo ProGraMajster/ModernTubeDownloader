@@ -10,6 +10,16 @@ public sealed class QueueProgressSummaryTests
         => new(Guid.NewGuid(), status, 90, size, null, null, speed);
 
     [Fact]
+    public void EmptyQueueHasNoTransferEstimateButARealSettledQueueKeepsZero()
+    {
+        var empty = QueueProgressSummary.Build([], false);
+        Assert.Null(empty.TransferRemaining);
+        Assert.Equal(0, empty.Total); Assert.Equal(0, empty.Settled); Assert.Equal(0, empty.Percent);
+        Assert.Equal(TimeSpan.Zero, QueueProgressSummary.Build([Row(DownloadStatus.Completed)], false).TransferRemaining);
+        Assert.Equal(TimeSpan.Zero, QueueProgressSummary.Build([Row(DownloadStatus.Completed)], true).TransferRemaining);
+    }
+
+    [Fact]
     public void UnknownSizeAndPausedQueueNeverInventAnEtaOrZeroSize()
     {
         var summary = QueueProgressSummary.Build([Row(DownloadStatus.Completed), Row(DownloadStatus.DownloadingVideo, null, 100)], false);

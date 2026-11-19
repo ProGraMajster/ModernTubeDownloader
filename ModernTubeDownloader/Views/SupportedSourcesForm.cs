@@ -18,7 +18,7 @@ internal sealed class SupportedSourcesForm : Form
     private readonly Label version = AppUi.Muted();
     private readonly Label popularLabel = AppUi.Muted();
     private readonly Panel popular = new();
-    private readonly TextBox search = new() { AccessibleAutomationId = "SupportedSourcesSearch" };
+    private readonly TextBox search = new AppThemeTextBox() { AccessibleAutomationId = "SupportedSourcesSearch" };
     private readonly CheckBox technical = new() { AccessibleAutomationId = "SupportedSourcesTechnicalToggle" };
     private readonly AppScrollFlowLayoutPanel list = new() { AutoScroll = true, FlowDirection = FlowDirection.TopDown,
         WrapContents = false, AccessibleAutomationId = "SupportedSourcesList" };
@@ -26,9 +26,9 @@ internal sealed class SupportedSourcesForm : Form
     private readonly Button next = new() { AccessibleAutomationId = "SupportedSourcesNext" };
     private readonly Label pageInfo = AppUi.Muted();
     private readonly Label generic = AppUi.Muted();
-    private readonly TextBox url = new() { AccessibleAutomationId = "SupportedSourcesUrlInput" };
+    private readonly TextBox url = new AppThemeTextBox() { AccessibleAutomationId = "SupportedSourcesUrlInput" };
     private readonly Button check = new() { AccessibleAutomationId = "SupportedSourcesCheckButton" };
-    private readonly TextBox result = new() { MultiLine = true, ReadOnly = true, TextAlign = ContentAlignment.TopLeft,
+    private readonly TextBox result = new AppThemeTextBox() { MultiLine = true, ReadOnly = true, TextAlign = ContentAlignment.TopLeft,
         ScrollBars = ScrollBars.Vertical, AccessibleAutomationId = "SupportedSourcesResult" };
     private readonly Button open = new() { Visible = false, AccessibleAutomationId = "SupportedSourcesOpenButton" };
     private readonly Button close = new() { AccessibleAutomationId = "SupportedSourcesCloseButton" };
@@ -147,7 +147,7 @@ internal sealed class SupportedSourcesForm : Form
                     row.Count(source => source.IsBroken)));
             tooltip.SetToolTip(button, label);
             tooltip.SetToolTip(status, row.Length == 1 && item.IsBroken ? text["Sources.Broken"] : text["Sources.TechnicalHint"]);
-            var content = new TextBox { ReadOnly = true, MultiLine = true, TextAlign = ContentAlignment.TopLeft,
+            var content = new AppThemeTextBox { ReadOnly = true, MultiLine = true, TextAlign = ContentAlignment.TopLeft,
                 ScrollBars = ScrollBars.Vertical, Visible = panel.Height > 72, Font = AppTypography.Font(10) };
             AppUi.Input(content);
             content.Text = string.Join(Environment.NewLine, row.Select(source =>

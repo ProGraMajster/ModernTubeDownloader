@@ -20,6 +20,8 @@ public enum AppThemeMode
 
 public sealed class AppSettings
 {
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalSettings { get; set; }
     public StartupSettings Startup { get; set; } = new();
     public UpdateSettings Updates { get; set; } = new();
     public NotificationSettings Notifications { get; set; } = new();

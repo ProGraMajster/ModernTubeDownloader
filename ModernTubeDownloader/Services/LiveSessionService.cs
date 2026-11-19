@@ -4,13 +4,15 @@ using ModernTubeDownloader.Models;
 namespace ModernTubeDownloader.Services;
 
 public sealed class LiveSessionService(LiveSessionPersistenceService persistence,
-    SettingsService settings, IAppLogger logger)
+    SettingsService settings, IAppLogger logger, Func<bool>? dependencyAvailability = null)
 {
     private readonly object sync = new();
     private readonly List<LiveSession> sessions = [];
     private readonly SemaphoreSlim saveGate = new(1, 1);
     private ILiveSessionCommands? commands;
     public event EventHandler? Changed;
+    public bool LoadFailed => persistence.LoadFailed;
+    public bool IsReadOnly => LoadFailed || dependencyAvailability?.Invoke() == false;
 
     // The service is the UI/API boundary; only the scheduler owns worker tasks/processes.
     internal void AttachScheduler(ILiveSessionCommands scheduler)
@@ -32,7 +34,7 @@ public sealed class LiveSessionService(LiveSessionPersistenceService persistence
             sessions.Clear();
             foreach (var session in loaded)
             {
-                if (session.IsActive || session.State == LiveSessionState.Interrupted)
+                if (!IsReadOnly && (session.IsActive || session.State == LiveSessionState.Interrupted))
                 {
                     session.Interrupted = true;
                     session.StopRequested = false;
@@ -43,17 +45,18 @@ public sealed class LiveSessionService(LiveSessionPersistenceService persistence
                     session.AttemptCount = 0;
                     session.RetryAt = null;
                 }
-                if (session.State == LiveSessionState.WaitingForLive) session.NextCheckAt = DateTimeOffset.UtcNow;
+                if (!IsReadOnly && session.State == LiveSessionState.WaitingForLive) session.NextCheckAt = DateTimeOffset.UtcNow;
                 sessions.Add(session);
             }
         }
-        await SaveAsync(token).ConfigureAwait(false);
+        if (!IsReadOnly) await SaveAsync(token).ConfigureAwait(false);
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
     public LiveSession Add(string sourceUrl, VideoMetadata? metadata, string qualityPresetId,
         LiveStartPolicy policy, bool waiting = false)
     {
+        if (IsReadOnly) throw new IOException("LIVE storage or its canonical dependencies could not be loaded; preserve original files and reopen after recovery.");
         if (!YtDlpMetadataService.TryValidateSourceUrl(sourceUrl, out var url, out _))
             throw new ArgumentException("Invalid LIVE source.", nameof(sourceUrl));
         if (metadata is not null && MediaAvailabilityPolicy.Classify(metadata) is not
@@ -88,6 +91,7 @@ public sealed class LiveSessionService(LiveSessionPersistenceService persistence
 
     internal LiveSession? TakePending()
     {
+        if (IsReadOnly) return null;
         LiveSession? session;
         lock (sync)
         {
@@ -119,6 +123,7 @@ public sealed class LiveSessionService(LiveSessionPersistenceService persistence
 
     public bool Resume(Guid id)
     {
+        if (IsReadOnly) return false;
         lock (sync)
         {
             var session = sessions.Find(item => item.Id == id);
@@ -139,6 +144,7 @@ public sealed class LiveSessionService(LiveSessionPersistenceService persistence
 
     public bool EditWaiting(Guid id, string qualityPresetId, LiveStartPolicy policy)
     {
+        if (IsReadOnly) return false;
         lock (sync)
         {
             var session = sessions.Find(item => item.Id == id);
@@ -152,6 +158,7 @@ public sealed class LiveSessionService(LiveSessionPersistenceService persistence
 
     internal bool CancelPending(Guid id)
     {
+        if (IsReadOnly) return false;
         lock (sync)
         {
             var session = sessions.Find(item => item.Id == id);
@@ -166,7 +173,11 @@ public sealed class LiveSessionService(LiveSessionPersistenceService persistence
     public async Task SaveAsync(CancellationToken token = default)
     {
         await saveGate.WaitAsync(token).ConfigureAwait(false);
-        try { await persistence.SaveAsync(Snapshot(), token).ConfigureAwait(false); }
+        try
+        {
+            if (IsReadOnly) throw new IOException("LIVE storage or its canonical dependencies could not be loaded; preserve original files and reopen after recovery.");
+            await persistence.SaveAsync(Snapshot(), token).ConfigureAwait(false);
+        }
         finally { saveGate.Release(); }
     }
 

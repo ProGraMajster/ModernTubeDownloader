@@ -5,6 +5,8 @@ public enum TrayCloseBehavior { Exit, HideToTray, Ask }
 
 public sealed class StartupSettings
 {
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public bool ShowTrayIcon { get; set; } = true;
     public TrayMinimizeBehavior MinimizeBehavior { get; set; }
     public TrayCloseBehavior CloseBehavior { get; set; }

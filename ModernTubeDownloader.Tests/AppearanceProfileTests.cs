@@ -21,7 +21,7 @@ public sealed class AppearanceProfileTests
     {
         var profile = AppearanceProfile.Preset(name); var copy = profile.Copy();
         Assert.Equal(JsonSerializer.Serialize(profile), JsonSerializer.Serialize(copy));
-        Assert.Equal(1, copy.SchemaVersion); Assert.NotSame(profile.Global, copy.Global);
+        Assert.Equal(2, copy.SchemaVersion); Assert.NotSame(profile.Global, copy.Global);
     }
     [Theory]
     [InlineData("{\"global\":{\"theme\":100}}")]

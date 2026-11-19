@@ -26,7 +26,22 @@ public static class NativeBridgeRegistration
         return JsonSerializer.Deserialize<BridgeBinding[]>(File.ReadAllBytes(path), CookieProtocol.Json) ?? [];
     }
     // Call only after explicit desktop user confirmation. Public IDs are not credentials.
-    public static void Register(string root, string browser, string extensionId, string executable)
+    public static void Register(string root, string browser, string extensionId, string executable) =>
+        RegisterFromCanonicalProfile(root, () => RegisterCore(root, browser, extensionId, executable));
+
+    internal static void RegisterFromCanonicalProfile(string root, Action register)
+    {
+        // The shipped NativeHost always uses DefaultRoot; registering another
+        // profile would mutate global browser state while pointing at the wrong
+        // cookie store. Enforce this at the API, not only in the settings editor.
+        if (!Path.IsPathFullyQualified(root) ||
+            !Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)).Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(AuthenticationFiles.DefaultRoot)), StringComparison.OrdinalIgnoreCase))
+            throw new CookieSecurityException("bridge-profile");
+        register();
+    }
+
+    private static void RegisterCore(string root, string browser, string extensionId, string executable)
     {
         if (!CookieProtocol.IsExtensionId(extensionId) || !File.Exists(executable) || !Path.IsPathFullyQualified(executable))
             throw new CookieSecurityException("bridge-input");

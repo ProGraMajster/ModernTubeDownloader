@@ -8,14 +8,15 @@ using SkiaSharp;
 
 namespace ModernTubeDownloader.Views;
 
-internal sealed class HistoryEntryCard : UserControl
+internal sealed partial class HistoryEntryCard : UserControl
 {
-    private readonly DownloadHistoryEntry entry;
+    private DownloadHistoryEntry entry;
+    private bool thumbnailSuspended;
     private readonly LocalizationService text;
     private readonly ThumbnailCacheService thumbnails;
     private readonly Panel placeholder;
     private readonly PictureBox placeholderText;
-    private readonly PictureBox thumbnail;
+    private readonly DownloadsPictureBox thumbnail;
     private readonly Label title;
     private readonly Label facts;
     private readonly Label path;
@@ -23,9 +24,11 @@ internal sealed class HistoryEntryCard : UserControl
     private readonly Button openFolder;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private bool disposed;
+    private readonly ToolTip rowTips = new();
 
     public HistoryEntryCard(DownloadHistoryEntry entry, LocalizationService text, ThumbnailCacheService thumbnails)
     {
+        ModernTubeDownloader.Infrastructure.PerformanceDiagnostics.Increment("history.cards.created");
         this.entry = entry;
         this.text = text;
         this.thumbnails = thumbnails;
@@ -38,11 +41,12 @@ internal sealed class HistoryEntryCard : UserControl
         placeholderText = new PictureBox { Image = AppBranding.Icon, SizeMode = PictureBoxSizeMode.Zoom, Padding = new Padding(20) };
         placeholderText.Dock = DockStyle.Fill;
         placeholder.Controls.Add(placeholderText);
-        thumbnail = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom, Visible = false };
+        thumbnail = new DownloadsPictureBox { SizeMode = PictureBoxSizeMode.Zoom, Visible = false };
         thumbnail.Style.Border.Radius = 10;
         thumbnail.Style.Border.Width = 0;
         AppUi.BindBackground(thumbnail, AppThemeTokens.SurfaceSecondary);
         title = AppUi.Heading(entry.Title, 13.5f);
+        rowTips.SetToolTip(title, entry.Title);
         facts = AppUi.Muted();
         path = AppUi.Muted();
         openFile = new Button();
@@ -51,19 +55,38 @@ internal sealed class HistoryEntryCard : UserControl
         AppUi.Secondary(openFolder);
         openFile.Enabled = File.Exists(entry.FinalPath);
         openFolder.Enabled = Directory.Exists(System.IO.Path.GetDirectoryName(entry.FinalPath));
-        openFile.Click += (_, _) => ShellService.OpenFile(entry.FinalPath);
-        openFolder.Click += (_, _) => ShellService.OpenFolderForFile(entry.FinalPath);
+        openFile.Click += (_, _) => ShellService.OpenFile(this.entry.FinalPath);
+        openFolder.Click += (_, _) => ShellService.OpenFolderForFile(System.IO.Path.GetDirectoryName(this.entry.FinalPath));
         Controls.AddRange([placeholder, thumbnail, title, facts, path, openFile, openFolder]);
+        Click += (_, _) => SelectionRequested?.Invoke(this, this.entry);
+        title.Click += (_, _) => SelectionRequested?.Invoke(this, this.entry);
+        thumbnail.Click += (_, _) => SelectionRequested?.Invoke(this, this.entry);
         SizeChanged += CardSizeChanged;
         text.LanguageChanged += LanguageChanged;
         ApplyLocalization();
         LayoutControls();
         AppTypography.RegisterLayout(this, () => { ApplyLocalization(); LayoutControls(); });
-        _ = LoadThumbnailAsync();
+        UpdateEntry(entry, force: true);
     }
 
+    private bool arrangingCard;
     private void LayoutControls()
     {
+        if (arrangingCard) return;
+        arrangingCard = true;
+        SuspendLayout();
+        try { LayoutControlsCore(); }
+        finally
+        {
+            try { ResumeLayout(true); }
+            finally { arrangingCard = false; }
+        }
+    }
+
+    private void LayoutControlsCore()
+    {
+        if (dashboard) { LayoutDashboardCard(); return; }
+        openFile.Visible = true; foreach (var cell in cells) cell.Visible = false;
         var appearance = AppearancePresentation.Current.History;
         // Compact list is a density choice, not the narrow-window stacked layout.
         var compact = Width < 760;
@@ -108,21 +131,42 @@ internal sealed class HistoryEntryCard : UserControl
         path.Text = text.Get("History.Path", entry.FinalPath);
     }
 
-    private async Task LoadThumbnailAsync()
+    internal void UpdateEntry(DownloadHistoryEntry value, bool force = false)
     {
-        SKBitmap? image;
-        try { image = await thumbnails.GetAsync(entry.ThumbnailUrl, lifetimeCancellation.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException) { return; }
-        if (image is null)
-            return;
-        Application.RunOnUIThread(() =>
+        if (!force && !thumbnailSuspended && entry == value) return;
+        var imageChanged = force || thumbnailSuspended || entry.ThumbnailUrl != value.ThumbnailUrl;
+        entry = value;
+        AccessibleAutomationId = dashboard ? $"HistoryItem-{value.QueueItemId:N}-{value.LivePartIndex?.ToString() ?? "vod"}" : "HistoryCard-" + value.QueueItemId.ToString("N") + "-" + value.LivePartIndex;
+        AccessibleName = value.Title;
+        title.Text = value.Title;
+        openFile.AccessibleAutomationId = "HistoryOpenFile-" + value.QueueItemId.ToString("N");
+        openFolder.AccessibleAutomationId = "HistoryOpenFolder-" + value.QueueItemId.ToString("N");
+        openFile.Enabled = File.Exists(value.FinalPath);
+        openFolder.Enabled = Directory.Exists(System.IO.Path.GetDirectoryName(value.FinalPath));
+        rowTips.SetToolTip(title, value.Title);
+        ApplyLocalization();
+        if (dashboard) LayoutControls();
+        if (imageChanged)
         {
-            if (disposed || lifetimeCancellation.IsCancellationRequested)
-                return;
-            thumbnail.Image = image;
-            thumbnail.Visible = AppearancePresentation.Current.History.ThumbnailSize != AppearanceSize.None;
-            placeholder.Visible = false;
-        });
+            thumbnailSuspended = false;
+            placeholder.Visible = AppearancePresentation.Current.History.ThumbnailSize != AppearanceSize.None;
+            thumbnail.Visible = false;
+            _ = ThumbnailImageBinding.For(thumbnail).LoadAsync(thumbnails, value.ThumbnailUrl, lifetimeCancellation.Token,
+                () => { thumbnail.Visible = AppearancePresentation.Current.History.ThumbnailSize != AppearanceSize.None; placeholder.Visible = false; });
+        }
+    }
+
+    internal void RefreshFileAvailability()
+    {
+        openFile.Enabled = File.Exists(entry.FinalPath);
+        openFolder.Enabled = Directory.Exists(System.IO.Path.GetDirectoryName(entry.FinalPath));
+    }
+
+    internal void SuspendThumbnail()
+    {
+        if (thumbnailSuspended) return;
+        thumbnailSuspended = true;
+        ThumbnailImageBinding.For(thumbnail).Clear();
     }
 
     private void CardSizeChanged(object? sender, EventArgs e) => LayoutControls();
@@ -130,9 +174,12 @@ internal sealed class HistoryEntryCard : UserControl
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !disposed)
         {
+            ThumbnailImageBinding.For(thumbnail).Dispose();
             disposed = true;
+            rowTips.Dispose();
+            historyMenu.Dispose();
             lifetimeCancellation.Cancel();
             SizeChanged -= CardSizeChanged;
             text.LanguageChanged -= LanguageChanged;

@@ -1,4 +1,93 @@
-# Batch import (1.2.1)
+# Batch import (1.3.0)
+
+## One-click preparation and list destinations
+
+**Import & Download** uses the same parser, source checks, format selector, durable
+Batch journal and canonical VOD queue as the manual actions. It chains import,
+analysis and queue handoff. The mode selector offers manual preparation (the default)
+or automatic analysis/handoff after an explicit file-picker, multi-file drop or paste.
+Each selected file creates an independent session. The list selector switches the
+destination editor and progress to that session. Classic retains its existing actions
+and adds the one-click action; no second runtime or download scheduler is created.
+
+The native Windows drop adapter and file picker accept **1–32 TXT/JSON/CSV files**.
+The entire selection is checked for supported extensions, existence and per-file size
+before its first import; oversized/truncated native selections are rejected as a whole.
+Duplicate paths are imported once. Files are prepared sequentially, retain separate
+session IDs and folders, and use the same shared automatic operation. A file changing
+or failing during parsing stops that operation; earlier persisted sessions remain
+available and are not automatically submitted as a partial selection.
+
+New sessions propose `<current downloads folder>/<list filename without extension>`.
+Clipboard sessions use `Import YYYY-MM-DD`. The destination card exposes a root,
+editable list name and enabled-by-default list subfolder option. Save applies a strict
+absolute-path policy, Windows reserved-name checks, existing-ancestor reparse rejection
+and a conservative path-length limit. Folder names derived from a list are sanitized
+and constrained beneath the selected root. Missing drives and file-as-folder paths
+are rejected. Existing storage preflight still validates writes and free space.
+Two different imports resolving to one folder require a different name or explicit
+MessageBoxForm confirmation; they are never silently merged.
+
+The accepted folder is persisted in the session and copied to `DownloadQueueItem.OutputDirectory`.
+It is frozen after handoff, survives restart/retry and does not follow subsequent
+global-folder changes. Legacy jobs with `null` retain the existing global-folder rule.
+Executor preflight, finalization, subtitle files, adjacent JSON and History use the
+actual final destination; central metadata remains in its original store.
+
+Exact source-content fingerprints plus original filename/default options reopen the
+same durable import on retry. Entries use stable queue IDs, including when recovering
+an admission whose Batch link was not yet journaled. Input deduplication includes
+quality, container and range, preserving legitimate variants. Duplicate files do not
+create another job merely because the original canonical job has completed.
+
+Automatic preparation **never resumes global Pause**. A paused queue leaves the list
+in “Added to queue — downloads are paused”. **Resume download queue** asks for explicit
+confirmation and reports the number of earlier pending jobs outside this list; the
+existing QueueProcessor, concurrency, storage latch and LIVE admission rules remain
+authoritative. Analysis Pause/Resume/Cancel is separate from queue pause/cancellation.
+Closing the view leaves the service-owned automatic preparation running; application
+shutdown cancels and saves it. Restart never restarts analysis automatically.
+
+Canonical queue status events now persist Batch completion even when its view is closed.
+Startup indexes unfinished sessions after loading the queue and before admitting workers;
+no raw video metadata is loaded for this reconciliation. Repeated progress ticks with an
+unchanged status do not scan the queue or write the journal. A completed row retains its
+stable job ID after clearing completed queue jobs; after a crash, completed canonical
+History records provide the durable evidence for the same identity. Unreadable stores
+block automatic startup installation and are retained for recovery.
+
+Explicit retry (a failed row, filtered Analyze action, or Import & Download) reuses the
+canonical failed job rather than adding another one. Its ID and accepted folder remain
+unchanged, and retry never resumes global pause or changes jobs outside the selection.
+The service serializes reconciliation and metadata commits, and drains admitted work
+on shutdown. An interrupted final journal append is backed up byte-for-byte before its
+valid prefix is recovered; this also happens before the next append without a restart.
+Corruption inside the journal fails closed instead of discarding committed records.
+
+An explicitly cancelled or parser-rejected initial import records a bounded terminal
+marker before returning its error. It states the exact session ID, schema and lack of
+queue admission; partial `entries.tmp` bytes remain available for diagnostics. Such an
+attempt no longer blocks startup updates forever. Unknown crash folders, malformed or
+oversized markers, ID/schema mismatches, and failed marker writes still block automatic
+installation. The marker does not turn an imported/downloaded row into a success.
+
+Progress uses five named segments (load, metadata, queue handoff, download, finalize),
+real row counts, authentication/error counts and the current analyzed/downloading title.
+The download segment counts completed items, **not bytes**; the lower existing summary
+separates successful and failed processed jobs and labels approximate sizes/ETA. Unknown
+import totals display `—`, never invented percentages. A one-second presenter coalesces
+updates and only rebuilds the bounded table page when row presentation changes.
+An empty list remains prepared, not falsely “completed”. Recovery/intervention states
+remain visible. Startup update preflight conservatively checks every session manifest,
+including older sessions outside Recent's thirty-item window and incomplete imports.
+
+The new targeted cases are `BatchImportTests.*AutomaticImport*` and
+`WorkflowIntegrationTests.BatchAutomaticPerListFinalizationPreservesMediaJsonSubtitlesHistoryAndLegacyDestination`.
+They use isolated profiles, synthetic metadata and FakeTool output. Execution results
+and native screenshots belong to this iteration's implementation report; source tests
+alone do not qualify network downloads, physical storage failures or the release.
+
+## Manual workflow and supported formats
 
 Open **Other → Batch import**, choose a TXT/CSV/JSON file, and import. Importing does
 not download or start analysis. Analyze with 1–8 metadata workers (default 1), pause,

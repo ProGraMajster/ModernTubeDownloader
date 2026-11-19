@@ -6,6 +6,14 @@ public enum MediaRangeMode { Full, Custom }
 
 public sealed record MediaTimeRange(MediaRangeMode Mode = MediaRangeMode.Full, TimeSpan? Start = null, TimeSpan? End = null)
 {
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; init; }
+    internal MediaTimeRange PersistenceCopy() => AdditionalData is null ? this : this with { AdditionalData = JsonExtensionFields.Copy(AdditionalData) };
+
+    // Unknown JSON is retained, not interpreted as a different download range.
+    public bool Equals(MediaTimeRange? other) => other is not null && Mode == other.Mode && Start == other.Start && End == other.End;
+    public override int GetHashCode() => HashCode.Combine(Mode, Start, End);
+
     public static MediaTimeRange Full { get; } = new();
 
     public string? Validate(double? durationSeconds, bool isActiveLive = false)

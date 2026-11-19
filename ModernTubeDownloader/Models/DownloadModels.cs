@@ -20,12 +20,18 @@ public enum DownloadStatus
 
 public sealed class DownloadQueueItem
 {
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
+
     internal DownloadQueueItem PersistenceCopy()
     {
         var copy = (DownloadQueueItem)MemberwiseClone();
         copy.TemporaryFiles = [.. TemporaryFiles];
         copy.SubtitleOptions = SubtitleOptions.Copy();
         copy.SponsorBlockOptions = SponsorBlockOptions.Copy();
+        copy.AdditionalData = JsonExtensionFields.Copy(AdditionalData);
+        copy.RequestedRange = RequestedRange.PersistenceCopy();
+        copy.SelectedFormats = SelectedFormats?.PersistenceCopy();
         // VOD owns immutable strings/value records; legacy LIVE is migrated before
         // loading this store. Freeze mutable collections while holding queue.sync.
         return copy;
@@ -54,12 +60,16 @@ public sealed class DownloadQueueItem
     public long? TotalBytes { get; set; }
     public long? EstimatedSizeBytes { get; set; }
     public double? SpeedBytesPerSecond { get; set; }
+    // Runtime-only telemetry. Loading a saved queue cannot manufacture traffic.
+    internal long ObservedTransferBytes { get; set; }
     public TimeSpan? Eta { get; set; }
     public DownloadStatus Status { get; set; } = DownloadStatus.Queued;
     public string StatusMessage { get; set; } = "Queued";
     public string? StatusMessageKey { get; set; } = "Queue.Detail.Queued";
     public List<string> TemporaryFiles { get; set; } = [];
     public string? FinalFile { get; set; }
+    /// <summary>Frozen destination for an explicitly prepared list. Null preserves legacy/global output behavior.</summary>
+    public string? OutputDirectory { get; set; }
     public string? ErrorMessage { get; set; }
     public string? FailureMessageKey { get; set; }
     public string? FailureTechnicalSummary { get; set; }
@@ -110,7 +120,10 @@ public sealed record DownloadProgress(
     long? TotalBytes,
     double? SpeedBytesPerSecond,
     TimeSpan? Eta,
-    string Status);
+    string Status)
+{
+    internal long ObservedBytesDelta { get; init; }
+}
 
 public sealed record DownloadHistoryEntry(
     Guid QueueItemId,
@@ -134,7 +147,19 @@ public sealed record DownloadHistoryEntry(
     DateTimeOffset? RecordingEndedAt = null,
     TimeSpan? RecordedDuration = null,
     bool WasPartial = false,
-    int? PartsCount = null);
+    int? PartsCount = null,
+    double? DurationSeconds = null,
+    long? FileSizeBytes = null)
+{
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; init; }
+
+    internal DownloadHistoryEntry PersistenceCopy() => AdditionalData is null && RequestedRange?.AdditionalData is null ? this : this with
+    {
+        AdditionalData = JsonExtensionFields.Copy(AdditionalData),
+        RequestedRange = RequestedRange?.PersistenceCopy()
+    };
+}
 
 public enum QueueChangeKind
 {
@@ -144,8 +169,9 @@ public enum QueueChangeKind
     Pause
 }
 
-public sealed class QueueChangedEventArgs(QueueChangeKind kind, Guid? itemId = null) : EventArgs
+public sealed class QueueChangedEventArgs(QueueChangeKind kind, Guid? itemId = null, DownloadStatus? status = null) : EventArgs
 {
     public QueueChangeKind Kind { get; } = kind;
     public Guid? ItemId { get; } = itemId;
+    public DownloadStatus? Status { get; } = status;
 }

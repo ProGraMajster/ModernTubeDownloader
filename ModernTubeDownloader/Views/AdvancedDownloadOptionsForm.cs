@@ -82,7 +82,7 @@ internal sealed class AdvancedDownloadOptionsForm : Form
             subtitleLanguages.Items.Add(new LocalizedOption<string>(code, $"{displayName} ({code})"));
             subtitleLanguages.SetItemChecked(index, initialSubtitles.Languages.Contains(available[index], StringComparer.OrdinalIgnoreCase));
         }
-        extraLanguages = new TextBox { AccessibleAutomationId = "AdvancedSubtitleLanguageCodes" };
+        extraLanguages = new AppThemeTextBox { AccessibleAutomationId = "AdvancedSubtitleLanguageCodes" };
         AppUi.Input(extraLanguages);
         extraLanguages.Placeholder = text["Advanced.LanguageCodesHint"];
         extraLanguages.Text = string.Join(", ", initialSubtitles.Languages.Where(code =>
@@ -117,7 +117,7 @@ internal sealed class AdvancedDownloadOptionsForm : Form
             initialSponsorBlock.Categories.SequenceEqual(settings.SponsorBlockDefaults.Categories, StringComparer.OrdinalIgnoreCase);
         Select(sponsorMode, item => item is LocalizedOption<SponsorBlockMode?> option &&
             option.Value == (sponsorMatchesDefaults ? null : initialSponsorBlock.Mode));
-        sponsorCategories = new TextBox { AccessibleAutomationId = "AdvancedSponsorBlockCategories" };
+        sponsorCategories = new AppThemeTextBox { AccessibleAutomationId = "AdvancedSponsorBlockCategories" };
         AppUi.Input(sponsorCategories);
         sponsorCategories.Text = string.Join(", ", initialSponsorBlock.Categories);
         sponsorCategories.SetBounds(20, 624, 590, 36);

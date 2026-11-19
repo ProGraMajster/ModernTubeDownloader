@@ -9,7 +9,7 @@ using ModernTubeDownloader.Services;
 
 namespace ModernTubeDownloader.Tests;
 
-public sealed class BatchImportTests(ITestOutputHelper output)
+public sealed partial class BatchImportTests(ITestOutputHelper output)
 {
     private sealed class Fixture : IAsyncDisposable
     {
@@ -18,6 +18,7 @@ public sealed class BatchImportTests(ITestOutputHelper output)
         public BatchSessionStore Store { get; }
         public SettingsService Settings { get; }
         public DownloadQueueService Queue { get; }
+        private readonly List<BatchImportService> services = [];
         public Fixture()
         {
             Paths = AppPaths.Create(Root); Paths.EnsureCreated(); Store = new(Path.Combine(Root, "Batch"));
@@ -27,12 +28,16 @@ public sealed class BatchImportTests(ITestOutputHelper output)
             Queue = new(new QueuePersistenceService(Paths, new NullAppLogger()), new NullAppLogger(), Settings);
         }
         public BatchImportService Service(Func<string, CancellationToken, Task<SourceCheckResult>>? check = null)
-            => new(Store, check ?? ((url, _) => Task.FromResult(new SourceCheckResult(url, Metadata(url), null, null))), Queue, Settings, new NullAppLogger());
+        {
+            var service = new BatchImportService(Store, check ?? ((url, _) => Task.FromResult(new SourceCheckResult(url, Metadata(url), null, null))), Queue, Settings, new NullAppLogger());
+            services.Add(service); return service;
+        }
         public async Task<string> File(string extension, string text)
         { var file = Path.Combine(Root, Guid.NewGuid().ToString("N") + extension); await System.IO.File.WriteAllTextAsync(file, text, Encoding.UTF8); return file; }
         public async ValueTask DisposeAsync()
         {
             // Queue mutations can schedule checkpoints. Drain them before deleting their files.
+            foreach (var service in services) await service.StopAsync();
             await Queue.SaveAsync();
             await Settings.SaveAsync();
             Directory.Delete(Root, true);

@@ -51,6 +51,7 @@ public sealed class PlaylistSelection
                 SourceUrl = pair.entry.SourceUrl,
                 Channel = pair.entry.Channel ?? Playlist.Channel ?? string.Empty,
                 DurationSeconds = pair.entry.DurationSeconds,
+                ThumbnailUrl = pair.entry.ThumbnailUrl,
                 QualityPresetId = preset.Id,
                 PreferredVideoContainer = preferredVideoContainer,
                 RequestedRange = requestedRange,
