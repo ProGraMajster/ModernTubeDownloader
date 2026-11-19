@@ -92,6 +92,7 @@ public sealed partial class HistoryDashboardPresentationTests
             for (var i = 0; i < 16; i++)
                 await services.History.AddAsync(new DownloadHistoryEntry(Guid.NewGuid(), "Recorded item " + i, "https://example.test/" + i, "id-" + i, "Channel", "1080p", "video-" + i + ".mp4", DateTimeOffset.UtcNow.AddMinutes(-i), "Completed"));
             var before = JsonSerializer.Serialize(services.History.Snapshot());
+            var expectedIds = services.History.Snapshot().Select(entry => entry.QueueItemId).ToArray();
             using (var host = ModernFormsTestHost.Create())
             {
                 services.Appearance.Initialize();
@@ -101,6 +102,23 @@ public sealed partial class HistoryDashboardPresentationTests
                 var header = Find<Panel>(view, "HistoryTableHeader");
                 var inspector = Find<DashboardInspector>(view, "DashboardInspector");
                 var list = Find<FlowLayoutPanel>(view, "HistoryList");
+                var summary = Find<Label>(view, "HistoryPageSummary");
+                var expectedSummary = services.Localization.Get("History.PageSummary", 1, 1, 16, 16);
+                Guid[] VisibleIds() => list.Controls.OfType<HistoryEntryCard>().Where(card => card.Visible).Select(card => card.ItemId).ToArray();
+                bool PageReady() => VisibleIds().SequenceEqual(expectedIds) && summary.AccessibleName == expectedSummary;
+                // Show drains already-posted UI work, not RefreshItems' Task.Run
+                // projection. Pump on this host's owning thread until that real
+                // page is published. Five seconds is the existing history-test
+                // fail-closed bound, not a delay or a controlled worker scheduler.
+                var readiness = System.Diagnostics.Stopwatch.StartNew();
+                while (!PageReady() && readiness.Elapsed < TimeSpan.FromSeconds(5))
+                {
+                    host.ProcessPendingWork();
+                    host.Dispatcher.ThrowUnhandledExceptions();
+                    if (!PageReady()) Thread.Yield();
+                }
+                Assert.Equal(expectedIds, VisibleIds());
+                Assert.Equal(expectedSummary, summary.AccessibleName);
                 var row = list.Controls.OfType<HistoryEntryCard>().First();
                 Assert.Equal(header.Top, inspector.Top);
                 Assert.Equal(header.Bottom, list.Top);
