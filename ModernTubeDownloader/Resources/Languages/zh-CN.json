@@ -1413,5 +1413,9 @@
   "Settings.SearchNotificationPresentation": "Notification presentation",
   "Settings.SearchAuthenticationSource": "Authentication source",
   "Settings.SearchBrowser": "Browser for synchronization",
-  "Settings.SearchExtensionId": "Browser extension identifier"
+  "Settings.SearchExtensionId": "Browser extension identifier",
+  "Experience.RefreshNotes": "刷新更新说明",
+  "Experience.GitHubNotes": "来源：已安装版本的官方 GitHub 发行说明。",
+  "Experience.CachedNotes": "来源：已保存的当前安装版本的官方 GitHub 发行说明。可离线查看。",
+  "Experience.OnlineEnglishNotes": "官方发行说明使用英语。本地离线摘要提供波兰语和英语版本。"
 }

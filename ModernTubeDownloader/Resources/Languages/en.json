@@ -1413,5 +1413,9 @@
   "Settings.SearchNotificationPresentation": "Notification presentation",
   "Settings.SearchAuthenticationSource": "Authentication source",
   "Settings.SearchBrowser": "Browser for synchronization",
-  "Settings.SearchExtensionId": "Browser extension identifier"
+  "Settings.SearchExtensionId": "Browser extension identifier",
+  "Experience.RefreshNotes": "Refresh notes",
+  "Experience.GitHubNotes": "Source: official GitHub Release for this installed version.",
+  "Experience.CachedNotes": "Source: saved official GitHub Release for this installed version. Available offline.",
+  "Experience.OnlineEnglishNotes": "Official release content is in English. The bundled offline summary is available in Polish and English."
 }

@@ -1413,5 +1413,9 @@
   "Settings.SearchNotificationPresentation": "Notification presentation",
   "Settings.SearchAuthenticationSource": "Authentication source",
   "Settings.SearchBrowser": "Browser for synchronization",
-  "Settings.SearchExtensionId": "Browser extension identifier"
+  "Settings.SearchExtensionId": "Browser extension identifier",
+  "Experience.RefreshNotes": "Obnovit informace",
+  "Experience.GitHubNotes": "Zdroj: oficiální vydání na GitHubu pro nainstalovanou verzi.",
+  "Experience.CachedNotes": "Zdroj: uložené oficiální vydání na GitHubu pro nainstalovanou verzi. Dostupné offline.",
+  "Experience.OnlineEnglishNotes": "Oficiální informace o vydání jsou v angličtině. Místní souhrn offline je dostupný v polštině a angličtině."
 }

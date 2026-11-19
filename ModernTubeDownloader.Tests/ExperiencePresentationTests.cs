@@ -259,7 +259,10 @@ public sealed partial class ExperiencePresentationTests
             foreach (var section in installedNotes.Sections)
             {
                 Assert.Contains(Descendants(newsRoot).OfType<Label>(), label => label.Text == section.Title);
-                foreach (var item in section.Items) Assert.Contains(Descendants(newsRoot).OfType<Label>(), label => label.Text.Contains(item, StringComparison.Ordinal));
+                var content = Find<TextBox>(newsRoot, "WhatsNewText-" + section.Category);
+                Assert.True(content.ReadOnly && content.MultiLine);
+                Assert.Equal(string.Join("\n\n", section.Items.Select(item => "• " + item)), content.Text);
+                foreach (var item in section.Items) Assert.Contains(item, content.Text, StringComparison.Ordinal);
             }
             Assert.Contains(Descendants(newsRoot).OfType<Label>(), label => label.Text.Contains(services.Experience.Version, StringComparison.Ordinal));
             Click(host, newsRoot, "WhatsNewDone"); Pump(host, () => newsWindow.IsClosed);
@@ -472,7 +475,9 @@ public sealed partial class ExperiencePresentationTests
             var tools = Path.Combine(Root, "fake"); Directory.CreateDirectory(tools);
             foreach (var file in Directory.EnumerateFiles(AppContext.BaseDirectory, "ModernTubeDownloader.FakeTool.*")) File.Copy(file, Path.Combine(tools, Path.GetFileName(file)));
             settings.Current.CustomDenoPath = Path.Combine(tools, "deno.exe"); File.Copy(CoreTests.FakeToolPath(), settings.Current.CustomDenoPath);
-            await settings.SaveAsync(); var services = AppServices.Create(paths, httpClient); await services.Tools.Initialization; return services;
+            // Presentation fixtures must remain deterministic after the public tag exists.
+            // Individual online cases supply their own controlled handler.
+            await settings.SaveAsync(); var services = AppServices.Create(paths, httpClient ?? new HttpClient(new UnavailableGitHub())); await services.Tools.Initialization; return services;
         }
         public void Dispose() { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(Root)) Directory.Delete(Root, true); }
     }

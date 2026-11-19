@@ -1413,5 +1413,9 @@
   "Settings.SearchNotificationPresentation": "Notification presentation",
   "Settings.SearchAuthenticationSource": "Authentication source",
   "Settings.SearchBrowser": "Browser for synchronization",
-  "Settings.SearchExtensionId": "Browser extension identifier"
+  "Settings.SearchExtensionId": "Browser extension identifier",
+  "Experience.RefreshNotes": "Újdonságok frissítése",
+  "Experience.GitHubNotes": "Forrás: a telepített verzió hivatalos GitHub-kiadása.",
+  "Experience.CachedNotes": "Forrás: a telepített verzió mentett hivatalos GitHub-kiadása. Offline is elérhető.",
+  "Experience.OnlineEnglishNotes": "A hivatalos kiadási megjegyzések angol nyelvűek. A helyi offline összefoglaló lengyelül és angolul érhető el."
 }

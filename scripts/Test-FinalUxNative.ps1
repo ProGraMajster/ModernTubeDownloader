@@ -8,12 +8,16 @@ param(
     [Parameter(Mandatory)][string]$LanguageDirectory,
     [Parameter(Mandatory)][Alias('EvidenceDirectory')][string]$EvidenceDir,
     [switch]$Before,
-    [switch]$ExperienceLaterOnly
+    [switch]$ExperienceLaterOnly,
+    [switch]$PublishedOfficialNotes,
+    [string]$ExpectedReleaseNotesPath
 )
 # External production UIA + HWND-directed messages. This is NOT physical input,
 # foreground acceptance, taskbar qualification, or a substitute for pixel review.
 $ErrorActionPreference = 'Stop'
 if ($Before -and $ExperienceLaterOnly) { throw 'The baseline cannot qualify the changed release-note journey.' }
+if ($PublishedOfficialNotes -and $Before) { throw 'Published official notes cannot qualify the historical baseline.' }
+if ($PublishedOfficialNotes -and [string]::IsNullOrWhiteSpace($ExpectedReleaseNotesPath)) { throw 'Published official notes require the explicit canonical release-note path.' }
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) { throw 'Use Windows PowerShell 5.' }
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Drawing
 Add-Type -ReferencedAssemblies System.Drawing @'
@@ -229,6 +233,101 @@ function Assert-LaterUnchanged($BeforeState,[string]$Action) {
     }
     Record $Action @{beforeSha256=$BeforeState.sha256; afterSha256=$after.sha256; acknowledgedVersion=$after.state.lastWhatsNewAcknowledgedVersion; deferredVersion=$after.state.deferredWhatsNewVersion}
 }
+function Normalize-NotesText([string]$Text) {
+    # Only line endings are normalized. Whitespace/content/trailing lines remain evidence.
+    return $Text.Replace("`r`n", "`n").Replace("`r", "`n")
+}
+function Notes-TextHash([string]$Text) {
+    $hash=[Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))).Replace('-','') }
+    finally { $hash.Dispose() }
+}
+function Read-ExpectedOfficialSections([string]$Text) {
+    # Parse the reviewed canonical headings/paragraphs/lists independently of the
+    # application assembly. This test runs in PowerShell 5, not the .NET 10 runtime.
+    $sections=[ordered]@{}; $paragraph=[Collections.Generic.List[string]]::new()
+    $preamble=[Collections.Generic.List[string]]::new(); $items=$preamble
+    $flush={ if ($paragraph.Count -gt 0) { $items.Add([string]::Join("`n",$paragraph.ToArray())); $paragraph.Clear() } }
+    foreach ($raw in (Normalize-NotesText $Text).Split([char]10)) {
+        $line=$raw.Trim()
+        if ($line.StartsWith('```',[StringComparison]::Ordinal)) { throw 'Canonical release notes contain an unsupported fenced block; review the native expected-text parser.' }
+        if ($line.StartsWith('## ',[StringComparison]::Ordinal)) {
+            & $flush
+            $id=switch -CaseSensitive ($line.Substring(3).Trim()) { 'New' {'new'} 'Improvements' {'improved'} 'Fixes' {'fixed'} 'Known Issues' {'limitations'} default { throw 'Unexpected canonical release-note heading.' } }
+            if ($sections.Contains($id)) { throw 'Duplicate canonical release-note heading.' }
+            $items=[Collections.Generic.List[string]]::new()
+            if ($sections.Count -eq 0) { $items.AddRange($preamble) }
+            $sections.Add($id,$items)
+            continue
+        }
+        if ($line.StartsWith('# ',[StringComparison]::Ordinal) -and $sections.Count -eq 0) {
+            if ($line -cne '# ModernTubeDownloader 1.3.0') { throw 'Canonical notes title is not stable 1.3.0.' }
+            continue
+        }
+        if ($line.Length -eq 0) { & $flush; continue }
+        if ($line.StartsWith('###',[StringComparison]::Ordinal) -or $line.StartsWith('- ',[StringComparison]::Ordinal) -or $line.StartsWith('* ',[StringComparison]::Ordinal)) {
+            & $flush
+            $line=if ($line.StartsWith('#',[StringComparison]::Ordinal)) { $line.TrimStart([char]'#').Trim() } else { $line.Substring(2) }
+        }
+        $paragraph.Add($line)
+    }
+    & $flush
+    if (($sections.Keys -join ',') -cne 'new,improved,fixed,limitations') { throw 'Canonical release notes must have all four ordered categories.' }
+    $result=[ordered]@{}
+    foreach ($id in $sections.Keys) {
+        if ($sections[$id].Count -eq 0) { throw "Empty canonical release-note category: $id" }
+        $result.Add($id,[string]::Join("`n`n",$sections[$id].ToArray()))
+    }
+    return $result
+}
+function Assert-NotesTextControls($Window,$ExpectedSections,[string]$Action) {
+    foreach ($id in @('new','improved','fixed','limitations')) {
+        if (-not (Find-Now $Window ('WhatsNewSection-'+$id))) { throw "Missing release section: $id" }
+        $control=Find-Now $Window ('WhatsNewText-'+$id)
+        if (-not $control) { throw "Missing native release-note editor: $id" }
+        $pattern=$null
+        if (-not $control.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) { throw "Release-note editor has no ValuePattern: $id" }
+        if (-not $pattern.Current.IsReadOnly) { throw "Release-note editor is writable: $id" }
+        $actual=[string]$pattern.Current.Value
+        if ([string]::IsNullOrWhiteSpace($actual)) { throw "Empty native release-note editor: $id" }
+        if ($ExpectedSections -and (Normalize-NotesText $actual) -cne $ExpectedSections[$id]) { throw "Native release-note text differs from the canonical published category: $id" }
+        Record $Action @{category=$id; automationId=$control.Current.AutomationId; pattern='ValuePattern'; readOnly=$pattern.Current.IsReadOnly;
+            characters=$actual.Length; normalizedTextSha256=(Notes-TextHash (Normalize-NotesText $actual));
+            exactCanonicalMatch=($null -ne $ExpectedSections); offscreen=$control.Current.IsOffscreen; processId=$control.Current.ProcessId}
+    }
+}
+function Assert-OfficialNotes($Window,[string]$SourceKey,[string]$Action) {
+    if ($installedVersion -cne '1.3.0') { throw 'Published official-note qualification requires the stable 1.3.0 package.' }
+    $caption=[string]$labels.$SourceKey
+    if ([string]::IsNullOrWhiteSpace($caption)) { throw "Missing trusted release-note source label: $SourceKey" }
+    $script:FinalUxState.notesProvenance=$null
+    Native-Call ('uia.notes-source.'+$Action) {
+        Wait-Condition {
+            $script:FinalUxState.notesProvenance=Find-Now $Window 'WhatsNewProvenance'
+            $script:FinalUxState.notesProvenance -and $script:FinalUxState.notesProvenance.Current.Name -ceq $caption
+        } "Published release notes did not reach the exact required source: $SourceKey"
+    } | Out-Null
+    $cachePath=Join-Path (Join-Path $DataRoot 'release-notes-cache') 'v1.3.0.json'
+    if (-not [IO.File]::Exists($cachePath)) { throw 'Validated official release-note cache is absent.' }
+    $stream=[IO.File]::Open($cachePath,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::Read -bor [IO.FileShare]::Delete))
+    $memory=[IO.MemoryStream]::new(); $hash=[Security.Cryptography.SHA256]::Create()
+    try {
+        if ($stream.Length -gt 2MB) { throw 'Official release-note cache exceeds the production envelope bound.' }
+        $stream.CopyTo($memory); $bytes=$memory.ToArray()
+        if ($bytes.Length -gt 2MB) { throw 'Official release-note cache changed beyond its size limit.' }
+        $cache=[Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF) | ConvertFrom-Json
+        $cacheHash=[BitConverter]::ToString($hash.ComputeHash($bytes)).Replace('-','')
+    } finally { $hash.Dispose(); $memory.Dispose(); $stream.Dispose() }
+    if ($cache.Schema -ne 1 -or $cache.Version -cne '1.3.0' -or
+        $cache.OfficialUrl -cne 'https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.3.0' -or
+        $cache.Body -isnot [string] -or [string]::IsNullOrWhiteSpace($cache.Body)) { throw 'Official release-note cache identity/schema is invalid.' }
+    if ((Normalize-NotesText $cache.Body) -cne $script:FinalUxState.expectedNotesBody) { throw 'Official release-note cache body differs from the canonical release document.' }
+    Assert-NotesTextControls $Window $script:FinalUxState.expectedNotesSections ($Action+'.text')
+    Record $Action @{sourceKey=$SourceKey; provenance=$script:FinalUxState.notesProvenance.Current.Name;
+        cacheFile='release-notes-cache/v1.3.0.json'; cacheSha256=$cacheHash; schema=$cache.Schema; version=$cache.Version; officialUrl=$cache.OfficialUrl;
+        canonicalDocumentSha256=$script:FinalUxState.expectedNotesHash; normalizedBodySha256=(Notes-TextHash $script:FinalUxState.expectedNotesBody);
+        bodyMatchesCanonical=$true; noOnlineLinkInvoked=$true; physicalInput='NOT EXECUTED'}
+}
 function Capture($Window,[string]$Name,[int]$MaximumMilliseconds=12000) {
     if ($MaximumMilliseconds -lt 1 -or $MaximumMilliseconds -gt 12000) { throw 'Capture deadline must stay within the existing 12-second readiness limit.' }
     Check-Events; $path=Join-Path $EvidenceDir ($Name+'.png'); if ([IO.File]::Exists($path)) { throw "Capture already exists: $Name" }
@@ -336,6 +435,15 @@ try {
     $languageFile=$languageFiles | Where-Object { $_.BaseName -eq $language } | Select-Object -First 1
     if (-not $languageFile) { throw "No exact trusted localization file for profile language: $language" }
     $labels=Get-Content -LiteralPath $languageFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($PublishedOfficialNotes) {
+        $expectedPath=[IO.Path]::GetFullPath($ExpectedReleaseNotesPath)
+        if (-not [IO.File]::Exists($expectedPath) -or ([IO.FileInfo]$expectedPath).Length -gt 64KB) { throw 'Canonical release-note document is missing or exceeds the production body bound.' }
+        $script:FinalUxState.expectedNotesBody=Normalize-NotesText ([IO.File]::ReadAllText($expectedPath,[Text.Encoding]::UTF8))
+        $script:FinalUxState.expectedNotesSections=Read-ExpectedOfficialSections $script:FinalUxState.expectedNotesBody
+        $script:FinalUxState.expectedNotesHash=File-Hash $expectedPath
+        Record 'notes.canonical-document' @{file=[IO.Path]::GetFileName($expectedPath); sha256=$script:FinalUxState.expectedNotesHash;
+            categories=@($script:FinalUxState.expectedNotesSections.Keys); characters=$script:FinalUxState.expectedNotesBody.Length}
+    }
     $stores=@{}; foreach ($name in @('settings.json','queue.json','history.json')) { $stores[$name]=File-Hash (Join-Path $DataRoot $name) }
     Wait-Condition { $script:FinalUxState.main=Window-Now 'MainWindow'; $null -ne $script:FinalUxState.main } 'MainWindow absent.'
     if (-not $Before) {
@@ -347,7 +455,11 @@ try {
             $experienceBefore.state.deferredWhatsNewVersion -eq $installedVersion) { throw 'Expected an unacknowledged, non-deferred installed-version fixture.' }
         $script:FinalUxState.news=$null
         Wait-Condition { $script:FinalUxState.news=Window-Now 'WhatsNewWindow'; $null -ne $script:FinalUxState.news } 'Automatic unacknowledged release notes did not open.'
-        Capture $script:FinalUxState.news '00-whats-new-automatic'
+        if ($PublishedOfficialNotes) {
+            $sourceKey=if ($ExperienceLaterOnly) { 'Experience.GitHubNotes' } else { 'Experience.CachedNotes' }
+            Assert-OfficialNotes $script:FinalUxState.news $sourceKey 'notes.automatic.official'
+            Capture $script:FinalUxState.news $(if ($ExperienceLaterOnly) { '00-whats-new-automatic-github' } else { '00-whats-new-automatic-cache-after-restart' })
+        } else { Capture $script:FinalUxState.news '00-whats-new-automatic' }
         Invoke $script:FinalUxState.news 'WhatsNewLater'
         Wait-Condition { $null -eq (Window-Now 'WhatsNewWindow') -and $script:FinalUxState.main.Current.IsEnabled } 'Automatic Later did not restore the main window.'
         Assert-LaterUnchanged $experienceBefore 'notes.automatic-later.unchanged'
@@ -389,15 +501,25 @@ try {
         Capture $script:FinalUxState.main '11-settings-reset'
         Invoke $script:FinalUxState.main 'NavHelp'; Invoke $script:FinalUxState.main 'HelpWhatsNew'
         $script:FinalUxState.news=$null; Wait-Condition { $script:FinalUxState.news=Window-Now 'WhatsNewWindow'; $null -ne $script:FinalUxState.news } 'WhatsNewWindow absent.'
-        $provenance=Find $script:FinalUxState.news 'WhatsNewProvenance'
-        if ($provenance.Current.Name -ne $labels.'Experience.LocalNotes') { throw 'Notes do not identify the bundled offline source.' }
-        foreach ($id in @('new','improved','fixed','limitations')) { if (-not (Find-Now $script:FinalUxState.news ('WhatsNewSection-'+$id))) { throw "Missing release section: $id" } }
-        Capture $script:FinalUxState.news '12-whats-new-bundled'
-        Record 'notes.source' @{source='embedded-manifest'; noOnlineLinkInvoked=$true; networkIsolation='NOT PROVIDED BY THIS HARNESS'}
+        if ($PublishedOfficialNotes) {
+            Assert-OfficialNotes $script:FinalUxState.news 'Experience.CachedNotes' 'notes.manual.official-cache'
+            Capture $script:FinalUxState.news '12-whats-new-official-cache'
+        } else {
+            $provenance=Find $script:FinalUxState.news 'WhatsNewProvenance'
+            if ($provenance.Current.Name -ne $labels.'Experience.LocalNotes') { throw 'Notes do not identify the bundled offline source.' }
+            foreach ($id in @('new','improved','fixed','limitations')) { if (-not (Find-Now $script:FinalUxState.news ('WhatsNewSection-'+$id))) { throw "Missing release section: $id" } }
+            Assert-NotesTextControls $script:FinalUxState.news $null 'notes.bundled.text'
+            Capture $script:FinalUxState.news '12-whats-new-bundled'
+            Record 'notes.source' @{source='embedded-manifest'; noOnlineLinkInvoked=$true; networkIsolation='NOT PROVIDED BY THIS HARNESS'}
+        }
         Invoke $script:FinalUxState.news 'WhatsNewLater'; Wait-Condition { $null -eq (Window-Now 'WhatsNewWindow') } 'Later did not close WhatsNew.'
         Assert-LaterUnchanged $experienceBefore 'notes.manual-later.unchanged'
         Invoke $script:FinalUxState.main 'HelpWhatsNew'
         $script:FinalUxState.news=$null; Wait-Condition { $script:FinalUxState.news=Window-Now 'WhatsNewWindow'; $null -ne $script:FinalUxState.news } 'Manual notes could not be reopened after Later.'
+        if ($PublishedOfficialNotes) {
+            Assert-OfficialNotes $script:FinalUxState.news 'Experience.CachedNotes' 'notes.reopened.official-cache'
+            Capture $script:FinalUxState.news '13-whats-new-reopened-official-cache'
+        }
         Invoke $script:FinalUxState.news 'WhatsNewDone'
         Wait-Condition { $saved=Read-Experience; $null -eq (Window-Now 'WhatsNewWindow') -and $saved.state.lastWhatsNewAcknowledgedVersion -eq $installedVersion -and $saved.state.lastObservedVersion -eq $installedVersion } 'Done did not durably acknowledge exactly the installed version.'
         $acknowledged=Read-Experience
@@ -422,6 +544,6 @@ try {
         }
         $script:FinalUxState.native.Dispose()
     }
-    @{phase=$phase; result=$(if ($script:FinalUxState.interrupted) {'INTERRUPTED'} elseif ($script:FinalUxState.errorText) {'FAIL'} else {'EVIDENCE COLLECTED'}); assertions=$(if ($Before) {'baseline observation only'} elseif ($script:FinalUxState.errorText) {'not qualified'} else {'targeted UIA actions passed'}); visualAcceptance='MANUAL REVIEW REQUIRED'; physicalInput='NOT EXECUTED'; semanticBridge=$false; elapsedSeconds=$script:FinalUxState.watch.Elapsed.TotalSeconds; processId=$OwnedProcessId; error=$script:FinalUxState.errorText; events=@($script:FinalUxState.events.ToArray())} | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'native-result.json') -Encoding UTF8
+    @{phase=$phase; notesLane=$(if ($PublishedOfficialNotes) {'published-exact-tag'} else {'bundled-local'}); result=$(if ($script:FinalUxState.interrupted) {'INTERRUPTED'} elseif ($script:FinalUxState.errorText) {'FAIL'} else {'EVIDENCE COLLECTED'}); assertions=$(if ($Before) {'baseline observation only'} elseif ($script:FinalUxState.errorText) {'not qualified'} else {'targeted UIA actions passed'}); visualAcceptance='MANUAL REVIEW REQUIRED'; physicalInput='NOT EXECUTED'; semanticBridge=$false; elapsedSeconds=$script:FinalUxState.watch.Elapsed.TotalSeconds; processId=$OwnedProcessId; error=$script:FinalUxState.errorText; events=@($script:FinalUxState.events.ToArray())} | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'native-result.json') -Encoding UTF8
 }
 if ($script:FinalUxState.errorText) { Write-Error $script:FinalUxState.errorText; exit 1 }; if ($script:FinalUxState.interrupted) { exit 2 }; exit 0

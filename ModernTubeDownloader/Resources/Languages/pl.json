@@ -1413,5 +1413,9 @@
   "Settings.SearchNotificationPresentation": "Sposób wyświetlania powiadomień",
   "Settings.SearchAuthenticationSource": "Źródło uwierzytelniania",
   "Settings.SearchBrowser": "Przeglądarka do synchronizacji",
-  "Settings.SearchExtensionId": "Identyfikator rozszerzenia przeglądarki"
+  "Settings.SearchExtensionId": "Identyfikator rozszerzenia przeglądarki",
+  "Experience.RefreshNotes": "Odśwież informacje",
+  "Experience.GitHubNotes": "Źródło: oficjalne wydanie GitHub dla zainstalowanej wersji.",
+  "Experience.CachedNotes": "Źródło: zapisana kopia oficjalnego wydania GitHub dla zainstalowanej wersji. Dostępna offline.",
+  "Experience.OnlineEnglishNotes": "Oficjalna treść wydania jest w języku angielskim. Lokalne podsumowanie offline jest dostępne po polsku i angielsku."
 }

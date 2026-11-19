@@ -1413,5 +1413,9 @@
   "Settings.SearchNotificationPresentation": "Notification presentation",
   "Settings.SearchAuthenticationSource": "Authentication source",
   "Settings.SearchBrowser": "Browser for synchronization",
-  "Settings.SearchExtensionId": "Browser extension identifier"
+  "Settings.SearchExtensionId": "Browser extension identifier",
+  "Experience.RefreshNotes": "업데이트 내용 새로 고침",
+  "Experience.GitHubNotes": "출처: 설치된 버전의 공식 GitHub 릴리스.",
+  "Experience.CachedNotes": "출처: 저장된 설치 버전의 공식 GitHub 릴리스. 오프라인에서 이용할 수 있습니다.",
+  "Experience.OnlineEnglishNotes": "공식 릴리스 내용은 영어로 제공됩니다. 로컬 오프라인 요약은 폴란드어와 영어로 제공됩니다."
 }

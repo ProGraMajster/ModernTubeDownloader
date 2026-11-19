@@ -1,4 +1,4 @@
-# Setup and migration to the 1.3.0 candidate
+# Setup and migration to 1.3.0
 
 The language step now uses the same searchable locale registry and local vector
 region indicators as Settings. Existing `pl`/`en` preferences remain compatible.
@@ -11,9 +11,10 @@ The native setup journey uses the existing `AppServices`, `SettingsService`,
 share one queue, history, LIVE runtime and profile. Completing setup does not create a
 parallel data store or replace the existing task models.
 
-This document describes implementation, not release qualification. The product remains
-a **1.3.0 candidate**. Test results and native captures belong in the iteration report;
-the presence of the code or previews below is not a PASS claim.
+This document describes the stable 1.3.0 migration contract. The historical test runs
+below qualify only their recorded source; stable publication evidence belongs in the
+publication report. The presence of code or previews is not a PASS claim. Current
+[release notes](docs/releases/v1.3.0.md) include installation instructions and known limits.
 
 ## Deciding which startup flow to show
 

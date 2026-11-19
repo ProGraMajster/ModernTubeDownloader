@@ -1413,5 +1413,9 @@
   "Settings.SearchNotificationPresentation": "Notification presentation",
   "Settings.SearchAuthenticationSource": "Authentication source",
   "Settings.SearchBrowser": "Browser for synchronization",
-  "Settings.SearchExtensionId": "Browser extension identifier"
+  "Settings.SearchExtensionId": "Browser extension identifier",
+  "Experience.RefreshNotes": "Sürüm notlarını yenile",
+  "Experience.GitHubNotes": "Kaynak: yüklü sürüm için resmî GitHub yayını.",
+  "Experience.CachedNotes": "Kaynak: yüklü sürüm için kaydedilmiş resmî GitHub yayını. Çevrimdışı kullanılabilir.",
+  "Experience.OnlineEnglishNotes": "Resmî sürüm notları İngilizcedir. Yerel çevrimdışı özet Lehçe ve İngilizce olarak sunulur."
 }

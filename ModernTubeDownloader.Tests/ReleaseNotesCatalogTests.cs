@@ -21,7 +21,6 @@ public sealed class ReleaseNotesCatalogTests
 
     [Theory]
     [InlineData("1.3.0-candidate.2")]
-    [InlineData("1.3.0")]
     [InlineData("1.2.1")]
     [InlineData("1.4.0")]
     public void AnotherTagOrAvailableUpdateCannotBorrowInstalledCandidateContent(string otherVersion)
@@ -30,7 +29,20 @@ public sealed class ReleaseNotesCatalogTests
         Assert.Null(ReleaseNotesCatalog.ForInstalled(otherVersion, "en"));
         Assert.Equal("https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v" + otherVersion,
             ReleaseNotesCatalog.OfficialReleaseUrl(otherVersion)!.AbsoluteUri);
-        Assert.Equal(new[] { "1.3.0-candidate.1" }, ReleaseNotesCatalog.AvailableVersions);
+        Assert.Equal(new[] { "1.3.0", "1.3.0-candidate.1" }, ReleaseNotesCatalog.AvailableVersions.OrderBy(version => version, StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("pl", false)] [InlineData("en", false)] [InlineData("ja-JP", true)]
+    public void StableVersionHasItsOwnFourCategoriesAndExactOfficialLink(string language, bool fallback)
+    {
+        var notes = Assert.IsType<InstalledReleaseNotes>(ReleaseNotesCatalog.ForInstalled("1.3.0+build", language));
+        Assert.Equal("1.3.0", notes.Version); Assert.False(notes.IsPrerelease);
+        Assert.Equal(fallback, notes.IsLanguageFallback);
+        Assert.Equal(new[] { "new", "improved", "fixed", "limitations" }, notes.Sections.Select(section => section.Category));
+        Assert.All(notes.Sections, section => Assert.NotEmpty(section.Items));
+        Assert.Equal("https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.3.0", notes.OfficialUrl.AbsoluteUri);
+        Assert.Contains(notes.Sections.Single(section => section.Category == "limitations").Items, item => item.Contains("534", StringComparison.Ordinal));
     }
 
     [Theory]

@@ -1,5 +1,32 @@
 # ModernTubeDownloader release checklist
 
+## Stable 1.3.0 publication gate
+
+The owner has authorized stable 1.3.0 publication after critical qualification,
+including normal merge of PR #3, the annotated `v1.3.0` tag and the existing
+GitHub Actions release workflow. ModernFormsNext #534 is explicitly accepted
+for this version and documented in the release Known Issues. Do not modify the
+framework, rewrite tags/history, bypass CI or replace the release workflow.
+
+The candidate ledgers below are historical evidence, not a prohibition on the
+newly authorized stable publication and not proof that the stable code passed.
+Record current results in `docs/stable-release-1.3.0.md` and the publication
+artifacts. Pending checks remain pending until actually executed.
+
+- [ ] Stable identity and exact-tag local-first release notes, cache and cancellation.
+- [ ] Targeted migration, updater, release-note HTTP and presentation tests.
+- [ ] Frozen-source Debug/Release, JavaScript, history security and package validation.
+- [ ] Actual unpacked EXE, NativeHost/Updater and isolated migration/startup journeys.
+- [ ] Both final feature-head CI runs successful; PR ready and exact-head normal merge.
+- [ ] Actual merged-master CI successful before creating/pushing `v1.3.0`.
+- [ ] Release workflow successful; public non-draft/non-prerelease and exact/latest APIs verified.
+- [ ] Downloaded official ZIP/checksum/symbols independently hashed and production smoke tested.
+- [ ] Actual published exact-version notes and 1.2.1 update discovery with Skip/Later checked.
+
+The long soak and physical 5K/225% qualification remain NOT EXECUTED. Previously
+unqualified native popup/tooltip lanes and translation editorial review remain
+explicit limitations; they must not be presented as passes.
+
 ## Current follow-up — speed telemetry and Organizer diagnostics, 2026-11-18
 
 Frozen product source: **`5d7536b944d4c34d3540c174f1a41e608948fba8`**.

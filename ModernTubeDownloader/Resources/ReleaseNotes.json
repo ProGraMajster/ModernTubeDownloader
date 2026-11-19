@@ -2,6 +2,71 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.3.0",
+      "languages": {
+        "en": [
+          { "category": "new", "title": "New", "items": [
+            "Modern Dashboard adds a native workspace for Downloads, LIVE, History, Batch Import, Other and Settings. Classic remains available with the same runtime, queue and data.",
+            "Batch Import & Download combines preparation, analysis and queue admission. Lists have their own saved destination folders; automatic preparation never silently resumes a paused queue.",
+            "The organizer matches existing recordings to URL lists using verified source identity, previews media/JSON/sidecar moves, updates canonical History/queue paths and offers recovery and guarded undo.",
+            "A resumable six-step setup and a one-time interface/update-policy choice for existing profiles preserve existing collections. Help links six practical topics to the existing tools.",
+            "What's New reads the official GitHub Release for the exact installed version, with bundled offline notes, a bounded cache and a visible source/language label. Later and Close do not mark it as read."
+          ] },
+          { "category": "improved", "title": "Improvements", "items": [
+            "Collapsible playlist groups preserve real job identities and order. Modern queue/History pages and bounded thumbnail ownership avoid creating a control and image for every stored item.",
+            "LIVE gains active/recent views, filtering, sorting and a structured inspector over the existing independent recording service.",
+            "Settings search reveals and highlights specific options without indexing private values. A shared language picker offers sixteen locale catalogs and local region icons.",
+            "New profiles automatically check, verify and stage stable updates for safe exit. Existing disabled checks, update choices, Skip and Later remain respected. Installation at manual startup is separate and off by default.",
+            "Batch completion is tracked with its page closed, accepted list folders survive restart/retry, and the organizer distinguishes unmatched URLs from recordings outside imported lists."
+          ] },
+          { "category": "fixed", "title": "Fixes", "items": [
+            "Passive Batch refresh retains unchanged rows and controls instead of resetting the screen and closing an open workflow ComboBox. Real progress updates remain enabled.",
+            "Download statistics and the graph use recent observed media-byte transfer with explicit KiB/s and MiB/s units. Resumed counters and gaps do not invent throughput; OS network figures can still differ.",
+            "Informational controls retain their background after clicking, focused inputs use a border, and Settings search Enter does not also toggle the revealed option. Large-text layouts avoid horizontal sidebar scrolling.",
+            "Unreadable queue, History and LIVE stores block unsafe writes and admission. Compatible unknown JSON fields and canonical task identities survive normal persistence and recovery.",
+            "Failed setup/update saves do not publish successful choices. Organizer recovery and undo reject changed evidence or conflicting paths without discarding the last verified copy."
+          ] },
+          { "category": "limitations", "title": "Known Issues", "items": [
+            "ModernFormsNext #534: a maximized window can cover a persistently visible Windows taskbar or show an incorrect strip. Use a restored, non-maximized window; taskbar auto-hide may help. Details: https://github.com/ProGraMajster/ModernFormsNext/issues/534",
+            "Some independent native popup/tooltip and focus scenarios remain NOT QUALIFIED. Physical 5K at Windows 225% DPI is not qualified; a long memory/leak soak was NOT EXECUTED.",
+            "All sixteen locale catalogs have not received full native-speaker review. Bundled Help and notes include Polish/English; official GitHub release text is English with an explicit language fallback.",
+            "Private/authenticated sources depend on their services and access/cookies. The organizer requires reliable identity evidence; an adjacent JSON alone is insufficient, and completed LIVE parts remain excluded.",
+            "LIVE FromStart and SponsorBlock Remove retain their existing experimental limitations. The executable is not code-signed; verify the official package checksum."
+          ] }
+        ],
+        "pl": [
+          { "category": "new", "title": "Nowe", "items": [
+            "Modern Dashboard dodaje natywną przestrzeń dla Pobierania, LIVE, Historii, Batch Import, Pozostałych i Ustawień. Classic pozostaje dostępny i korzysta z tego samego runtime, kolejki oraz danych.",
+            "Importuj i pobierz w Batch łączy przygotowanie listy, analizę i dodawanie do kolejki. Listy mają własne zapisane foldery docelowe; automatyczne przygotowanie nie wznawia samodzielnie wstrzymanej kolejki.",
+            "Organizator dopasowuje istniejące nagrania do list URL na podstawie potwierdzonej tożsamości źródła, pokazuje plan przenoszenia mediów, JSON-ów i plików towarzyszących, aktualizuje ścieżki Historii/kolejki oraz udostępnia odzyskiwanie i bezpieczne cofanie.",
+            "Wznawialny sześciostopniowy kreator i jednorazowy wybór interfejsu oraz polityki aktualizacji dla istniejących profili zachowują dotychczasowe kolekcje. Pomoc łączy sześć praktycznych tematów z istniejącymi narzędziami.",
+            "Co nowego pobiera oficjalne GitHub Release dokładnie dla zainstalowanej wersji, z lokalnymi notatkami offline, ograniczoną pamięcią podręczną i jawnym oznaczeniem źródła oraz języka. Później i zamknięcie okna nie oznaczają przeczytania."
+          ] },
+          { "category": "improved", "title": "Ulepszenia", "items": [
+            "Zwijane grupy playlist zachowują rzeczywiste identyfikatory i kolejność zadań. Stronicowanie kolejki i Historii oraz ograniczone ładowanie miniaturek zapobiegają tworzeniu kontrolki i obrazu dla każdej zapisanej pozycji.",
+            "LIVE otrzymuje widoki bieżących i ostatnich sesji, filtrowanie, sortowanie oraz uporządkowany inspektor nad dotychczasową niezależną usługą nagrywania.",
+            "Wyszukiwarka Ustawień odsłania i podświetla konkretne opcje bez indeksowania prywatnych wartości. Wspólny wybór języka oferuje szesnaście katalogów lokalizacji i lokalne ikony regionów.",
+            "Nowe profile automatycznie sprawdzają, weryfikują i przygotowują stabilne aktualizacje do instalacji przy bezpiecznym wyjściu. Dotychczasowe wyłączenie sprawdzania, tryb, Pomiń i Później są zachowywane. Instalacja przy ręcznym uruchomieniu jest osobna i domyślnie wyłączona.",
+            "Batch śledzi zakończenie zadań także po zamknięciu strony, foldery list przetrwają restart i ponowienie, a organizator odróżnia nierozpoznane URL-e od nagrań spoza wczytanych list."
+          ] },
+          { "category": "fixed", "title": "Naprawy", "items": [
+            "Pasywne odświeżanie Batch zachowuje niezmienione wiersze i kontrolki zamiast odtwarzać ekran i zamykać otwartą listę wyboru. Rzeczywiste aktualizacje postępu pozostają włączone.",
+            "Statystyki pobierania i wykres korzystają z ostatnio zaobserwowanego transferu danych multimedialnych w jednostkach KiB/s i MiB/s. Wznawiane liczniki i przerwy nie tworzą fikcyjnej prędkości; wskazania sieciowe Windows mogą nadal być inne.",
+            "Kontrolki informacyjne zachowują tło po kliknięciu, pola z fokusem mają ramkę, a Enter w wyszukiwaniu nie przełącza odsłoniętej opcji. Duży tekst nie powoduje poziomego przewijania sidebaru.",
+            "Nieczytelne magazyny kolejki, Historii i LIVE blokują niebezpieczny zapis oraz rozpoczynanie pracy. Zgodne nieznane pola JSON i dotychczasowe identyfikatory zadań są zachowywane.",
+            "Błędy zapisu kreatora i aktualizacji nie publikują pomyślnej decyzji. Odzyskiwanie i cofanie organizatora odrzucają zmienione pliki i konflikty ścieżek, zachowując ostatnią zweryfikowaną kopię."
+          ] },
+          { "category": "limitations", "title": "Znane ograniczenia", "items": [
+            "ModernFormsNext #534: zmaksymalizowane okno może przysłonić stale widoczny pasek zadań Windows lub pokazać nieprawidłowy pas. Użyj przywróconego, niezmaksymalizowanego okna; autoukrywanie paska może pomóc. Szczegóły: https://github.com/ProGraMajster/ModernFormsNext/issues/534",
+            "Niektóre niezależne scenariusze popupów, tooltipów i fokusu pozostają NIEZAKWALIFIKOWANE. Fizyczny ekran 5K przy DPI Windows 225% nie jest zakwalifikowany; długi test pamięci/wycieków NIE ZOSTAŁ WYKONANY.",
+            "Nie wszystkie szesnaście lokalizacji przeszło pełną redakcję native-speaker. Lokalna Pomoc i notatki obejmują polski/angielski; oficjalny opis GitHub jest angielski, z jawnym oznaczeniem zastępczego języka.",
+            "Prywatne źródła wymagają działającej usługi i odpowiedniego dostępu/cookies. Organizator potrzebuje wiarygodnego dowodu tożsamości; sam sąsiedni JSON nie wystarcza, a zakończone części LIVE pozostają wyłączone.",
+            "LIVE Od początku i SponsorBlock Remove zachowują dotychczasowe ograniczenia eksperymentalne. EXE nie ma podpisu cyfrowego; sprawdź sumę kontrolną oficjalnej paczki."
+          ] }
+        ]
+      }
+    },
+    {
       "version": "1.3.0-candidate.1",
       "languages": {
         "en": [

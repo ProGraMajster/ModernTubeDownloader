@@ -6,6 +6,7 @@ param(
     [switch]$PublishedNoUpdate,
     [switch]$PublishedFinalUxSmoke,
     [switch]$PublishedFinalUxBefore,
+    [switch]$PublishedOfficialNotes,
     [switch]$TraySmoke,
     [switch]$UpdateSmoke,
     [switch]$UpdateStatesSmoke,
@@ -101,6 +102,8 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Test-NativePopupWitness.ps1')
 $script:popupWitnessStarted = $false
+if ($PublishedOfficialNotes -and ($PublishedFinalUxBefore -or $ExperienceSmoke)) { throw 'PublishedOfficialNotes requires its fresh unacknowledged production UX profile, not a baseline or another experience fixture.' }
+if ($PublishedOfficialNotes) { $PublishedFinalUxSmoke = $true }
 if ($PublishedFinalUxBefore) { $PublishedFinalUxSmoke = $true }
 if ($PublishedFinalUxSmoke) { $PublishStartupSmoke = $true }
 if ($ExperienceExternalActivation -and $ExperienceSmoke -ne 'Resume') { throw 'ExperienceExternalActivation requires ExperienceSmoke Resume.' }
@@ -1010,6 +1013,16 @@ elseif ($PublishedFinalUxSmoke -and -not $PublishedFinalUxBefore) {
 # Every other smoke represents an already-onboarded isolated QA user. This is a
 # persisted test fixture, not a production flag which suppresses the new journeys.
 $experienceState | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dataRoot 'experience.json') -Encoding utf8
+if ($PublishedOfficialNotes) {
+    if ($experienceVersion -cne '1.3.0') { throw 'PublishedOfficialNotes is bound to the stable 1.3.0 release.' }
+    if (Test-Path -LiteralPath (Join-Path $dataRoot 'release-notes-cache')) { throw 'PublishedOfficialNotes must start without any preseeded release-note cache.' }
+    $expectedReleaseNotesPath = Join-Path $repo 'docs/releases/v1.3.0.md'
+    if (-not (Test-Path -LiteralPath $expectedReleaseNotesPath -PathType Leaf)) { throw 'Canonical stable release-note document is missing.' }
+    @{ releaseVersion='1.3.0'; initialCacheAbsent=$true; acknowledgedVersion=$experienceState.lastWhatsNewAcknowledgedVersion;
+        canonicalDocumentSha256=(Get-FileHash -LiteralPath $expectedReleaseNotesPath -Algorithm SHA256).Hash;
+        firstRequiredSource='Experience.GitHubNotes'; restartRequiredSource='Experience.CachedNotes' } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'native-official-notes-fixture.json') -Encoding utf8
+}
 if ($ExperienceSmoke -in @('Upgrade', 'News', 'Reopen')) {
     $experienceHistoryId = [guid]::NewGuid()
     $experienceHistory = @(@{ QueueItemId = $experienceHistoryId; Title = 'Isolated migration record'; SourceUrl = 'https://example.test/experience'; VideoId = 'experience';
@@ -1124,6 +1137,7 @@ try {
                     "' -EvidenceDir '" + $evidencePath.Replace("'", "''") + "' -LanguageDirectory '" + $languagePath.Replace("'", "''") + "'"
                 if ($PublishedFinalUxBefore) { $command += ' -Before' }
                 if ($LaterOnly) { $command += ' -ExperienceLaterOnly' }
+                if ($PublishedOfficialNotes) { $command += " -PublishedOfficialNotes -ExpectedReleaseNotesPath '" + $expectedReleaseNotesPath.Replace("'", "''") + "'" }
                 & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command $command
                 if ($LASTEXITCODE -ne 0) { throw 'Published UX native probe failed; original evidence preserved.' }
             }

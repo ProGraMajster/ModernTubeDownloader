@@ -15,14 +15,17 @@ internal sealed class WhatsNewForm : Form
     private readonly AppVectorIcon headerIcon = new(AppIconKind.Info, 36, AppThemeTokens.Info);
     private readonly ExperienceScrollPanel body = new() { AutoScroll = true };
     private readonly Panel surface = new() { Dock = DockStyle.Fill };
-    private readonly Button done = new DashboardButton(), later = new DashboardButton(), appearance = new DashboardButton(), updates = new DashboardButton(), releases = new DashboardButton();
-    private readonly List<(Panel Panel, Label Title, Label Text, AppVectorIcon Icon)> cards = [];
-    private bool shown, acknowledging, closeAllowed, closeWhenIdle, arrangingCards;
+    private readonly Button done = new DashboardButton(), later = new DashboardButton(), appearance = new DashboardButton(), updates = new DashboardButton(), releases = new DashboardButton(), refresh = new DashboardButton();
+    private readonly List<(Panel Panel, Label Title, TextBox Text, AppVectorIcon Icon)> cards = [];
+    private readonly CancellationTokenSource notesLifetime = new();
+    private readonly string contentLanguage;
+    private bool shown, acknowledging, closeAllowed, closeWhenIdle, arrangingCards, closed, disposed, refreshing;
     public string? Destination { get; private set; }
 
     internal WhatsNewForm(AppServices services)
     {
         this.services = services; var text = services.Localization;
+        contentLanguage = text.Language;
         Text = text["Experience.WhatsNew"]; AccessibilityObject.AutomationId = "WhatsNewWindow";
         AppBranding.Apply(this); Size = new(1040, 820); MinimumSize = new(720, 560);
         Controls.Add(surface); ExperienceVisual.Surface(surface); ExperienceVisual.Surface(body); AppTypography.SetDashboardPresentation(surface, true);
@@ -40,16 +43,26 @@ internal sealed class WhatsNewForm : Form
         foreach (var section in installedNotes?.Sections ?? [])
         {
             var card = new Panel { AccessibleAutomationId = "WhatsNewSection-" + section.Category }; DownloadsVisual.Card(card);
-            var title = AppUi.Heading(section.Title, 14); var description = AppUi.Muted(string.Join("\n\n", section.Items.Select(item => "• " + item))); description.Multiline = true;
+            var title = AppUi.Heading(section.Title, 14);
+            var description = new AppThemeTextBox
+            {
+                Text = string.Join("\n\n", section.Items.Select(item => "• " + item)), ReadOnly = true, MultiLine = true,
+                ScrollBars = ScrollBars.Vertical, TextAlign = ContentAlignment.TopLeft,
+                MaxLength = GitHubReleaseNotesService.MaximumBodyBytes,
+                AccessibleAutomationId = "WhatsNewText-" + section.Category, AccessibleName = section.Title
+            };
+            AppUi.Input(description);
             var kind = section.Category switch { "new" => AppIconKind.Plus, "improved" => AppIconKind.Queue, "fixed" => AppIconKind.Check, _ => AppIconKind.Info };
             var icon = new AppVectorIcon(kind, 28, AppThemeTokens.Info);
             card.Controls.AddRange([icon, title, description]); body.Controls.Add(card); cards.Add((card, title, description, icon));
             AppTypography.Bind(description, 10.5f);
         }
-        foreach (var (button, key, id) in new[] { (appearance, "Experience.Appearance", "WhatsNewAppearance"), (updates, "Experience.UpdatePreferences", "WhatsNewUpdates"), (releases, "Experience.ReleaseNotes", "WhatsNewReleases"), (done, "Experience.GotIt", "WhatsNewDone"), (later, "Experience.Later", "WhatsNewLater") })
+        foreach (var (button, key, id) in new[] { (appearance, "Experience.Appearance", "WhatsNewAppearance"), (updates, "Experience.UpdatePreferences", "WhatsNewUpdates"), (releases, "Experience.ReleaseNotes", "WhatsNewReleases"), (refresh, "Experience.RefreshNotes", "WhatsNewRefresh"), (done, "Experience.GotIt", "WhatsNewDone"), (later, "Experience.Later", "WhatsNewLater") })
         { button.Text = text[key]; button.AccessibleAutomationId = id; ExperienceVisual.Action(button, button == done); }
         releases.Text = text.Get("Experience.ExactReleaseNotes", services.Experience.Version); releases.Enabled = officialUrl is not null;
-        body.Controls.AddRange([appearance, updates, releases]);
+        body.Controls.AddRange([appearance, updates, releases, refresh]);
+        refresh.Enabled = officialUrl is not null;
+        refresh.Click += async (_, _) => await RefreshNotesAsync(true);
         appearance.Click += async (_, _) => await AcknowledgeAsync("Personalization");
         updates.Click += async (_, _) => await AcknowledgeAsync("Updates");
         done.Click += async (_, _) => await AcknowledgeAsync(null);
@@ -60,11 +73,64 @@ internal sealed class WhatsNewForm : Form
             try { Process.Start(new ProcessStartInfo(officialUrl.AbsoluteUri) { UseShellExecute = true }); }
             catch (Exception ex) { services.Logger.Error("Opening official release notes failed.", ex); error.Text = text["Experience.LinkError"]; LayoutPage(); }
         };
-        Shown += (_, _) => shown = true;
+        Shown += (_, _) => { shown = true; _ = RefreshNotesAsync(false); };
         Closing += (_, e) => { if (acknowledging && !closeAllowed) { e.Cancel = true; closeWhenIdle = true; } };
+        Closed += (_, _) => { closed = true; if (!disposed) notesLifetime.Cancel(); };
         SizeChanged += (_, _) => LayoutPage(); body.SizeChanged += (_, _) => LayoutCards();
         body.ViewportChanged += (_, _) => LayoutCards();
         surface.SizeChanged += (_, _) => LayoutPage(); AppTypography.RegisterLayout(surface, LayoutPage); AppTypography.CaptureRecipes(surface).Invoke(); LayoutPage();
+    }
+
+    private async Task RefreshNotesAsync(bool forceRefresh)
+    {
+        if (refreshing || disposed || closed || officialUrl is null) return;
+        refreshing = true;
+        // Keep the focused action and all content controls alive during the request.
+        // A second click is coalesced rather than changing focus via Enabled=false.
+        try
+        {
+            var notes = await services.ReleaseNotes.FetchAsync(services.Experience.Version, forceRefresh, notesLifetime.Token).ConfigureAwait(false);
+            if (notes is null || notesLifetime.IsCancellationRequested) return;
+            await ModernFormsNext.WindowKit.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (disposed || closed || notes.Version != services.Experience.Version || contentLanguage != services.Localization.Language) return;
+                if (cards.Count != notes.Sections.Count) return;
+                var scroll = body.VerticalScrollProperties.Value;
+                var sections = notes.Sections.ToDictionary(section => "WhatsNewSection-" + section.Category, StringComparer.Ordinal);
+                foreach (var card in cards)
+                {
+                    if (!sections.ContainsKey(card.Panel.AccessibleAutomationId!)) return;
+                }
+                foreach (var card in cards)
+                {
+                    var section = sections[card.Panel.AccessibleAutomationId!];
+                    card.Title.Text = section.Title; card.Text.AccessibleName = section.Title;
+                    // A bounded, read-only native editor renders the entire text. Large releases
+                    // never create full-document Skia bitmaps or turn markup into active content.
+                    var content = string.Join("\n\n", section.Items);
+                    if (card.Text.Text == content) continue;
+                    var selectionStart = card.Text.SelectionStart; var selectionEnd = card.Text.SelectionEnd;
+                    var textScroll = card.Text.VerticalScrollBar.Value;
+                    card.Text.Text = content;
+                    card.Text.SelectionStart = Math.Clamp(selectionStart, -1, content.Length);
+                    card.Text.SelectionEnd = Math.Clamp(selectionEnd, -1, content.Length);
+                    card.Text.VerticalScrollBar.Value = Math.Clamp(textScroll, card.Text.VerticalScrollBar.Minimum, card.Text.VerticalScrollBar.Maximum);
+                }
+                provenance.Text = services.Localization[notes.Origin == ReleaseNotesOrigin.GitHub ? "Experience.GitHubNotes" : "Experience.CachedNotes"];
+                fallback.Text = contentLanguage.Equals("en", StringComparison.OrdinalIgnoreCase) ? "" : services.Localization["Experience.OnlineEnglishNotes"];
+                LayoutCards();
+                body.VerticalScrollProperties.Value = Math.Clamp(scroll, body.VerticalScrollProperties.Minimum, body.VerticalScrollProperties.Maximum);
+            });
+        }
+        catch (OperationCanceledException) when (notesLifetime.IsCancellationRequested) { }
+        catch (Exception ex) { services.Logger.Error("Exact-version release notes remain local after refresh failed.", ex); }
+        finally { refreshing = false; }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !disposed) { disposed = true; notesLifetime.Cancel(); notesLifetime.Dispose(); }
+        base.Dispose(disposing);
     }
 
     private async Task AcknowledgeAsync(string? destination)
@@ -122,11 +188,11 @@ internal sealed class WhatsNewForm : Form
         {
             icon.SetBounds(16, 18, 28, 28); title.Multiline = true;
             title.SetBounds(56, 14, Math.Max(1, width - 72), DashboardVisual.LabelHeight(title, Math.Max(1, width - 72), 3));
-            description.SetBounds(56, title.Bottom + 8, Math.Max(1, width - 72), DashboardVisual.LabelHeight(description, Math.Max(1, width - 72), 120));
+            description.SetBounds(56, title.Bottom + 8, Math.Max(1, width - 72), Math.Min(360, AppTypography.TextHeight(240)));
             panel.SetBounds(viewport.X, y, width, description.Bottom + 18); y = panel.Bottom + 12;
         }
         var x = viewport.X; var line = AppTypography.TextHeight(42);
-        foreach (var button in new[] { appearance, updates, releases })
+        foreach (var button in new[] { appearance, updates, releases, refresh })
         {
             var desiredWidth = Math.Min(width, DashboardVisual.ActionWidth(button));
             if (x > viewport.X && x + desiredWidth > viewport.X + width) { x = viewport.X; y += line + 10; }

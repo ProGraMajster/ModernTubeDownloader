@@ -63,6 +63,7 @@ public sealed class AppServices : IDisposable
     public ModernTubeDownloader.Batch.BatchImportService Batch { get; private set; } = null!;
     public ModernTubeDownloader.Organizer.DownloadOrganizerService Organizer { get; private set; } = null!;
     internal UserExperienceService Experience { get; private set; } = null!;
+    internal GitHubReleaseNotesService ReleaseNotes { get; private set; } = null!;
 
     public static AppServices Create(
         AppPaths paths,
@@ -121,6 +122,7 @@ public sealed class AppServices : IDisposable
         var thumbnails = new ThumbnailCacheService(paths, logger, () => settings.Current.DownloadThumbnail);
         var services = new AppServices(paths, logger, settings, localization, appearance, tools, metadata, queue, processor, history, thumbnails, httpClient);
         services.Experience = experience;
+        services.ReleaseNotes = new(paths, httpClient, logger);
         services.ThumbnailTool = new(metadata.AnalyzeAsync, thumbnails, paths, logger);
         services.Live = live;
         services.Updates = new ApplicationUpdateService(paths, settings, httpClient, logger);

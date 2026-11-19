@@ -83,7 +83,7 @@ The optional restart goes through the application's normal single-instance start
 
 Validation must include the real updater process against an isolated synthetic
 installation. Never use a user's existing installation as an update fixture.
-The 1.3.0 candidate still checks public stable releases only; private/beta/candidate
+ModernTubeDownloader 1.3.0 checks public stable releases only; private/beta/candidate
 update channels are not supported. Product prerelease and build-metadata suffixes are
 handled independently of AssemblyVersion; a candidate can upgrade to the corresponding
 stable release, while an installed stable release cannot offer itself again. Portable folder moves require

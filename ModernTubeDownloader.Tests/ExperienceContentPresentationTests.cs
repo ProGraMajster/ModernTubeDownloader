@@ -32,7 +32,9 @@ public sealed partial class ExperiencePresentationTests
             Assert.Equal(fallback, Find<Label>(root, "WhatsNewLanguageFallback").Text.Length > 0);
             Assert.Equal(services.Localization["Experience.LocalNotes"], Find<Label>(root, "WhatsNewProvenance").Text);
             Assert.Contains(services.Experience.Version, Find<Button>(root, "WhatsNewReleases").Text);
-            Assert.Equal(beforeRequests, handler.Requests); // Even an HTTP 404 endpoint is irrelevant: opening notes never calls it.
+            Pump(host, () => handler.Requests == beforeRequests + 1);
+            Assert.Equal("https://api.github.com/repos/ProGraMajster/ModernTubeDownloader/releases/tags/v" + services.Experience.Version, handler.LastUri);
+            Assert.Equal(services.Localization["Experience.LocalNotes"], Find<Label>(root, "WhatsNewProvenance").Text);
             Click(host, root, "WhatsNewLater"); Pump(host, () => window.IsClosed);
             Assert.Null(services.Experience.State.LastWhatsNewAcknowledgedVersion);
         }
@@ -77,7 +79,8 @@ public sealed partial class ExperiencePresentationTests
     private sealed class UnavailableGitHub : HttpMessageHandler
     {
         public int Requests { get; private set; }
+        public string? LastUri { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        { Requests++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)); }
+        { LastUri = request.RequestUri?.AbsoluteUri; Requests++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)); }
     }
 }

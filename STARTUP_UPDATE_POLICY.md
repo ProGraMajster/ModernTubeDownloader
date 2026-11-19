@@ -1,6 +1,6 @@
 # Optional installation at startup
 
-Implementation notes for 1.3.0-candidate.1. Qualification results are recorded in
+Implementation notes for 1.3.0. Qualification results are recorded in
 `IMPLEMENTATION_REPORT.md`; this document alone is not a test result.
 
 `UpdateSettings.InstallAtStartup` is an independent, opt-in Boolean. Its default is

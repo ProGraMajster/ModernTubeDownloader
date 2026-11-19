@@ -1,4 +1,4 @@
-# Batch import (1.3.0 candidate)
+# Batch import (1.3.0)
 
 ## One-click preparation and list destinations
 
