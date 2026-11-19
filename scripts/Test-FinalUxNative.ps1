@@ -263,19 +263,41 @@ function Capture($Window,[string]$Name,[int]$MaximumMilliseconds=12000) {
     }
     throw "NOT QUALIFIED: $Name did not reach three consecutive identical rasters within $MaximumMilliseconds ms; all $number raw frames were retained."
 }
-function Label-Now([string]$Caption) {
+function Label-Now([string]$Caption,[switch]$Reveal) {
     $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$Caption)
     $matches=$script:FinalUxState.main.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)
-    $visible=@($matches | Where-Object { $_.Current.ProcessId -eq $OwnedProcessId -and -not $_.Current.IsOffscreen -and $_.Current.BoundingRectangle.Width -gt 0 -and $_.Current.BoundingRectangle.Height -gt 0 })
+    $owned=@($matches | Where-Object { $_.Current.ProcessId -eq $OwnedProcessId })
+    $visible=@($owned | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.BoundingRectangle.Width -gt 0 -and $_.Current.BoundingRectangle.Height -gt 0 })
     if ($visible.Count -gt 1) { throw "Ambiguous exact visible label: $Caption" }
-    if ($visible.Count -eq 1) { return $visible[0] }; return $null
+    if ($visible.Count -eq 1) { return $visible[0] }
+    if ($Reveal -and -not $script:FinalUxState.labelRevealAttempted -and $owned.Count -gt 0) {
+        if ($owned.Count -ne 1) { throw "Ambiguous exact label for scroll reveal: $Caption" }
+        $target=$owned[0]
+        if ($target.Current.IsOffscreen) {
+            $scroll=$null
+            if (-not $target.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern,[ref]$scroll)) {
+                throw "Offscreen exact label does not support native ScrollItemPattern: $Caption"
+            }
+            $script:FinalUxState.labelRevealAttempted=$true
+            $bounds=$target.Current.BoundingRectangle
+            Record 'label.scroll-reveal' @{caption=$Caption; runtimeId=@($target.GetRuntimeId()); automationId=$target.Current.AutomationId;
+                processId=$target.Current.ProcessId; offscreen=$true; x=$bounds.Left; y=$bounds.Top; width=$bounds.Width; height=$bounds.Height;
+                pattern='ScrollItemPattern'; attempt=1}
+            # The provider reveals through the target's actual scrolling ancestors.
+            # This is one action inside the existing readiness deadline, not a new wait.
+            Native-Call 'uia.label.ScrollIntoView' { $scroll.ScrollIntoView() } | Out-Null
+            return (Label-Now $Caption)
+        }
+    }
+    return $null
 }
 function Label-States([string]$Key,[string]$Name) {
     $caption=$labels.$Key; if (-not $caption) { throw "Missing trusted localization key: $Key" }
-    $script:FinalUxState.label=$null
-    Native-Call ('uia.label.'+$Key) { Wait-Condition { $script:FinalUxState.label=Label-Now $caption; $null -ne $script:FinalUxState.label } "Exact label absent: $Key" } | Out-Null
+    $script:FinalUxState.label=$null; $script:FinalUxState.labelRevealAttempted=$false
+    Native-Call ('uia.label.'+$Key) { Wait-Condition { $script:FinalUxState.label=Label-Now $caption -Reveal; $null -ne $script:FinalUxState.label } "Exact label absent: $Key" } | Out-Null
     $b=$script:FinalUxState.label.Current.BoundingRectangle; $x=[int]($b.Left+$b.Width/2); $y=[int]($b.Top+$b.Height/2)
-    Record 'label.bounds' @{key=$Key; caption=$caption; x=$b.Left; y=$b.Top; width=$b.Width; height=$b.Height; hwnd=$script:FinalUxState.main.Current.NativeWindowHandle}
+    Record 'label.bounds' @{key=$Key; caption=$caption; runtimeId=@($script:FinalUxState.label.GetRuntimeId()); automationId=$script:FinalUxState.label.Current.AutomationId;
+        x=$b.Left; y=$b.Top; width=$b.Width; height=$b.Height; hwnd=$script:FinalUxState.main.Current.NativeWindowHandle}
     Capture $script:FinalUxState.main ($Name+'-normal')
     $script:FinalUxState.pointerDownQueued=$false
     try {
