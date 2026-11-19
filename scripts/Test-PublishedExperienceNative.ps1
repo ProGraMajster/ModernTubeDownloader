@@ -112,10 +112,19 @@ function Set-Text($Parent, [string]$Id, [string]$Value) {
 }
 function Read-Experience {
     if (-not (Test-Path -LiteralPath $experiencePath -PathType Leaf)) { return $null }
-    # Atomic replacement can briefly deny sharing. Retry only that observation;
-    # malformed JSON and semantic assertions are never swallowed.
-    try { return Get-Content -LiteralPath $experiencePath -Raw -Encoding UTF8 | ConvertFrom-Json }
+    # This observer must not prevent the application's atomic replacement. Copy
+    # a snapshot with delete sharing, then close its handle before JSON parsing.
+    # Retry only I/O observation failures; malformed JSON/assertions still fail.
+    $stream=$null; $snapshot=$null
+    try {
+        $stream=[IO.File]::Open($experiencePath,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $snapshot=[IO.MemoryStream]::new()
+        $stream.CopyTo($snapshot)
+        $bytes=$snapshot.ToArray()
+    }
     catch [IO.IOException] { return $null }
+    finally { if ($stream) { $stream.Dispose() }; if ($snapshot) { $snapshot.Dispose() } }
+    return [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF) | ConvertFrom-Json
 }
 function Step($Wizard, [int]$Index, [string]$ControlId) {
     Wait-Condition { $saved = Read-Experience; $saved -and $saved.setup -eq 1 -and $saved.draft.step -eq $Index } "Draft step $Index was not persisted."

@@ -64,6 +64,39 @@ headless process loading verified official binaries: its old GUI startup can
 change shared HKCU registrations even with a separate data root. This evidence
 is explicitly distinct from an old-GUI or end-to-end installation test.
 
+## Qualification follow-up (2026-11-19)
+
+The product source frozen at `36e3b5205a4f6fb5e6facf496292e3c018fcd385`
+passed local `Build-Release.ps1`: Debug 1597/1597, Release 1597/1597,
+JavaScript 93/93, zero skipped tests, and 816 package entries. The matching PR
+CI run 44591427628 also passed. Push CI run 44591413530 failed one pacing
+test (1596/1597 Debug); its Release/package stages were not executed. Both
+original runs, logs and TRX files are retained. A green PR run does not cancel
+the push failure.
+
+The single-worker pacing test previously compared executor wall-clock times,
+which include variable durable-checkpoint and scheduler latency after queue
+admission. It now uses the existing controlled admission clock, verifies the
+free slot and waiting item, and requires the full exact 500 ms interval. The
+three related targeted Release tests pass. Runtime, deadlines and queue policy
+are unchanged; both CI events on the new head remain required.
+
+The first production-wizard probe encountered an atomic experience-file save
+failure. Its `Get-Content` observer could deny delete sharing while the product
+replaced the ledger. An isolated Windows PowerShell/.NET experiment reproduces
+that exact UnauthorizedAccessException and proves that a snapshot reader using
+ReadWrite/Delete sharing permits replacement while retaining a coherent old
+snapshot. Only the observer was corrected; JSON assertions, action counts and
+timeouts remain intact. The original failure is preserved, and the corrected
+native probe must complete before publication.
+
+The actual unpacked product passed six helper scenarios and production UIA
+navigation through both shells, with 1300 Batch imports, selection/analysis/
+handoff of 60 items, cancellation and reopening. A separate What's New probe
+was interrupted by an external foreground transition and is not a pass.
+Remaining native and public-asset results belong in the terminal publication
+ledger; no merge, tag or public release is asserted by this source document.
+
 ## Accepted issue and remaining boundaries
 
 The owner accepts [ModernFormsNext #534](https://github.com/ProGraMajster/ModernFormsNext/issues/534)
