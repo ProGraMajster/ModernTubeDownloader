@@ -203,6 +203,15 @@ completed local full build is not repeated.
 
 ## Accepted issue and remaining boundaries
 
+The production notes-only client had the same observer pattern at Done. It now
+waits for the awaited acknowledgement window to close, then reads the ledger
+once; the exact-version, changed-hash and unchanged-deferral assertions remain.
+The controlled production run passed Later, restart, manual reopening and Done
+on the unchanged 5fcef77 package. An earlier run interrupted by foreign foreground
+activation remains INTERRUPTED, not PASS. No production code, timeout or test
+assertion was weakened. Both native clients now observe existing UI completion
+boundaries instead of racing an in-progress atomic JSON replacement.
+
 The owner accepts [ModernFormsNext #534](https://github.com/ProGraMajster/ModernFormsNext/issues/534)
 for this release: maximization can cover a persistent Windows taskbar or produce
 an incorrect strip. Use a restored window; auto-hide may help. This behavior is
