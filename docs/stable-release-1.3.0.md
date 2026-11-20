@@ -167,6 +167,40 @@ The first attempted targeted build overlapped an unfinished FakeTool edit and
 did not execute tests; its compiler log is retained separately. Complete frozen
 head and package validation remain required after these fixture corrections.
 
+## Native observer qualification follow-up
+
+The frozen `5fcef77` product/test graph passed local Debug 1609/1609, Release
+1609/1609, JavaScript 93/93 and 816-entry package validation. Both exact-head CI
+events also passed (44784331104 and 44784347741, attempt 1). The actual unpacked
+EXE passed helper qualification (6 cases) and the Classic-to-Modern-to-Classic
+UIA journey, including 1300 Batch entries and 60-item analysis/handoff. An initial
+misconfigured run started Modern while expecting Classic's separate BatchWindow;
+it is retained as a failed harness invocation, not a product window defect.
+Separate Debug native workflows passed organizer/undo, playlist persistence and
+grouping, LIVE stop/save, upgrade choice, and a real public VOD download/probe.
+
+The new production wizard run exposed a remaining observer race: its JSON
+polling could briefly hold a destination open while the application replaced it.
+The earlier snapshot experiment established success only after reader close.
+A new named-pipe-controlled experiment held the actual Read-Experience stream
+immediately after Open(Read, ReadWrite|Delete), before CopyTo/Dispose. Windows
+rejected replacement with the same UnauthorizedAccessException/0x80070005,
+preserved the old JSON, and allowed replacement immediately after explicit
+reader close. This proves a remaining interference mechanism; it does not
+identify an untraced historical handle owner. The original native FAIL remains.
+
+The native client now waits for the exact UI progress value, the target step's
+control and the enabled Next button before asserting the persisted snapshot.
+Setter checks cross an existing awaited Next/Close boundary, and acknowledgement
+is read only after the notes window closes. The JSON values and all earlier
+assertions remain required; no timeout, arbitrary delay, retry or production
+write behavior changed. The fresh production run passed Draft, Complete and
+Restart on the same package, including six steps, retained values, native close,
+three process lifetimes and durable acknowledgement. Original FAIL and corrected
+PASS have separate profiles, logs and captures. This script-only correction
+still requires exact-head CI; the product/test graph is byte-identical and its
+completed local full build is not repeated.
+
 ## Accepted issue and remaining boundaries
 
 The owner accepts [ModernFormsNext #534](https://github.com/ProGraMajster/ModernFormsNext/issues/534)
