@@ -106,8 +106,13 @@ public sealed class ThumbnailToolTests : IDisposable
         var result = await service.ExportAsync(preview, target, ThumbnailExportFormat.Png);
         Assert.False(result.HistorySaved);
         Assert.Equal(target, result.OutputPath);
-        using var decoded = SKBitmap.Decode(target);
+        // SKFileStream's CRT handle can be inherited by an unrelated concurrent
+        // child launch even though Decode(path) closes it synchronously here.
+        // Read via a non-inheritable managed handle, as the production cache does.
+        using var decoded = SKBitmap.Decode(await File.ReadAllBytesAsync(target));
         Assert.Equal(32, decoded.Width); Assert.Equal(18, decoded.Height);
+        using (var exclusive = new FileStream(target, FileMode.Open, FileAccess.Read, FileShare.None))
+            Assert.True(exclusive.Length > 0);
         Assert.Empty(Directory.GetFiles(root, ".mtd-thumbnail-*.tmp"));
     }
 

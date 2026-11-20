@@ -130,6 +130,43 @@ The targeted atomic suite passes 19/19, including the unchanged three RED
 regressions. Full final validation, new package checks and CI must qualify the
 follow-up commit and its actual master merge before the stable tag is allowed.
 
+### Qualification fixture races
+
+The first full local run on `51c970a` passed Debug 1607/1607 and failed Release
+1606/1607 during thumbnail fixture cleanup. Export, history-failure handling and
+decoded-dimension assertions had passed; Windows rejected deleting `export.png`
+with sharing violation `0x80070020`. Original logs/TRX remain preserved and that
+run did not produce a qualified package.
+
+A four-case isolated experiment established that a native Skia file stream/path
+codec can pass its CRT file handle to a concurrently launched child. After the
+parent disposes the stream, exclusive access remains blocked while the child is
+alive and succeeds immediately after its explicit exit. The child receives no
+image path. The native-without-child and managed FileStream/SKData controls both
+allow immediate exclusive access. All four cases passed with exact SkiaSharp
+3.119.2 and native binary hashes retained. This explains a reproducible race in
+the fixture's direct `SKBitmap.Decode(path)` usage; the historical child identity
+was not captured. The production thumbnail cache already uses managed reads.
+The remaining fixture decoder now reads bytes through a managed handle, keeps
+all original assertions, and additionally requires immediate exclusive access.
+Cleanup still fails on a genuinely held file; no retries or sleeps were added.
+
+Push CI 44780967884 on the same commit failed Debug 1606/1607 in the mixed
+Batch/VOD/LIVE/organizer scenario. Its test-only FakeTool wrote a readiness JSON
+directly to the final filename, so the observer could see three filenames and
+read one while its writer was still open. The producer now closes its staged
+write before atomically publishing the marker. Original consumer assertions and
+deadlines remain intact. A controlled real-child handshake holds staging open
+to prove the final marker is absent, then verifies complete PID/ownership data
+and immediate exclusive access after publication. This changes the test protocol,
+not production readiness or runtime behavior.
+
+The targeted Release run passes all 12 thumbnail, marker-publication and
+original mixed-runtime/five-process integration cases, with zero skipped tests.
+The first attempted targeted build overlapped an unfinished FakeTool edit and
+did not execute tests; its compiler log is retained separately. Complete frozen
+head and package validation remain required after these fixture corrections.
+
 ## Accepted issue and remaining boundaries
 
 The owner accepts [ModernFormsNext #534](https://github.com/ProGraMajster/ModernFormsNext/issues/534)
