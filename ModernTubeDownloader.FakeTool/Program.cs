@@ -3,6 +3,24 @@ using System.Text;
 using System.Text.Json.Nodes;
 
 var arguments = args.ToList();
+if (args is ["--qa-publish-started-marker", var markerDirectory])
+{
+    if (Environment.GetEnvironmentVariable("MTD_QA_FAKE_MARKER_PUBLICATION") != "1" ||
+        !Path.IsPathFullyQualified(markerDirectory) || !Directory.Exists(markerDirectory))
+    { Console.Error.WriteLine("Explicit owned QA marker directory required."); return 76; }
+    await PublishStartedMarkerAsync(markerDirectory, async () =>
+    {
+        // This handshake holds the real staging writer, not an artificial delay.
+        // The parent can inspect the publication boundary before releasing it.
+        Console.WriteLine("STAGING_READY");
+        await Console.Out.FlushAsync();
+        if (await Console.In.ReadLineAsync() != "publish")
+            throw new InvalidOperationException("The QA marker writer was not released.");
+    });
+    Console.WriteLine("PUBLISHED");
+    await Console.Out.FlushAsync();
+    return await Console.In.ReadLineAsync() == "exit" ? 0 : 77;
+}
 if (args is ["--qa-automation-utf8-echo"])
 {
     if (Environment.GetEnvironmentVariable("MTD_QA_AUTOMATION_UTF8") != "1")
@@ -337,7 +355,7 @@ if (arguments.Contains("-f"))
         mode ??= Environment.GetEnvironmentVariable("MTD_FAKE_LIVE_BEHAVIOR") ?? "natural";
         var partial = Path.Combine(outputDirectory, "capture.mkv.part");
         await File.WriteAllBytesAsync(partial, Encoding.UTF8.GetBytes("synthetic-live-audio-video-fragments"));
-        await File.WriteAllTextAsync(Path.Combine(outputDirectory, ".test-started.json"), Environment.ProcessId.ToString());
+        await PublishStartedMarkerAsync(outputDirectory);
         Console.WriteLine("MTD_PROGRESS|downloading|0|32|0|4|0|LIVE");
         if (mode == "diskfull")
         {
@@ -380,7 +398,7 @@ if (arguments.Contains("-f"))
     var extension = format == "140" ? "m4a" : "mp4";
     if (sourceUrl.Contains("hold=1", StringComparison.Ordinal))
     {
-        await File.WriteAllTextAsync(Path.Combine(outputDirectory, ".test-started.json"), Environment.ProcessId.ToString());
+        await PublishStartedMarkerAsync(outputDirectory);
         while (!File.Exists(Path.Combine(outputDirectory, ".test-finish.json")))
             await Task.Delay(20);
     }
@@ -485,6 +503,23 @@ static string? ValueAfter(IReadOnlyList<string> values, string option)
         if (values[index] == option)
             return values[index + 1];
     return null;
+}
+
+static async Task PublishStartedMarkerAsync(string directory, Func<Task>? stagingWriterReady = null)
+{
+    var marker = Path.Combine(directory, ".test-started.json");
+    var staging = marker + ".tmp";
+    // The final name is a readiness event used by another process. Publishing
+    // that name while WriteAllTextAsync still owns its writer exposes a partial
+    // PID or a sharing violation. Close the staging handle before the rename.
+    await using (var stream = new FileStream(staging, FileMode.Create, FileAccess.Write,
+                     FileShare.None, 4096, FileOptions.Asynchronous))
+    {
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        await stream.FlushAsync();
+        if (stagingWriterReady is not null) await stagingWriterReady();
+    }
+    File.Move(staging, marker, overwrite: true);
 }
 
 // Deterministic metadata for opt-in native QA; never used by the application.

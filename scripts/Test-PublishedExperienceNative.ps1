@@ -70,7 +70,7 @@ function Wait-Condition([scriptblock]$Condition, [string]$Failure, [int]$Seconds
     do {
         Assert-Alive
         if (& $Condition) { return }
-        Start-Sleep -Milliseconds 100 # Bounded external UI/atomic-file observation, never a completion guess.
+        Start-Sleep -Milliseconds 100 # Bounded external UI observation, never a completion guess.
     } while ($timer.Elapsed.TotalSeconds -lt $Seconds)
     throw $Failure
 }
@@ -106,15 +106,17 @@ function Invoke($Parent, [string]$Id) {
 }
 function Set-Text($Parent, [string]$Id, [string]$Value) {
     $element = Find $Parent $Id
+    Wait-Condition { $element.Current.IsEnabled -and (Find-Now $Parent 'SetupNext').Current.IsEnabled } "Wizard input remains disabled: $Id"
     $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Value)
     Wait-Condition { $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $Value } "Text was not applied: $Id"
     Record 'value.set' $Id
 }
 function Read-Experience {
     if (-not (Test-Path -LiteralPath $experiencePath -PathType Leaf)) { return $null }
-    # This observer must not prevent the application's atomic replacement. Copy
-    # a snapshot with delete sharing, then close its handle before JSON parsing.
-    # Retry only I/O observation failures; malformed JSON/assertions still fail.
+    # Call only after a UI boundary that follows the awaited application save.
+    # Windows Move(overwrite) can fail even with delete sharing while this handle
+    # is open. Never poll persistence during a write; read once and fail on I/O.
+    # Close the snapshot handle before JSON parsing as an additional precaution.
     $stream=$null; $snapshot=$null
     try {
         $stream=[IO.File]::Open($experiencePath,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
@@ -122,17 +124,28 @@ function Read-Experience {
         $stream.CopyTo($snapshot)
         $bytes=$snapshot.ToArray()
     }
-    catch [IO.IOException] { return $null }
     finally { if ($stream) { $stream.Dispose() }; if ($snapshot) { $snapshot.Dispose() } }
     return [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF) | ConvertFrom-Json
 }
 function Step($Wizard, [int]$Index, [string]$ControlId) {
-    Wait-Condition { $saved = Read-Experience; $saved -and $saved.setup -eq 1 -and $saved.draft.step -eq $Index } "Draft step $Index was not persisted."
-    [void](Find $Wizard $ControlId)
-    Wait-Condition { (Find-Now $Wizard 'SetupNext').Current.IsEnabled } 'Wizard did not finish building its step.'
+    # MoveToStepAsync awaits persistence before BuildStep changes this range;
+    # RunAsync then enables the body/Next. The exact numeric step also prevents
+    # the shared Next button or the textual denominator "6" satisfying step 6.
+    $stepProgress = Find $Wizard 'SetupStepProgress'
+    Wait-Condition {
+        $range = $stepProgress.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current
+        $control = Find-Now $Wizard $ControlId
+        $next = Find-Now $Wizard 'SetupNext'
+        $range.Minimum -eq 0 -and $range.Maximum -eq 6 -and $range.Value -eq ($Index + 1) -and
+            $control -and $control.Current.IsEnabled -and -not $control.Current.IsOffscreen -and
+            $next -and $next.Current.IsEnabled
+    } "Wizard did not finish building visible step $Index."
     $progress = (Find $Wizard 'SetupProgress').Current.Name
     if ($progress -notmatch [regex]::Escape([string]($Index + 1)) -or $progress -notmatch '6') { throw "Visible progress disagrees with six-step draft: $progress" }
-    Record 'step.verified' @{ zeroBasedStep = $Index; visibleProgress = $progress }
+    $saved = Read-Experience
+    if (-not $saved -or $saved.setup -ne 1 -or $saved.draft.step -ne $Index) { throw "Draft step $Index was not persisted." }
+    Record 'step.verified' @{ zeroBasedStep = $Index; visibleProgress = $progress; numericProgress = $Index + 1; durableSnapshotAfterUiReady = $true }
+    return $saved
 }
 function Get-CaptureHash([string]$Path) {
     # The Windows PowerShell UIA child can inherit PowerShell 7's module search
@@ -157,6 +170,7 @@ function Assert-PersistedSettings {
     if (-not $settings.updates.automaticChecks -or $settings.updates.mode -ne 0 -or $settings.updates.installAtStartup) { throw 'Explicit safe update policy was not saved.' }
     if ($state.existingProfile -or $state.setup -ne 2 -or $null -ne $state.draft -or $state.interfaceChoiceFamily -ne '1.3') { throw 'Fresh-profile completion/provenance is incorrect.' }
     Record 'settings.verified' @{ modern = $true; syntheticFolders = $true; automaticChecks = $true; mode = 'NotifyOnly'; installAtStartup = $false }
+    return $state
 }
 
 try {
@@ -165,38 +179,39 @@ try {
         # No synthetic tools: allow first-launch provisioning up to 180 seconds,
         # reported separately from UI action readiness and never silently retried.
         $wizard = Wait-Window 'SetupWizardWindow' 180
-        Step $wizard 0 'SetupLanguage'; Capture $wizard '01-welcome'
+        [void](Step $wizard 0 'SetupLanguage'); Capture $wizard '01-welcome'
         Invoke $wizard 'SetupNext'
-        Step $wizard 1 'SetupModern'; Invoke $wizard 'SetupModern'
-        Wait-Condition { (Read-Experience).draft.interface -eq 1 } 'Modern choice was not saved.'
+        [void](Step $wizard 1 'SetupModern'); Invoke $wizard 'SetupModern'
+        $selectedMarker = ' ' + [char]0x00B7 + ' '
+        Wait-Condition { (Find-Now $wizard 'SetupModern').Current.Name.Contains($selectedMarker) -and -not (Find-Now $wizard 'SetupClassic').Current.Name.Contains($selectedMarker) } 'Modern choice was not visibly selected.'
         Capture $wizard '02-interface-choice'
         Invoke $wizard 'SetupNext'
-        Step $wizard 2 'SetupOutput'
+        $state = Step $wizard 2 'SetupOutput'
+        if ($state.draft.interface -ne 1) { throw 'Modern choice was not saved.' }
         Set-Text $wizard 'SetupOutput' $output
         Set-Text $wizard 'SetupTemporary' $temporary
-        Wait-Condition { $state = Read-Experience; $state.draft.output -eq $output -and $state.draft.temporary -eq $temporary } 'Folder draft was not saved.'
         Capture $wizard '03-folders-before-interruption'
         Close-Window $wizard
         Wait-Condition { $null -eq (Window-Now 'SetupWizardWindow') } 'Wizard did not close after saving its draft.'
         $state = Read-Experience
         if ($state.setup -ne 1 -or $state.draft.step -ne 2 -or $state.existingProfile) { throw 'Closing wizard lost resumable fresh-profile state.' }
+        if ($state.draft.output -ne $output -or $state.draft.temporary -ne $temporary) { throw 'Folder draft was not saved.' }
         if (Window-Now 'WhatsNewWindow') { throw 'Closing an incomplete wizard incorrectly opened WhatsNew.' }
         Record 'interrupted' @{ zeroBasedStep = 2; displayedStep = 3; method = 'native WindowPattern.Close'; skipped = $false }
         Close-Window $main
     } elseif ($Phase -eq 'Complete') {
         $wizard = Wait-Window 'SetupWizardWindow' 30
-        Step $wizard 2 'SetupOutput'
+        $state = Step $wizard 2 'SetupOutput'
         foreach ($pair in @(@('SetupOutput', $output), @('SetupTemporary', $temporary))) {
             if ((Find $wizard $pair[0]).GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne $pair[1]) { throw 'Restart did not restore the visible folder draft.' }
         }
-        if ((Read-Experience).draft.interface -ne 1) { throw 'Restart lost selected Modern interface.' }
+        if ($state.draft.interface -ne 1) { throw 'Restart lost selected Modern interface.' }
         Capture $wizard '04-resumed-folders'
-        Invoke $wizard 'SetupNext'; Step $wizard 3 'SetupQuality'; [void](Find $wizard 'SetupContainer')
+        Invoke $wizard 'SetupNext'; [void](Step $wizard 3 'SetupQuality'); [void](Find $wizard 'SetupContainer')
         Capture $wizard '05-format-preferences'
-        Invoke $wizard 'SetupNext'; Step $wizard 4 'SetupAutomaticUpdates'
+        Invoke $wizard 'SetupNext'; $state = Step $wizard 4 'SetupAutomaticUpdates'
         $automatic = (Find $wizard 'SetupAutomaticUpdates').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
         $startup = (Find $wizard 'SetupStartupUpdate').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
-        $state = Read-Experience
         if ($automatic.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On -or $startup.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off -or $state.draft.updateMode -ne 2) { throw 'New-profile update defaults disagree with the documented policy.' }
         Capture $wizard '06-default-update-policy'
         # Exercise a genuine choice. NotifyOnly prevents this UI test from
@@ -204,23 +219,26 @@ try {
         $mode = Find $wizard 'SetupUpdateMode'
         $items = $mode.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
         if ($items.Count -ne 3) { throw 'Expected three update policy choices.' }
+        Wait-Condition { $mode.Current.IsEnabled -and (Find-Now $wizard 'SetupNext').Current.IsEnabled } 'Update policy input remains disabled.'
         $items[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
-        Wait-Condition { (Read-Experience).draft.updateMode -eq 0 } 'NotifyOnly choice was not saved.'
-        Invoke $wizard 'SetupNext'; Step $wizard 5 'SetupNext'
+        Wait-Condition { $items[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected } 'NotifyOnly choice was not visibly selected.'
+        Invoke $wizard 'SetupNext'; $state = Step $wizard 5 'SetupNext'
+        if ($state.draft.updateMode -ne 0) { throw 'NotifyOnly choice was not saved.' }
         Capture $wizard '07-summary'
         Invoke $wizard 'SetupNext'
         $news = Wait-Window 'WhatsNewWindow' 30
-        Assert-PersistedSettings
+        [void](Assert-PersistedSettings)
         Capture $news '08-whats-new'
         Invoke $news 'WhatsNewDone'
-        Wait-Condition { $saved = Read-Experience; $null -eq (Window-Now 'WhatsNewWindow') -and $saved.lastWhatsNewAcknowledgedVersion -and $saved.lastWhatsNewAcknowledgedVersion -eq $saved.lastObservedVersion } 'WhatsNew acknowledgement was not durably saved.'
+        Wait-Condition { $null -eq (Window-Now 'WhatsNewWindow') } 'WhatsNew did not close after acknowledgement.'
+        $saved = Read-Experience
+        if (-not $saved.lastWhatsNewAcknowledgedVersion -or $saved.lastWhatsNewAcknowledgedVersion -ne $saved.lastObservedVersion) { throw 'WhatsNew acknowledgement was not durably saved.' }
         [void](Find $main 'NavBatch')
         Invoke $main 'NavDownloads'
         Capture $main '09-modern-after-setup'
         Close-Window $main
     } else {
-        Assert-PersistedSettings
-        $state = Read-Experience
+        $state = Assert-PersistedSettings
         if (-not $state.lastWhatsNewAcknowledgedVersion -or $state.lastWhatsNewAcknowledgedVersion -ne $state.lastObservedVersion) { throw 'Acknowledgement was lost on restart.' }
         [void](Find $main 'NavBatch')
         # Native readiness, not a delay standing in for initialization: wait for

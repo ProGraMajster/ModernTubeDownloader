@@ -97,7 +97,120 @@ was interrupted by an external foreground transition and is not a pass.
 Remaining native and public-asset results belong in the terminal publication
 ledger; no merge, tag or public release is asserted by this source document.
 
+## Master qualification follow-up (2026-11-20)
+
+Both push and PR CI passed on `82261d642b45b6ea3b234b233086a579459e6ee9`
+(runs 44597376600 and 44597389747, Debug/Release 1597 each, JavaScript 93).
+PR #3 was normally merged as `b8cc26a127c09acd8779c8a02ecfce4d1d765468`.
+Actual-master run 44602383522 then failed one Debug test: the five-VOD/three-LIVE
+scenario retained a completed recording's worker while a pending recording did
+not start. Release/package stages were not executed. No tag was created and no
+release was published at that point. Original logs and failures remain intact.
+
+Inspection found that every JSON file shared one global semaphore. The LIVE
+worker correctly awaits its final durable save before relinquishing ownership;
+an unrelated slow JSON read could hold that global semaphore and prevent this
+handoff. Three deterministic regressions failed before the fix, including an
+actual LIVE scheduler blocked behind a controlled reader in another store.
+The exact semaphore owner in the historical CI failure is unknown: that runner
+did not provide a process dump. The controlled reproduction establishes the
+cross-file blocking mechanism, not a claim about that unobserved owner.
+
+The follow-up branch replaces the global gate with reference-counted gates for
+canonical absolute paths. The captured path is used for both gate identity and
+I/O. Waiters retain the gate, cancellation does not release another operation's
+permit, and the final holder/waiter retires the gate. Atomic replacement, flush
+behavior, LIVE final-save ordering and the original integration-test assertions
+and deadlines are unchanged. This is canonical path identity, not physical
+identity across junctions or hard links; existing stores use the common AppPaths
+root. New lifecycle tests cover cancellation, reacquisition, disposal races and
+recovery after read, serialization and publication failures.
+
+The targeted atomic suite passes 19/19, including the unchanged three RED
+regressions. Full final validation, new package checks and CI must qualify the
+follow-up commit and its actual master merge before the stable tag is allowed.
+
+### Qualification fixture races
+
+The first full local run on `51c970a` passed Debug 1607/1607 and failed Release
+1606/1607 during thumbnail fixture cleanup. Export, history-failure handling and
+decoded-dimension assertions had passed; Windows rejected deleting `export.png`
+with sharing violation `0x80070020`. Original logs/TRX remain preserved and that
+run did not produce a qualified package.
+
+A four-case isolated experiment established that a native Skia file stream/path
+codec can pass its CRT file handle to a concurrently launched child. After the
+parent disposes the stream, exclusive access remains blocked while the child is
+alive and succeeds immediately after its explicit exit. The child receives no
+image path. The native-without-child and managed FileStream/SKData controls both
+allow immediate exclusive access. All four cases passed with exact SkiaSharp
+3.119.2 and native binary hashes retained. This explains a reproducible race in
+the fixture's direct `SKBitmap.Decode(path)` usage; the historical child identity
+was not captured. The production thumbnail cache already uses managed reads.
+The remaining fixture decoder now reads bytes through a managed handle, keeps
+all original assertions, and additionally requires immediate exclusive access.
+Cleanup still fails on a genuinely held file; no retries or sleeps were added.
+
+Push CI 44780967884 on the same commit failed Debug 1606/1607 in the mixed
+Batch/VOD/LIVE/organizer scenario. Its test-only FakeTool wrote a readiness JSON
+directly to the final filename, so the observer could see three filenames and
+read one while its writer was still open. The producer now closes its staged
+write before atomically publishing the marker. Original consumer assertions and
+deadlines remain intact. A controlled real-child handshake holds staging open
+to prove the final marker is absent, then verifies complete PID/ownership data
+and immediate exclusive access after publication. This changes the test protocol,
+not production readiness or runtime behavior.
+
+The targeted Release run passes all 12 thumbnail, marker-publication and
+original mixed-runtime/five-process integration cases, with zero skipped tests.
+The first attempted targeted build overlapped an unfinished FakeTool edit and
+did not execute tests; its compiler log is retained separately. Complete frozen
+head and package validation remain required after these fixture corrections.
+
+## Native observer qualification follow-up
+
+The frozen `5fcef77` product/test graph passed local Debug 1609/1609, Release
+1609/1609, JavaScript 93/93 and 816-entry package validation. Both exact-head CI
+events also passed (44784331104 and 44784347741, attempt 1). The actual unpacked
+EXE passed helper qualification (6 cases) and the Classic-to-Modern-to-Classic
+UIA journey, including 1300 Batch entries and 60-item analysis/handoff. An initial
+misconfigured run started Modern while expecting Classic's separate BatchWindow;
+it is retained as a failed harness invocation, not a product window defect.
+Separate Debug native workflows passed organizer/undo, playlist persistence and
+grouping, LIVE stop/save, upgrade choice, and a real public VOD download/probe.
+
+The new production wizard run exposed a remaining observer race: its JSON
+polling could briefly hold a destination open while the application replaced it.
+The earlier snapshot experiment established success only after reader close.
+A new named-pipe-controlled experiment held the actual Read-Experience stream
+immediately after Open(Read, ReadWrite|Delete), before CopyTo/Dispose. Windows
+rejected replacement with the same UnauthorizedAccessException/0x80070005,
+preserved the old JSON, and allowed replacement immediately after explicit
+reader close. This proves a remaining interference mechanism; it does not
+identify an untraced historical handle owner. The original native FAIL remains.
+
+The native client now waits for the exact UI progress value, the target step's
+control and the enabled Next button before asserting the persisted snapshot.
+Setter checks cross an existing awaited Next/Close boundary, and acknowledgement
+is read only after the notes window closes. The JSON values and all earlier
+assertions remain required; no timeout, arbitrary delay, retry or production
+write behavior changed. The fresh production run passed Draft, Complete and
+Restart on the same package, including six steps, retained values, native close,
+three process lifetimes and durable acknowledgement. Original FAIL and corrected
+PASS have separate profiles, logs and captures. This script-only correction
+still requires exact-head CI; the product/test graph is byte-identical and its
+completed local full build is not repeated.
+
 ## Accepted issue and remaining boundaries
+
+The production notes-only client had the same observer pattern at Done. It now
+waits for the awaited acknowledgement window to close, then reads the ledger
+once; the exact-version, changed-hash and unchanged-deferral assertions remain.
+The controlled production run passed Later, restart, manual reopening and Done
+on the unchanged 5fcef77 package. An earlier run interrupted by foreign foreground
+activation remains INTERRUPTED, not PASS. No production code, timeout or test
+assertion was weakened. Both native clients now observe existing UI completion
+boundaries instead of racing an in-progress atomic JSON replacement.
 
 The owner accepts [ModernFormsNext #534](https://github.com/ProGraMajster/ModernFormsNext/issues/534)
 for this release: maximization can cover a persistent Windows taskbar or produce

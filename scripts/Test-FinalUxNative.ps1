@@ -216,7 +216,8 @@ function File-Hash([string]$Path) {
     try { return [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-','') } finally { $hash.Dispose(); $stream.Dispose() }
 }
 function Read-Experience {
-    # One shared-read snapshot: do not block an atomic acknowledgement replace.
+    # Read once after the awaited UI save boundary, never while polling a writer.
+    # Delete sharing alone does not guarantee Windows replacement can proceed.
     $stream=[IO.File]::Open((Join-Path $DataRoot 'experience.json'),[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
     $memory=[IO.MemoryStream]::new(); $hash=[Security.Cryptography.SHA256]::Create()
     try {
@@ -521,8 +522,12 @@ try {
             Capture $script:FinalUxState.news '13-whats-new-reopened-official-cache'
         }
         Invoke $script:FinalUxState.news 'WhatsNewDone'
-        Wait-Condition { $saved=Read-Experience; $null -eq (Window-Now 'WhatsNewWindow') -and $saved.state.lastWhatsNewAcknowledgedVersion -eq $installedVersion -and $saved.state.lastObservedVersion -eq $installedVersion } 'Done did not durably acknowledge exactly the installed version.'
+        # AcknowledgeAsync closes the window only after its durable save. Poll
+        # that UI boundary; an open JSON observer can prevent Windows replacement
+        # even with delete sharing. Assert persistence once after the writer ends.
+        Wait-Condition { $null -eq (Window-Now 'WhatsNewWindow') } 'Done did not close WhatsNew after its durable save.'
         $acknowledged=Read-Experience
+        if ($acknowledged.state.lastWhatsNewAcknowledgedVersion -ne $installedVersion -or $acknowledged.state.lastObservedVersion -ne $installedVersion) { throw 'Done did not durably acknowledge exactly the installed version.' }
         if ($acknowledged.sha256 -eq $experienceBefore.sha256 -or $acknowledged.state.deferredWhatsNewVersion -ne $experienceBefore.state.deferredWhatsNewVersion) { throw 'Explicit acknowledgement did not change the ledger as expected.' }
         Record 'notes.done.persisted' @{installedVersion=$installedVersion; acknowledgedVersion=$acknowledged.state.lastWhatsNewAcknowledgedVersion; sha256=$acknowledged.sha256}
     }

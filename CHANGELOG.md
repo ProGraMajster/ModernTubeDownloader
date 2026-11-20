@@ -103,8 +103,11 @@ the actual publication time and published assets.
 - Failed queue/History/LIVE loads preserve original bytes and block unsafe writes/work
   admission; damaged identities are not replaced with invented GUIDs. Legacy LIVE
   migration preserves unknown evidence and rejects conflicting source records.
-- Small JSON reads and atomic publication share the existing I/O gate to avoid
-  overlapping open-file replacement during Batch completion on Windows.
+- JSON reads and atomic publication share a gate for each canonical file path,
+  preventing open-file replacement races on Windows without blocking unrelated
+  stores or profiles. In particular, a slow reader no longer delays another
+  store's final LIVE save and admission of the next recording. Canceled waiters
+  and unused gates are released without weakening same-file serialization.
 - Torn final Batch journal records are preserved before valid-prefix recovery;
   corruption inside a journal fails closed. Clearing completed jobs does not erase
   their Batch identity or cause retry to admit duplicates.
