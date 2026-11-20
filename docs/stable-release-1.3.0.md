@@ -97,6 +97,39 @@ was interrupted by an external foreground transition and is not a pass.
 Remaining native and public-asset results belong in the terminal publication
 ledger; no merge, tag or public release is asserted by this source document.
 
+## Master qualification follow-up (2026-11-20)
+
+Both push and PR CI passed on `82261d642b45b6ea3b234b233086a579459e6ee9`
+(runs 44597376600 and 44597389747, Debug/Release 1597 each, JavaScript 93).
+PR #3 was normally merged as `b8cc26a127c09acd8779c8a02ecfce4d1d765468`.
+Actual-master run 44602383522 then failed one Debug test: the five-VOD/three-LIVE
+scenario retained a completed recording's worker while a pending recording did
+not start. Release/package stages were not executed. No tag was created and no
+release was published at that point. Original logs and failures remain intact.
+
+Inspection found that every JSON file shared one global semaphore. The LIVE
+worker correctly awaits its final durable save before relinquishing ownership;
+an unrelated slow JSON read could hold that global semaphore and prevent this
+handoff. Three deterministic regressions failed before the fix, including an
+actual LIVE scheduler blocked behind a controlled reader in another store.
+The exact semaphore owner in the historical CI failure is unknown: that runner
+did not provide a process dump. The controlled reproduction establishes the
+cross-file blocking mechanism, not a claim about that unobserved owner.
+
+The follow-up branch replaces the global gate with reference-counted gates for
+canonical absolute paths. The captured path is used for both gate identity and
+I/O. Waiters retain the gate, cancellation does not release another operation's
+permit, and the final holder/waiter retires the gate. Atomic replacement, flush
+behavior, LIVE final-save ordering and the original integration-test assertions
+and deadlines are unchanged. This is canonical path identity, not physical
+identity across junctions or hard links; existing stores use the common AppPaths
+root. New lifecycle tests cover cancellation, reacquisition, disposal races and
+recovery after read, serialization and publication failures.
+
+The targeted atomic suite passes 19/19, including the unchanged three RED
+regressions. Full final validation, new package checks and CI must qualify the
+follow-up commit and its actual master merge before the stable tag is allowed.
+
 ## Accepted issue and remaining boundaries
 
 The owner accepts [ModernFormsNext #534](https://github.com/ProGraMajster/ModernFormsNext/issues/534)
