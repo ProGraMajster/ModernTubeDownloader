@@ -205,12 +205,11 @@ For isolated process/UI integration tests, `MODERNTUBEDOWNLOADER_DATA_ROOT` can 
 ## Build and release packaging
 
 Application and assembly versioning are centralized in `Directory.Build.props`.
-`ModernFormsNextCommit` pins the published ModernFormsNext v1.12.0 source snapshot.
-The solution uses the ignored `.mfn-master-worktree` checkout. Direct project builds
-can set `ModernFormsNextRoot` to another checkout of the same commit. CI and release
-packaging read the central pin and verify the checkout identity and cleanliness.
-The application embeds the framework commit for diagnostics. Framework runtime,
-automation, testing and notification providers come from the same source checkout.
+`ModernFormsNextVersion` pins the runtime, notification, testing and Debug-only
+automation packages to the same NuGet release. `NuGet.Config` configures NuGet.org
+for local, CI and packaging restores. Release packaging checks the resolved framework
+package graph. About and crash reports read the framework version and source revision
+from the loaded ModernFormsNext assembly.
 
 The supported 1.0.0 distribution is self-contained `win-x64`. Publishing is deliberately multi-file, untrimmed, and without ReadyToRun or NativeAOT so ModernFormsNext reflection, resources, and native Skia dependencies retain their validated behavior. `scripts/Build-Release.ps1` creates a clean end-user directory, excludes PDB/test/fake-tool/managed-tool files, produces a separate symbols archive, and writes a SHA-256 checksum.
 

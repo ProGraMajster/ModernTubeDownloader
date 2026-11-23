@@ -27,9 +27,6 @@ jobs:
           }
           [xml] $props = Get-Content -LiteralPath .\Directory.Build.props -Raw
           $version = $props.SelectSingleNode('/Project/PropertyGroup/Version').InnerText.Trim()
-          $mfn = $props.SelectSingleNode('/Project/PropertyGroup/ModernFormsNextCommit').InnerText.Trim()
-          if ($mfn -notmatch '^[0-9a-f]{40}$') { throw 'Invalid MFN pin.' }
-          "mfn=$mfn" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
           if ($version.Contains('-')) { throw 'Candidate publication requires explicit final-version approval.' }
           if ($env:GITHUB_REF_NAME -ne "v$version") {
@@ -44,13 +41,6 @@ jobs:
             throw 'The repository must be public before publishing the release.'
           }
 
-      - name: Checkout pinned ModernFormsNext
-        uses: actions/checkout@v5
-        with:
-          repository: ProGraMajster/ModernFormsNext
-          ref: ${{ steps.pins.outputs.mfn }}
-          path: .mfn-master-worktree
-
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
@@ -63,7 +53,7 @@ jobs:
 
       - name: Validate and package
         shell: pwsh
-        run: .\scripts\Build-Release.ps1 -ModernFormsNextRoot "$env:GITHUB_WORKSPACE\.mfn-master-worktree"
+        run: .\scripts\Build-Release.ps1
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v6

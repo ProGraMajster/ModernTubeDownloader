@@ -57,7 +57,7 @@ public sealed class ReleaseReadinessTests : IDisposable
 
         var artifact = Assert.Single(Directory.GetFiles(Path.Combine(root, "CrashReports"), "ModernTubeDownloader-crash-*.log"));
         var contents = File.ReadAllText(artifact);
-        Assert.Contains("ModernFormsNext SHA:", contents, StringComparison.Ordinal);
+        Assert.Matches(@"ModernFormsNext: \d+\.\d+\.\d+\+[0-9a-f]{40}", contents);
         Assert.Contains("UI thread id:", contents, StringComparison.Ordinal);
         Assert.Contains("Active view: Settings", contents, StringComparison.Ordinal);
         Assert.Contains("settings.remote.save", contents, StringComparison.Ordinal);

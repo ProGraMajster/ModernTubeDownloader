@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Reflection;
 using System.Text;
+using ModernTubeDownloader.Theming;
 
 namespace ModernTubeDownloader.Infrastructure;
 
@@ -60,10 +61,8 @@ internal static class FatalErrorReporter
         var assembly = typeof(FatalErrorReporter).Assembly;
         var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             ?? assembly.GetName().Version?.ToString() ?? "unknown";
-        var mfnSha = assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
-            .FirstOrDefault(attribute => attribute.Key == "ModernFormsNextCommit")?.Value ?? "unknown";
         var raw = $"ModernTubeDownloader fatal crash {DateTimeOffset.Now:O}{Environment.NewLine}" +
-            $"App version: {version}; ModernFormsNext SHA: {mfnSha}{Environment.NewLine}" +
+            $"App version: {version}; ModernFormsNext: {AppBranding.FrameworkVersion}{Environment.NewLine}" +
             $"OS: {RuntimeInformation.OSDescription}; architecture: {RuntimeInformation.ProcessArchitecture}{Environment.NewLine}" +
             $"{message}{Environment.NewLine}{exception}{Environment.NewLine}" +
             UiCrashDiagnostics.Snapshot();

@@ -1,3 +1,4 @@
+using System.Reflection;
 using ModernFormsNext;
 using SkiaSharp;
 
@@ -14,6 +15,8 @@ internal static class AppBranding
     public static SKBitmap CaptionIcon(bool dashboard) => dashboard ? DashboardTitleBarIcon.Value : TitleBarIcon.Value;
 
     public static string Version => typeof(AppBranding).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "";
+    public static string FrameworkVersion => typeof(Form).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? typeof(Form).Assembly.GetName().Version?.ToString() ?? "unknown";
 
     public static SKBitmap Icon => NativeIcon.Value;
     public static string SourceCommit => typeof(AppBranding).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)

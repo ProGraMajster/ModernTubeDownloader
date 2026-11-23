@@ -165,20 +165,17 @@ Logs are local and redact common credential/URL data. Known auth values are scru
 ## Build from source
 
 Requires the .NET 10 SDK and Node.js for JavaScript tests. Development, CI and
-packaging use the clean ModernFormsNext [v1.12.0 source snapshot](https://github.com/ProGraMajster/ModernFormsNext/tree/v1.12.0).
-The exact commit is recorded in `Directory.Build.props`.
+packaging restore [ModernFormsNext 1.12.0 from NuGet.org](https://www.nuget.org/packages/ModernFormsNext/1.12.0).
+The framework version is shared through `Directory.Build.props`.
 
 ```powershell
 git clone https://github.com/ProGraMajster/ModernTubeDownloader.git
 cd ModernTubeDownloader
-git clone --no-checkout https://github.com/ProGraMajster/ModernFormsNext.git .mfn-master-worktree
-$frameworkCommit = ([xml](Get-Content -Raw Directory.Build.props)).SelectSingleNode('/Project/PropertyGroup/ModernFormsNextCommit').InnerText.Trim()
-git -C .mfn-master-worktree checkout --detach --no-overwrite-ignore $frameworkCommit
-dotnet restore .\ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj
-dotnet build .\ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj -c Debug -m:1 /p:UseSharedCompilation=false
+dotnet build .\ModernTubeDownloader.slnx -c Debug -m:1 /p:UseSharedCompilation=false
 ```
 
-Open `ModernTubeDownloader.slnx` or the app project in Visual Studio after preparing the dependency checkout. A direct project build can instead specify `-p:ModernFormsNextRoot=C:\src\ModernFormsNext`; solution references expect `.mfn-master-worktree`. The solution includes the independent Updater. End users of the ZIP need neither repository.
+Open `ModernTubeDownloader.slnx` or the app project in Visual Studio. The solution
+includes the independent Updater. End users run the self-contained ZIP.
 
 `scripts/Build-Release.ps1` validates and creates the self-contained Windows x64 ZIP, separate symbols ZIP and SHA-256 under ignored `artifacts/release`. Publishing is multi-file, untrimmed, without NativeAOT or ReadyToRun. Debug-only opt-in UI automation is documented in [AUTOMATION_TESTING.md](AUTOMATION_TESTING.md); it is absent from Release.
 

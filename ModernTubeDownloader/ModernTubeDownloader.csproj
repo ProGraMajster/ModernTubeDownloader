@@ -26,15 +26,13 @@
     <ProjectReference Include="..\ModernTubeDownloader.Updater\ModernTubeDownloader.Updater.csproj" />
     <ProjectReference Include="..\ModernTubeDownloader.Authentication\ModernTubeDownloader.Authentication.csproj" />
     <ProjectReference Include="..\ModernTubeDownloader.NativeHost\ModernTubeDownloader.NativeHost.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext\ModernFormsNext.csproj" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.SystemNotifications.AppSdk\ModernFormsNext.SystemNotifications.AppSdk.csproj" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.SystemNotifications.WinRT\ModernFormsNext.SystemNotifications.WinRT.csproj" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Automation\ModernFormsNext.Automation.csproj" Condition="'$(Configuration)' == 'Debug'" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Automation.Windows\ModernFormsNext.Automation.Windows.csproj" Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
   <ItemGroup>
-    <AssemblyMetadata Include="ModernFormsNextCommit" Value="$(ModernFormsNextCommit)" />
-    <AssemblyMetadata Include="ModernFormsNextLocalPatchSha256" Value="$(ModernFormsNextLocalPatchSha256)" Condition="'$(ModernFormsNextLocalPatchSha256)' != ''" />
+    <PackageReference Include="ModernFormsNext" Version="[$(ModernFormsNextVersion)]" />
+    <PackageReference Include="ModernFormsNext.SystemNotifications.AppSdk" Version="[$(ModernFormsNextVersion)]" />
+    <PackageReference Include="ModernFormsNext.SystemNotifications.WinRT" Version="[$(ModernFormsNextVersion)]" />
+    <PackageReference Include="ModernFormsNext.Automation" Version="[$(ModernFormsNextVersion)]" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="ModernFormsNext.Automation.Windows" Version="[$(ModernFormsNextVersion)]" Condition="'$(Configuration)' == 'Debug'" />
     <PackageReference Include="QRCoder" Version="1.8.0" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <EmbeddedResource Include="Assets\AppIcon.png" LogicalName="ModernTubeDownloader.Assets.AppIcon.png" />

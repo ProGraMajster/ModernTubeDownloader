@@ -18,8 +18,7 @@
     <WarningLevel>8</WarningLevel>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
 
-    <!-- ModernFormsNext v1.12.0 -->
-    <ModernFormsNextCommit>268fb0328e7fe4a534c322be4ca06b1c48b27d77</ModernFormsNextCommit>
+    <ModernFormsNextVersion>1.12.0</ModernFormsNextVersion>
     <ModernTubeDownloaderTargetFramework>net10.0-windows10.0.26100.0</ModernTubeDownloaderTargetFramework>
     <!-- Must be explicit before the first restore of the optional notification projections. -->
     <WindowsSdkPackageVersion>10.0.28000.87</WindowsSdkPackageVersion>
@@ -28,7 +27,6 @@
     <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
     <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
     <WindowsAppSdkUndockedRegFreeWinRTInitialize>false</WindowsAppSdkUndockedRegFreeWinRTInitialize>
-    <ModernFormsNextRoot Condition="'$(ModernFormsNextRoot)' == ''">$(MSBuildThisFileDirectory).mfn-master-worktree</ModernFormsNextRoot>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">

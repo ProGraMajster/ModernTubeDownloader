@@ -87,7 +87,6 @@ param(
     [string]$DenoPath,
     [ValidateRange(5, 60)][int]$LiveCaptureSeconds = 15,
     [ValidateRange(1, 200)][int]$CrashStressPasses = 15,
-    [string]$ModernFormsNextRoot = '.mfn-master-worktree',
     [ValidateSet('en', 'pl', 'de-DE', 'fr-FR', 'es-ES', 'it-IT', 'pt-BR', 'nl-NL', 'cs-CZ', 'sk-SK', 'ru-RU', 'hu-HU', 'tr-TR', 'ja-JP', 'ko-KR', 'zh-CN')][string]$Language = 'en',
     [ValidateSet('Dark', 'Light')][string]$Theme = 'Dark',
     [ValidateRange(80, 200)][int]$AppTextScale = 100,
@@ -176,8 +175,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 $appFramework = $buildProperties.SelectSingleNode('/Project/PropertyGroup/ModernTubeDownloaderTargetFramework').InnerText.Trim()
 $app = Join-Path $repo "ModernTubeDownloader/bin/Debug/$appFramework/ModernTubeDownloader.exe"
 if ($ApplicationPath) { $app = [IO.Path]::GetFullPath($ApplicationPath) }
-$cli = Join-Path $ModernFormsNextRoot 'ModernFormsNext.Automation.Cli/bin/Debug/net10.0-windows/ModernFormsNext.Automation.Cli.dll'
-if (-not [System.IO.Path]::IsPathRooted($cli)) { $cli = Join-Path $repo $cli }
+$cli = Join-Path $repo 'qa/AutomationCli/bin/Debug/net10.0-windows/AutomationCli.dll'
 $fake = Join-Path $repo 'ModernTubeDownloader.FakeTool/bin/Debug/net10.0'
 foreach ($required in @($app, $cli, (Join-Path $fake 'ModernTubeDownloader.FakeTool.exe'))) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Build Debug application, MFN Automation CLI and FakeTool first: $required" }
