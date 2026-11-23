@@ -382,7 +382,7 @@ function Stop-ExperienceApplication {
     $script:automationProcess.Dispose(); $script:automationProcess = $null
 }
 
-function Capture-Experience([string]$id, [string]$name) {
+function Capture-Experience([string]$id, [string]$name, [string]$enabledActionId) {
     $root = Wait-ExperienceRoot $id
     $captionKey = switch ($id) { 'SetupWizardWindow' { 'Experience.WelcomeTitle' } 'UpgradeChoiceWindow' { 'Experience.UpgradeTitle' } 'WhatsNewWindow' { 'Experience.WhatsNew' } }
     $caption = $script:experienceLabels.$captionKey
@@ -391,9 +391,19 @@ function Capture-Experience([string]$id, [string]$name) {
     if ($WindowWidth -gt 0 -and $WindowHeight -gt 0) {
         if (-not [MtdAutomationWindowCloser]::PlaceWindow($hwnd, $WindowWidth, $WindowHeight, $WindowLeft, $WindowTop)) { throw "Cannot place $id." }
     }
-    $snapshot = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $root.rootId, '--depth', '12')
+    $allowedErrors = if ($id -eq 'WhatsNewWindow') { @('LimitExceeded') } else { @() }
+    $snapshot = Invoke-AutomationCli -CliArguments @('tree', '--pid', "$($script:automationProcess.Id)", '--root', $root.rootId, '--depth', '12') -AllowedSemanticErrors $allowedErrors
     $snapshot | ConvertTo-Json -Depth 60 | Set-Content -LiteralPath (Join-Path $dataRoot ($name + '-tree.json')) -Encoding utf8
-    if ($snapshot.error -ne 'None') { throw "Cannot capture the $id semantic tree: $($snapshot.error)." }
+    if ($snapshot.error -eq 'LimitExceeded') {
+        # The bridge bounds text values, while the notes editors expose the full
+        # release document. Require every reported limit to be a value on an
+        # editor still present in the tree inspected for layout below.
+        $notesEditorIds = @($snapshot.nodes | Where-Object { $_.node.automationId -like 'WhatsNewText-*' } | ForEach-Object { $_.node.runtimeId })
+        $unexpectedIssues = @($snapshot.issues | Where-Object {
+            $_.code -ne 'LimitExceeded' -or $_.property -ne 'Value' -or $_.runtimeId -notin $notesEditorIds
+        })
+        if (-not $snapshot.issues.Count -or $unexpectedIssues.Count) { throw "Unexpected semantic tree limit in $name." }
+    } elseif ($snapshot.error -ne 'None') { throw "Cannot capture the $id semantic tree: $($snapshot.error)." }
     $size = [MtdAutomationWindowCloser]::OwnWindowSize($script:automationProcess.Id, $hwnd)
     if ($WindowWidth -gt 0 -and $WindowHeight -gt 0 -and ($size[0] -ne $WindowWidth -or $size[1] -ne $WindowHeight)) { throw "Unexpected owned dialog dimensions for $name." }
     Add-Type -AssemblyName System.Drawing
@@ -410,14 +420,25 @@ function Capture-Experience([string]$id, [string]$name) {
     foreach ($node in $snapshot.nodes) {
         if ($node.node.scrollInfo.horizontal.isScrollable -and $node.node.controlType -eq 'Pane') { throw "Horizontal panel overflow in $name." }
     }
+    if ($enabledActionId) {
+        $actions = @($snapshot.nodes | Where-Object { $_.node.automationId -eq $enabledActionId })
+        if ($actions.Count -ne 1) { throw "Expected one $enabledActionId in $name." }
+        $handle = $actions[0].node.handle
+        # An ID search traverses the long notes values again. Wait on the
+        # captured button handle to keep the enabled-state check local.
+        $waited = Invoke-AutomationCli -CliArguments @('wait', '--pid', "$($script:automationProcess.Id)", '--root', $root.rootId,
+            '--condition', 'Enabled', '--session', $handle.sessionId, '--node', $handle.runtimeId, '--timeout-ms', '30000')
+        if ($waited.status -ne 'Satisfied') { throw "Wait failed for $enabledActionId." }
+        return $waited.snapshot
+    }
     return $root.rootId
 }
 
 function Complete-ExperienceNews([string]$name) {
-    $rootId = Capture-Experience 'WhatsNewWindow' $name
-    Invoke-NodeAction (Wait-Node 'WhatsNewDone' $rootId 'Enabled').snapshot $rootId 'Invoke' | Out-Null
-    [void](Wait-ExperienceState { param($state) $state.lastWhatsNewAcknowledgedVersion -eq $experienceVersion } 'current release acknowledged')
+    $done = Capture-Experience 'WhatsNewWindow' $name 'WhatsNewDone'
+    Invoke-NodeAction $done $done.rootId 'Invoke' | Out-Null
     [void](Wait-ExperienceRoot 'WhatsNewWindow' $false)
+    [void](Wait-ExperienceState { param($state) $state.lastWhatsNewAcknowledgedVersion -eq $experienceVersion } 'current release acknowledged')
 }
 
 function Invoke-ExperienceSmoke {
@@ -503,8 +524,8 @@ function Invoke-ExperienceSmoke {
             $beforeLater = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
             if ($beforeLater.lastWhatsNewAcknowledgedVersion -eq $experienceVersion) { throw 'Read-later fixture must not already acknowledge the current version.' }
             $beforeLaterHash = (Get-FileHash -LiteralPath $markerPath -Algorithm SHA256).Hash
-            $newsRootId = Capture-Experience 'WhatsNewWindow' 'experience-news-later'
-            Invoke-NodeAction (Wait-Node 'WhatsNewLater' $newsRootId 'Enabled').snapshot $newsRootId 'Invoke' | Out-Null
+            $later = Capture-Experience 'WhatsNewWindow' 'experience-news-later' 'WhatsNewLater'
+            Invoke-NodeAction $later $later.rootId 'Invoke' | Out-Null
             [void](Wait-ExperienceRoot 'WhatsNewWindow' $false)
             if ([MtdAutomationWindowCloser]::FindOwnCaption($script:automationProcess.Id, $script:experienceLabels.'Experience.WhatsNew') -ne [IntPtr]::Zero) {
                 throw 'Read later left the owned native notes window visible.'
@@ -2034,7 +2055,7 @@ try {
         Invoke-NodeAction (Find-Node 'ShutdownHide' $choiceRoot.rootId) $choiceRoot.rootId 'Invoke' | Out-Null
         Start-Sleep -Milliseconds 300
         $script:automationProcess.Refresh()
-        if ($script:automationProcess.HasExited -or $script:automationMainWindow -ne [IntPtr]::Zero) {
+        if ($script:automationProcess.HasExited -or [MtdAutomationWindowCloser]::FindOwnMainWindow($script:automationProcess.Id) -ne [IntPtr]::Zero) {
             throw 'Hide-to-tray did not keep an accessible background instance without a visible main window.'
         }
         $secondary = Start-Process -FilePath $app -PassThru -WindowStyle Hidden
