@@ -164,16 +164,16 @@ Logs are local and redact common credential/URL data. Known auth values are scru
 
 ## Build from source
 
-Requires the .NET 10 SDK and Node.js for JavaScript tests. The central ModernFormsNext
-pin is `7bf58d06d795d7298c86d9bf9471bbfb46852bab`, shared by development, CI and release
-packaging. Use that exact clean checkout; no uncommitted framework patch is needed or
-copied into this repository:
+Requires the .NET 10 SDK and Node.js for JavaScript tests. Development, CI and
+packaging use the clean ModernFormsNext [v1.12.0 source snapshot](https://github.com/ProGraMajster/ModernFormsNext/tree/v1.12.0).
+The exact commit is recorded in `Directory.Build.props`.
 
 ```powershell
 git clone https://github.com/ProGraMajster/ModernTubeDownloader.git
 cd ModernTubeDownloader
 git clone --no-checkout https://github.com/ProGraMajster/ModernFormsNext.git .mfn-master-worktree
-git -C .mfn-master-worktree checkout --detach 7bf58d06d795d7298c86d9bf9471bbfb46852bab
+$frameworkCommit = ([xml](Get-Content -Raw Directory.Build.props)).SelectSingleNode('/Project/PropertyGroup/ModernFormsNextCommit').InnerText.Trim()
+git -C .mfn-master-worktree checkout --detach --no-overwrite-ignore $frameworkCommit
 dotnet restore .\ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj
 dotnet build .\ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj -c Debug -m:1 /p:UseSharedCompilation=false
 ```

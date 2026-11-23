@@ -18,7 +18,8 @@
     <WarningLevel>8</WarningLevel>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
 
-    <ModernFormsNextCommit>7bf58d06d795d7298c86d9bf9471bbfb46852bab</ModernFormsNextCommit>
+    <!-- ModernFormsNext v1.12.0 -->
+    <ModernFormsNextCommit>268fb0328e7fe4a534c322be4ca06b1c48b27d77</ModernFormsNextCommit>
     <ModernTubeDownloaderTargetFramework>net10.0-windows10.0.26100.0</ModernTubeDownloaderTargetFramework>
     <!-- Must be explicit before the first restore of the optional notification projections. -->
     <WindowsSdkPackageVersion>10.0.28000.87</WindowsSdkPackageVersion>

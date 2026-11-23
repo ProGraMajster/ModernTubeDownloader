@@ -204,7 +204,13 @@ For isolated process/UI integration tests, `MODERNTUBEDOWNLOADER_DATA_ROOT` can 
 
 ## Build and release packaging
 
-Application and assembly versioning is centralized in `Directory.Build.props`. The application builds against a configurable `ModernFormsNextRoot`; local development defaults to the ignored `.mfn-master-worktree`, while CI checks out the exact `ModernFormsNextCommit` (`8d8a7679779608b4edbee7dc687c13e3b1a611d9`, notification hotfix PR #271 based on master `18f47b085a59e65eb611e3fd1d38e8dffa3fb19c`) into an ignored dependency directory. CI/release read that central pin, verify the clean checkout and do not maintain a second hardcoded SHA. No local framework patch is needed for source builds. The earlier local 1.2.1 candidate artifact records its pre-commit patch fingerprints/provenance; it is not represented as a build of the later Git commit. An explicit candidate-only opt-in remains available for local patch qualification; default clean-pin gates remain enforced. A NuGet migration is a separate decision.
+Application and assembly versioning are centralized in `Directory.Build.props`.
+`ModernFormsNextCommit` pins the published ModernFormsNext v1.12.0 source snapshot.
+The solution uses the ignored `.mfn-master-worktree` checkout. Direct project builds
+can set `ModernFormsNextRoot` to another checkout of the same commit. CI and release
+packaging read the central pin and verify the checkout identity and cleanliness.
+The application embeds the framework commit for diagnostics. Framework runtime,
+automation, testing and notification providers come from the same source checkout.
 
 The supported 1.0.0 distribution is self-contained `win-x64`. Publishing is deliberately multi-file, untrimmed, and without ReadyToRun or NativeAOT so ModernFormsNext reflection, resources, and native Skia dependencies retain their validated behavior. `scripts/Build-Release.ps1` creates a clean end-user directory, excludes PDB/test/fake-tool/managed-tool files, produces a separate symbols archive, and writes a SHA-256 checksum.
 
