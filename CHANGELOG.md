@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.1
+
+### Fixed
+
+- Preserve the exact Unicode spelling of local source and destination paths, including folder picker selections and saved download folders.
+- Remove mixed trailing dots and spaces from suggested list folders and keep Unicode characters intact when shortening names. If a suggestion fails, keep the list available so its destination can be entered manually.
+- Accept a drive root as a source for a non-recursive scan and as the base for suggested subfolders. Each actual destination must be below the root.
+- Require a local drive path and reject network shares, device paths, traversal, reserved names, system paths, symbolic links and junctions.
+
+### Improved
+
+- Validate per-list destinations before scanning. Show the affected field or list and the reason for failure in all 16 application languages.
+- Record the failing operation, context, error type and HRESULT in local logs. The new diagnostics omit folder paths and list names.
+- Keep the same data formats for settings, History, the download queue and Organizer journals.
+
+[Release notes](docs/releases/v1.3.1.md) · [Informacje o wydaniu po polsku](docs/releases/v1.3.1.pl.md)
+
 ## 1.3.0
 
 Detailed [English release notes](docs/releases/v1.3.0.md) and a
