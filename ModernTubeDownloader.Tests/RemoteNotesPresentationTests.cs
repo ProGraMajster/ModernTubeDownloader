@@ -12,6 +12,8 @@ namespace ModernTubeDownloader.Tests;
 
 public sealed partial class ExperiencePresentationTests
 {
+    private const string NotesVersion = "1.3.1";
+
     [Theory]
     [InlineData("en", 100, false)] [InlineData("pl", 150, false)] [InlineData("ja-JP", 200, false)]
     [InlineData("pl", 200, true)]
@@ -59,7 +61,7 @@ public sealed partial class ExperiencePresentationTests
             Pump(host, () => Find<Label>(reopenedRoot, "WhatsNewProvenance").Text == services.Localization["Experience.CachedNotes"]);
             Assert.Equal(1, handler.Requests);
             Click(host, reopenedRoot, "WhatsNewDone"); Pump(host, () => reopenedWindow.IsClosed);
-            Assert.Equal("1.3.1", services.Experience.State.LastWhatsNewAcknowledgedVersion);
+            Assert.Equal(NotesVersion, services.Experience.State.LastWhatsNewAcknowledgedVersion);
         }
         await services.ShutdownAsync();
     }
@@ -129,7 +131,7 @@ public sealed partial class ExperiencePresentationTests
         public void Complete() => ready.TrySetResult();
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
-            if (request.RequestUri?.AbsolutePath != "/repos/ProGraMajster/ModernTubeDownloader/releases/tags/v1.3.1")
+            if (request.RequestUri?.AbsolutePath != $"/repos/ProGraMajster/ModernTubeDownloader/releases/tags/v{NotesVersion}")
                 return new(HttpStatusCode.NotFound);
             Interlocked.Increment(ref requests);
             try { await ready.Task.WaitAsync(token); }
@@ -137,8 +139,8 @@ public sealed partial class ExperiencePresentationTests
             var paragraph = string.Join("\n", Enumerable.Repeat("- Verified remote change for exactly this installed release; data is preserved.", 24));
             var body = Body ?? string.Join("\n\n", new[] { "New", "Improvements", "Fixes", "Known Issues" }.Select(title => "## " + title + "\n" + paragraph));
             return new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new {
-                tag_name = "v1.3.0", draft = false, prerelease = false,
-                html_url = "https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.3.1", body
+                tag_name = $"v{NotesVersion}", draft = false, prerelease = false,
+                html_url = $"{GitHubApplicationReleaseSource.Repository}/releases/tag/v{NotesVersion}", body
             })) };
         }
     }

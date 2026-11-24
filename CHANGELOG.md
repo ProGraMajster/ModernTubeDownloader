@@ -5,6 +5,7 @@
 ### Fixed
 
 - Preserve the exact Unicode spelling of local source and destination paths, including folder picker selections and saved download folders.
+- Open the Windows folder picker when the current folder field is empty or unavailable.
 - Remove mixed trailing dots and spaces from suggested list folders and keep Unicode characters intact when shortening names. If a suggestion fails, keep the list available so its destination can be entered manually.
 - Accept a drive root as a source for a non-recursive scan and as the base for suggested subfolders. Each actual destination must be below the root.
 - Require a local drive path and reject network shares, device paths, traversal, reserved names, system paths, symbolic links and junctions.
