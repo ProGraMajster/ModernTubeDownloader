@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using ModernTubeDownloader.Batch;
@@ -52,7 +53,31 @@ public sealed partial class DownloadOrganizerService : IDisposable
     private void QueueReferencesChanged(object? sender, QueueChangedEventArgs args) => Interlocked.Increment(ref referenceVersion);
     private void HistoryReferencesChanged(object? sender, EventArgs args) => Interlocked.Increment(ref referenceVersion);
 
-    public static string SuggestDestination(string root, string listName) => OrganizerPathSafety.ListFolder(root, listName);
+    public static string SuggestDestination(string root, string listName)
+    {
+        root = DirectoryFor(root, "Organizer.Error.OutputFolder", allowRoot: true);
+        try { return OrganizerPathSafety.DirectoryPath(Path.Combine(root, OrganizerPathSafety.ListName(listName))); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { throw new OrganizerPathException("Organizer.Error.ListFolder", listName, error); }
+    }
+
+    private static string DirectoryFor(string path, string contextKey, string? listName = null,
+        bool mustExist = false, bool allowRoot = false)
+    {
+        try { return OrganizerPathSafety.DirectoryPath(path, mustExist, allowRoot); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { throw new OrganizerPathException(contextKey, listName, error); }
+    }
+
+    internal void LogFailure(string operation, Exception error)
+    {
+        var path = error as OrganizerPathException;
+        var cause = path?.InnerException ?? error;
+        var native = cause.InnerException ?? cause;
+        logger.Warning($"Organizer {operation} failed. Context={path?.ContextKey ?? "-"} " +
+            $"Reason={SafeError(error)} Type={native.GetType().Name} HResult=0x{native.HResult:X8} " +
+            $"Origin={native.TargetSite?.DeclaringType?.Name}.{native.TargetSite?.Name}");
+    }
     public void SetPaused(bool value)
     {
         if (value == paused) return;
@@ -80,7 +105,8 @@ public sealed partial class DownloadOrganizerService : IDisposable
         queue.Changed -= QueueReferencesChanged; history.Changed -= HistoryReferencesChanged;
     }
 
-    private Task<T> RunOwnedAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken token)
+    private Task<T> RunOwnedAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken token,
+        [CallerMemberName] string operationName = "")
     {
         lock (workSync)
         {
@@ -95,6 +121,11 @@ public sealed partial class DownloadOrganizerService : IDisposable
                     await operationGate.WaitAsync(linked.Token).ConfigureAwait(false); entered = true;
                     return await operation(linked.Token).ConfigureAwait(false);
                 }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    LogFailure(operationName, error);
+                    throw;
+                }
                 finally { if (entered) operationGate.Release(); Interlocked.Decrement(ref activeCount); SetPaused(false); }
             });
             activeTasks.Add(task);
@@ -107,27 +138,44 @@ public sealed partial class DownloadOrganizerService : IDisposable
     private async Task<OrganizerPlan> BuildPlanCoreAsync(IReadOnlyList<OrganizerSourceList> lists, string scanRoot,
         bool recursive, bool requireJson, CancellationToken token)
     {
-        scanRoot = OrganizerPathSafety.DirectoryPath(scanRoot, true);
-        if (IsProtected(scanRoot)) throw new IOException("Organizer.Error.OutsideRoot");
+        scanRoot = DirectoryFor(scanRoot, "Organizer.Source", mustExist: true, allowRoot: true);
+        if (recursive && OrganizerPathSafety.Comparer.Equals(scanRoot, Path.GetPathRoot(scanRoot)))
+            throw new OrganizerPathException("Organizer.Source", null, new IOException("Organizer.Error.RootRecursive"));
+        if (IsProtected(scanRoot))
+            throw new OrganizerPathException("Organizer.Source", null, new IOException("Organizer.Error.OutsideRoot"));
         if (lists.Count is < 1 or > 100) throw new IOException("Organizer.Error.Limit");
+
+        var destinations = new List<OrganizerSourceList>(lists.Count);
+        foreach (var list in lists)
+        {
+            var destination = DirectoryFor(list.DestinationDirectory, "Organizer.Destination", list.Name);
+            if (IsProtected(destination))
+                throw new OrganizerPathException("Organizer.Destination", list.Name, new IOException("Organizer.Error.OutsideRoot"));
+            destinations.Add(list with { DestinationDirectory = destination });
+        }
         var plan = new OrganizerPlan { ScanRoot = scanRoot, Recursive = recursive, RequireJson = requireJson };
         var files = new HashSet<string>(OrganizerPathSafety.Comparer);
         var directories = new Stack<string>(); directories.Push(scanRoot);
         while (directories.TryPop(out var directory))
         {
             await PauseBoundary(token).ConfigureAwait(false);
-            OrganizerPathSafety.CheckAncestors(directory);
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            try
             {
-                token.ThrowIfCancellationRequested();
-                var attributes = File.GetAttributes(entry);
-                if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.System)) != 0 || IsProtected(entry)) { plan.SkippedFiles++; continue; }
-                if ((attributes & FileAttributes.Directory) != 0) { if (recursive) directories.Push(entry); continue; }
-                if (++plan.ScannedFiles > MaximumScanFiles) throw new IOException("Organizer.Error.Limit");
-                if (Path.GetFileName(entry).Contains(".part", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) { plan.SkippedFiles++; continue; }
-                files.Add(Path.GetFullPath(entry));
-                if (plan.ScannedFiles % 100 == 0) Report("Organizer.Phase.Scanning", plan.ScannedFiles, 0, 0, 0);
+                OrganizerPathSafety.CheckAncestors(directory);
+                foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+                {
+                    token.ThrowIfCancellationRequested();
+                    var attributes = File.GetAttributes(entry);
+                    if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.System)) != 0 || IsProtected(entry)) { plan.SkippedFiles++; continue; }
+                    if ((attributes & FileAttributes.Directory) != 0) { if (recursive) directories.Push(entry); continue; }
+                    if (++plan.ScannedFiles > MaximumScanFiles) throw new IOException("Organizer.Error.Limit");
+                    if (Path.GetFileName(entry).Contains(".part", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) { plan.SkippedFiles++; continue; }
+                    files.Add(Path.GetFullPath(entry));
+                    if (plan.ScannedFiles % 100 == 0) Report("Organizer.Phase.Scanning", plan.ScannedFiles, 0, 0, 0);
+                }
             }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { throw new OrganizerPathException("Organizer.Source", null, error); }
         }
         var media = files.Where(file => MediaExtensions.Contains(Path.GetExtension(file))).ToHashSet(OrganizerPathSafety.Comparer);
         plan.ScannedMediaFiles = media.Count;
@@ -160,18 +208,15 @@ public sealed partial class DownloadOrganizerService : IDisposable
             if (!known.TryGetValue(identity, out var matches)) known[identity] = matches = new(OrganizerPathSafety.Comparer);
             foreach (var file in mediaFiles) matches.Add(file);
         }
-        foreach (var list in lists)
+        foreach (var list in destinations)
         {
-            var destination = OrganizerPathSafety.DirectoryPath(list.DestinationDirectory);
-            if (IsProtected(destination)) throw new IOException("Organizer.Error.OutsideRoot");
-            var session = new BatchImportSession { FileName = list.Name };
-            var rows = list.Entries ?? await ReadListAsync(list.SourceFile ?? throw new IOException("Organizer.Error.List"), session, token).ConfigureAwait(false);
+            var rows = list.Entries ?? await ReadListAsync(list, token).ConfigureAwait(false);
             var listIdentities = new HashSet<string>(StringComparer.Ordinal);
             foreach (var row in rows)
             {
                 await PauseBoundary(token).ConfigureAwait(false);
                 if (plan.Matches.Count >= MaximumPlanEntries) throw new IOException("Organizer.Error.Limit");
-                var match = new OrganizerMatch { ListName = list.Name, Url = row.Url, Identity = row.Identity, DestinationDirectory = destination,
+                var match = new OrganizerMatch { ListName = list.Name, Url = row.Url, Identity = row.Identity, DestinationDirectory = list.DestinationDirectory,
                     RequestedRange = row.Range, RequestedQuality = row.Quality };
                 plan.Matches.Add(match);
                 if (row.ErrorKey is not null || !TryIdentity(row.Url, out var identity)) { match.Status = OrganizerMatchStatus.Invalid; match.ReasonKey = "Organizer.Reason.Invalid"; continue; }
@@ -235,15 +280,21 @@ public sealed partial class DownloadOrganizerService : IDisposable
             return match;
         }, token);
 
-    private static async Task<IReadOnlyList<BatchImportEntry>> ReadListAsync(string file, BatchImportSession session, CancellationToken token)
+    private static async Task<IReadOnlyList<BatchImportEntry>> ReadListAsync(OrganizerSourceList list, CancellationToken token)
     {
-        var rows = new List<BatchImportEntry>();
-        await foreach (var raw in BatchImportParser.ParseAsync(file, token))
+        try
         {
-            if (rows.Count >= MaximumPlanEntries) throw new IOException("Organizer.Error.Limit");
-            rows.Add(BatchImportParser.Validate(raw, session, rows.Count + 1));
+            var session = new BatchImportSession { FileName = list.Name };
+            var rows = new List<BatchImportEntry>();
+            await foreach (var raw in BatchImportParser.ParseAsync(list.SourceFile ?? throw new IOException("Organizer.Error.List"), token))
+            {
+                if (rows.Count >= MaximumPlanEntries) throw new IOException("Organizer.Error.Limit");
+                rows.Add(BatchImportParser.Validate(raw, session, rows.Count + 1));
+            }
+            return rows;
         }
-        return rows;
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { throw new OrganizerPathException("Organizer.Error.InputList", list.Name, error); }
     }
 
     private async Task PopulateMatchAsync(OrganizerPlan plan, OrganizerMatch match, string media,
@@ -291,7 +342,11 @@ public sealed partial class DownloadOrganizerService : IDisposable
             else { match.Status = OrganizerMatchStatus.Found; match.ReasonKey = hasJson ? "Organizer.Reason.Verified" : "Organizer.Reason.JsonOptional"; }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
-        { match.Status = OrganizerMatchStatus.Attention; match.ReasonKey = error.Message.StartsWith("Organizer.", StringComparison.Ordinal) ? error.Message : "Organizer.Error.Access"; }
+        {
+            match.Status = OrganizerMatchStatus.Attention;
+            match.ReasonKey = SafeError(error);
+            LogFailure(nameof(PopulateMatchAsync), error);
+        }
     }
 
     private bool IsProtected(string path) => new[] { paths.RootDirectory, settings.Current.TemporaryDirectory }

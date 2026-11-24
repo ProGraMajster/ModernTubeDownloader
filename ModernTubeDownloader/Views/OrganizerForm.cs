@@ -59,6 +59,7 @@ internal sealed class OrganizerForm : Form
             ExperienceVisual.Action(button, button == planButton || button == move);
         description.Multiline = summary.Multiline = scanSummary.Multiline = status.Multiline = true;
         scanSummary.AccessibleAutomationId = "OrganizerScanSummary";
+        status.AccessibleAutomationId = "OrganizerStatus";
         setup.Controls.AddRange([add, listChoice, remove, sourceLabel, source, browseSource, destinationLabel, destination, browseDestination, recursive, requireJson, planButton]);
         results.Controls.AddRange([summary, scanSummary, filter, selectPage, rows, previous, pageLabel, next]);
         inspector.Controls.AddRange([detailHeading, details, candidateChoice, resolve, journalLabel, journals, refreshJournals, recover, undo]);
@@ -93,13 +94,15 @@ internal sealed class OrganizerForm : Form
         Closing += (_, args) => { if (operation is not null) { args.Cancel = true; closeRequested = true; operation.Cancel(); } };
         SizeChanged += (_, _) => Arrange(); body.SizeChanged += (_, _) => Arrange(); body.ViewportChanged += (_, _) => Arrange();
         rows.ViewportChanged += (_, _) => ArrangeRows(); AppTypography.RegisterLayout(surface, Arrange);
+        OrganizerPathException? destinationError = null;
         if (session is not null)
-        {
-            var folder = session.OutputDirectory ?? DownloadOrganizerService.SuggestDestination(services.Settings.Current.FinalOutputDirectory, Path.GetFileNameWithoutExtension(session.FileName));
-            lists.Add(new(session.FileName, folder, Entries: session.Snapshot()));
-        }
+            destinationError = AddList(new(session.FileName, session.OutputDirectory ?? "", Entries: session.Snapshot()));
         Localize(); RenderLists(); RenderRows(); Arrange();
-        Shown += async (_, _) => await RunAsync(RefreshJournalsAsync);
+        Shown += async (_, _) => await RunAsync(async token =>
+        {
+            await RefreshJournalsAsync(token);
+            if (destinationError is not null) ShowError(destinationError);
+        });
     }
 
     private async Task AddListsAsync()
@@ -109,15 +112,47 @@ internal sealed class OrganizerForm : Form
         if (await dialog.ShowDialog(this) != DialogResult.OK) return;
         await RunAsync(_ =>
         {
-            foreach (var file in dialog.FileNames)
+            var files = dialog.FileNames.Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(file => !lists.Any(list => string.Equals(list.SourceFile, file, StringComparison.OrdinalIgnoreCase))).ToArray();
+            if (files.Length > 100 - lists.Count) throw new IOException("Organizer.Error.Limit");
+
+            OrganizerPathException? firstError = null;
+            foreach (var file in files)
             {
-                if (lists.Count >= 100) throw new IOException("Organizer.Error.Limit");
-                if (lists.Any(list => string.Equals(list.SourceFile, file, StringComparison.OrdinalIgnoreCase))) continue;
-                lists.Add(new(Path.GetFileName(file), DownloadOrganizerService.SuggestDestination(services.Settings.Current.FinalOutputDirectory, Path.GetFileNameWithoutExtension(file)), file));
+                var error = AddList(new(Path.GetFileName(file), "", file));
+                if (firstError is null && error is not null)
+                {
+                    selectedList = lists.Count - 1;
+                    firstError = error;
+                }
             }
-            InvalidatePlan(); RenderLists(); return Task.CompletedTask;
+            InvalidatePlan(); RenderLists();
+            if (firstError is not null) ShowError(firstError);
+            return Task.CompletedTask;
         });
     }
+
+    private OrganizerPathException? AddList(OrganizerSourceList list)
+    {
+        OrganizerPathException? failure = null;
+        if (string.IsNullOrWhiteSpace(list.DestinationDirectory))
+        {
+            try
+            {
+                var stem = Path.GetFileNameWithoutExtension(list.Name);
+                var folder = DownloadOrganizerService.SuggestDestination(services.Settings.Current.FinalOutputDirectory, stem);
+                list = list with { DestinationDirectory = folder };
+            }
+            catch (OrganizerPathException error)
+            {
+                services.Organizer.LogFailure(nameof(DownloadOrganizerService.SuggestDestination), error);
+                failure = error;
+            }
+        }
+        lists.Add(list);
+        return failure;
+    }
+
     private async Task PickFolderAsync(TextBox target)
     {
         var dialog = new FolderBrowserDialog { Title = target == source ? services.Localization["Organizer.Source"] : services.Localization["Organizer.Destination"], InitialDirectory = target.Text };
@@ -223,17 +258,34 @@ internal sealed class OrganizerForm : Form
     private async Task RunAsync(Func<CancellationToken, Task> action)
     {
         if (operation is not null || disposed) return;
-        using var cancellation = new CancellationTokenSource(); operation = cancellation; RefreshEnabled(); status.Text = services.Localization["Organizer.Working"];
+        using var cancellation = new CancellationTokenSource(); operation = cancellation; RefreshEnabled();
+        latestProgress = null;
+        status.Text = services.Localization["Organizer.Working"];
         try { await action(cancellation.Token); }
-        catch (Exception error) { if (!disposed) status.Text = services.Localization[DownloadOrganizerService.SafeError(error)]; }
+        catch (Exception error) { ShowError(error); }
         finally { operation = null; if (!disposed) { services.Organizer.SetPaused(false); RefreshEnabled(); Localize(); if (closeRequested) Close(); } }
     }
+    private void ShowError(Exception error)
+    {
+        if (disposed) return;
+        latestProgress = null;
+        var text = services.Localization;
+        var reason = text[DownloadOrganizerService.SafeError(error)];
+        if (error is OrganizerPathException pathError)
+        {
+            var context = text[pathError.ContextKey];
+            if (pathError.ListName is { } list) context += " · " + text.Get("Organizer.ListLabel", list);
+            status.Text = context + Environment.NewLine + reason;
+        }
+        else status.Text = reason;
+    }
+
     private void ProgressChanged(object? sender, OrganizerProgress value)
     {
         latestProgress = value; if (disposed || Interlocked.Exchange(ref progressQueued, 1) != 0) return;
         Application.RunOnUIThread(() =>
         {
-            Interlocked.Exchange(ref progressQueued, 0); if (disposed || latestProgress is not { } current) return;
+            Interlocked.Exchange(ref progressQueued, 0); if (disposed || operation is null || latestProgress is not { } current) return;
             status.Text = services.Localization[current.Phase] + " · " + current.CompletedFiles + " / " + (current.TotalFiles == 0 ? "—" : current.TotalFiles.ToString()) + " · " + DashboardStyle.Bytes(current.CompletedBytes) + " / " + DashboardStyle.Bytes(current.TotalBytes) + (current.CurrentName is null ? "" : " · " + current.CurrentName);
             progress.Value = current.TotalBytes > 0 ? (int)Math.Clamp(current.CompletedBytes * 1000d / current.TotalBytes, 0, 1000) : current.TotalFiles > 0 ? current.CompletedFiles * 1000 / current.TotalFiles : 0;
         });
