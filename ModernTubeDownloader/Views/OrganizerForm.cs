@@ -155,8 +155,23 @@ internal sealed class OrganizerForm : Form
 
     private async Task PickFolderAsync(TextBox target)
     {
-        var dialog = new FolderBrowserDialog { Title = target == source ? services.Localization["Organizer.Source"] : services.Localization["Organizer.Destination"], InitialDirectory = target.Text };
-        if (await dialog.ShowDialog(this) == DialogResult.OK && dialog.SelectedPath is { } path) target.Text = path;
+        var titleKey = target == source ? "Organizer.Source" : "Organizer.Destination";
+        var dialog = new FolderBrowserDialog { Title = services.Localization[titleKey] };
+        // ModernFormsNext treats an explicitly empty initial path as a DirectoryInfo input.
+        if (Path.IsPathFullyQualified(target.Text) && Directory.Exists(target.Text))
+            dialog.InitialDirectory = target.Text;
+
+        try
+        {
+            if (await dialog.ShowDialog(this) == DialogResult.OK && dialog.SelectedPath is { } path) target.Text = path;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            var listName = target == destination && selectedList >= 0 ? lists[selectedList].Name : null;
+            var failure = new OrganizerPathException(titleKey, listName, error);
+            services.Organizer.LogFailure(nameof(PickFolderAsync), failure);
+            ShowError(failure);
+        }
     }
     private void RemoveList() { if (selectedList < 0) return; lists.RemoveAt(selectedList); selectedList = -1; InvalidatePlan(); RenderLists(); }
     private void RenderLists()
