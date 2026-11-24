@@ -204,7 +204,12 @@ For isolated process/UI integration tests, `MODERNTUBEDOWNLOADER_DATA_ROOT` can 
 
 ## Build and release packaging
 
-Application and assembly versioning is centralized in `Directory.Build.props`. The application builds against a configurable `ModernFormsNextRoot`; local development defaults to the ignored `.mfn-master-worktree`, while CI checks out the exact `ModernFormsNextCommit` (`8d8a7679779608b4edbee7dc687c13e3b1a611d9`, notification hotfix PR #271 based on master `18f47b085a59e65eb611e3fd1d38e8dffa3fb19c`) into an ignored dependency directory. CI/release read that central pin, verify the clean checkout and do not maintain a second hardcoded SHA. No local framework patch is needed for source builds. The earlier local 1.2.1 candidate artifact records its pre-commit patch fingerprints/provenance; it is not represented as a build of the later Git commit. An explicit candidate-only opt-in remains available for local patch qualification; default clean-pin gates remain enforced. A NuGet migration is a separate decision.
+Application and assembly versioning are centralized in `Directory.Build.props`.
+`ModernFormsNextVersion` pins the runtime, notification, testing and Debug-only
+automation packages to the same NuGet release. `NuGet.Config` configures NuGet.org
+for local, CI and packaging restores. Release packaging checks the resolved framework
+package graph. About and crash reports read the framework version and source revision
+from the loaded ModernFormsNext assembly.
 
 The supported 1.0.0 distribution is self-contained `win-x64`. Publishing is deliberately multi-file, untrimmed, and without ReadyToRun or NativeAOT so ModernFormsNext reflection, resources, and native Skia dependencies retain their validated behavior. `scripts/Build-Release.ps1` creates a clean end-user directory, excludes PDB/test/fake-tool/managed-tool files, produces a separate symbols archive, and writes a SHA-256 checksum.
 

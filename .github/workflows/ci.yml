@@ -17,28 +17,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Read central framework pin
-        id: pins
-        shell: pwsh
-        run: |
-          [xml] $props = Get-Content .\Directory.Build.props -Raw
-          $sha = $props.SelectSingleNode('/Project/PropertyGroup/ModernFormsNextCommit').InnerText.Trim()
-          if ($sha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid MFN pin.' }
-          "mfn=$sha" >> $env:GITHUB_OUTPUT
-
-      - name: Checkout pinned ModernFormsNext
-        uses: actions/checkout@v5
-        with:
-          repository: ProGraMajster/ModernFormsNext
-          ref: ${{ steps.pins.outputs.mfn }}
-          path: .mfn-master-worktree
-
-      - name: Verify exact clean framework checkout
-        shell: pwsh
-        run: |
-          if ((git -C .mfn-master-worktree rev-parse HEAD) -ne '${{ steps.pins.outputs.mfn }}') { throw 'MFN pin mismatch.' }
-          if (git -C .mfn-master-worktree status --porcelain) { throw 'MFN checkout is dirty.' }
-
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
@@ -57,7 +35,7 @@ jobs:
 
       - name: Restore, Debug and Release tests, NativeHost, publish and package gates
         shell: pwsh
-        run: .\scripts\Build-Release.ps1 -ModernFormsNextRoot "$env:GITHUB_WORKSPACE\.mfn-master-worktree"
+        run: .\scripts\Build-Release.ps1
 
       - name: Preserve test results and hang sequence
         if: always()
