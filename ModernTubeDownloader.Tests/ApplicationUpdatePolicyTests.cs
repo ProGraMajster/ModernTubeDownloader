@@ -252,7 +252,7 @@ public sealed partial class ApplicationUpdateTests
         var archive = fixture.Zip(("ModernTubeDownloader.exe", "new executable"), ("added.dll", "new DLL"), ("blocked.dll", "will fail"));
         var hash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(archive)));
         using var parent = Process.Start(new ProcessStartInfo(CoreTests.FakeToolPath(), "--sleep-short") { UseShellExecute = false, CreateNoWindow = true })!;
-        var request = new UpdaterRequest(install, archive, hash, parent.Id, parent.StartTime.ToUniversalTime().Ticks, false);
+        var request = new UpdaterRequest(install, archive, hash, parent.Id, parent.StartTime.ToUniversalTime().Ticks, true);
         var requestFile = Path.Combine(fixture.Root, "rollback-request.json"); await File.WriteAllTextAsync(requestFile, JsonSerializer.Serialize(request));
         var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "updater", "ModernTubeDownloader.Updater.exe")) { UseShellExecute = false, CreateNoWindow = true };
         start.ArgumentList.Add("--request"); start.ArgumentList.Add(requestFile);
@@ -267,6 +267,8 @@ public sealed partial class ApplicationUpdateTests
             Assert.Equal("private settings", await File.ReadAllTextAsync(Path.Combine(install, "settings.json")));
             foreach (var pair in before) Assert.Equal(pair.Value, SHA256.HashData(await File.ReadAllBytesAsync(pair.Key)));
             using var result = JsonDocument.Parse(await File.ReadAllTextAsync(requestFile + ".result.json")); Assert.False(result.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal("restored", result.RootElement.GetProperty("recovery").GetString());
+            Assert.Equal(0, result.RootElement.GetProperty("recoveryFailureCount").GetInt32());
             using var journal = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(install, ".mtd-update-backup", "journal.json")));
             Assert.True(journal.RootElement.GetProperty("Completed").GetBoolean());
         }
@@ -295,12 +297,17 @@ public sealed partial class ApplicationUpdateTests
         FileStream? held = null;
         try
         {
-            Assert.Throws<AggregateException>(() => UpdateTransaction.Install(installation, extracted, files, index =>
+            var failure = Assert.Throws<UpdateTransactionException>(() => UpdateTransaction.Install(installation, extracted, files, index =>
             {
                 if (index != 2) return;
                 held = new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None);
                 throw new IOException("Synthetic failure while a replaced file is locked by another process.");
             }));
+            Assert.Equal(UpdateRecoveryStatus.Partial, failure.Recovery);
+            Assert.Equal("Synthetic failure while a replaced file is locked by another process.", failure.Failure.Error.Message);
+            var restorationFailure = Assert.Single(failure.RecoveryFailures);
+            Assert.Equal("restore-file", restorationFailure.Operation);
+            Assert.Equal("existing.dll", restorationFailure.RelativePath);
             Assert.Equal("old exe", await File.ReadAllTextAsync(executable));
             using var journal = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(installation, ".mtd-update-backup", "journal.json")));
             Assert.False(journal.RootElement.GetProperty("Completed").GetBoolean());

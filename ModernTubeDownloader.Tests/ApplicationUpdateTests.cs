@@ -108,7 +108,11 @@ public sealed partial class ApplicationUpdateTests
         var zip = fixture.Zip(("ModernTubeDownloader.exe", "new exe"), ("added.dll", "new"), ("existing.dll", "new dll"), ("LICENSE", "MIT"));
         var extract = Path.Combine(fixture.Root, "extract");
         var files = await UpdatePackageSecurity.ExtractAsync(zip, extract);
-        Assert.Throws<IOException>(() => UpdateTransaction.Install(install, extract, files, index => { if (index == 2) throw new IOException("Synthetic copy failure"); }));
+        var failure = Assert.Throws<UpdateTransactionException>(() => UpdateTransaction.Install(install, extract, files,
+            index => { if (index == 2) throw new IOException("Synthetic copy failure"); }));
+        Assert.Equal(UpdateRecoveryStatus.Restored, failure.Recovery);
+        Assert.Equal("Synthetic copy failure", failure.Failure.Error.Message);
+        Assert.Empty(failure.RecoveryFailures);
         Assert.Equal("old exe", await File.ReadAllTextAsync(Path.Combine(install, "ModernTubeDownloader.exe")));
         Assert.Equal("old dll", await File.ReadAllTextAsync(Path.Combine(install, "existing.dll")));
         Assert.False(File.Exists(Path.Combine(install, "added.dll")));

@@ -57,13 +57,22 @@ eligible release after the user changes policy.
 `ModernTubeDownloader.Updater` has no UI, framework, worker, authentication or registry
 dependencies. The GUI copies its files to staging, then launches a request with the
 current PID and start-time identity. The updater waits for actual parent exit,
-verifies/extracts again, journals each file's backup before replacement and rolls back
-on copying failure. One private `.mtd-update-backup` holds the prior managed files.
-An interrupted incomplete journal is recovered before the next transaction.
-Read-only destination attributes are respected. Recovery skips unchanged destinations
-when a denied copy left them intact; one locked changed file does not prevent recovery
-of the other files. If any restoration still fails, the journal remains incomplete for
-the next recovery attempt and the failure is reported instead of claiming success.
+verifies/extracts again and flushes each backup and its journal entry before replacing
+the destination. The updater serializes work for the installation path. The active
+`.mtd-update-backup` holds the prior managed files. An incomplete journal is recovered
+before the next transaction. Read-only destination attributes are respected.
+Recovery verifies restored bytes and the absence of removed files. Unchanged
+destinations are left untouched. A locked file can prevent its own restoration while
+the rest of the recovery proceeds.
+
+The updater publishes a verified restoration only after all affected files are checked
+and the rollback is committed in the journal. When only some files can be verified,
+the result is partial. An unreadable journal, an unconfirmed rollback commit or a missing
+or unreadable result leaves the installation state unknown. The last durable incomplete
+journal stays available for the next attempt. The private runner's `request.json.result.json`
+records the initial failure and separate rollback failures, including operation and
+HRESULT. Results from earlier helpers with no recovery field are treated as unknown
+after failure.
 Only validated package files are changed; unlisted installation files are preserved.
 No AppData, queues, history, LIVE, cookies, registrations, logs, downloads, certificates
 or appearance profiles are updated. Install now uses the normal work warning/shutdown.
@@ -78,8 +87,9 @@ every exit. Manual retry remains available. No elevation is requested.
 ZIP validation rejects traversal, absolute/ADS/device/invalid paths, symlinks,
 case-insensitive duplicates, unknown root directories and user-data files. File count,
 compressed/uncompressed sizes and depth are bounded. Existing reparse points are
-rejected. Failed updates leave the old installation intact and record diagnostics.
-The optional restart goes through the application's normal single-instance startup.
+rejected. The updater only restarts the app after a successful installation and
+publication of its result. A failed installation leaves the app closed, including after
+a verified rollback. A restart failure after a successful commit is recorded separately.
 
 Validation must include the real updater process against an isolated synthetic
 installation. Never use a user's existing installation as an update fixture.
