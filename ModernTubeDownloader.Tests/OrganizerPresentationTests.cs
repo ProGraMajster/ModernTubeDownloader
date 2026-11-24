@@ -1,5 +1,6 @@
 using ModernFormsNext;
 using ModernFormsNext.Testing;
+using ModernFormsNext.WindowKit.Platform.Storage.FileIO;
 using ModernTubeDownloader.Batch;
 using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Views;
@@ -185,6 +186,23 @@ public sealed partial class BatchDashboardPresentationTests
                 Assert.Contains(final, Find<TextBox>(surface, "OrganizerDetails").Text);
                 Assert.False(Directory.Exists(final));
                 Assert.Equal("keep", File.ReadAllText(Path.Combine(media, "Playlist")));
+
+                using var sourceSelection = new BclStorageFolder(new DirectoryInfo(media));
+                var pickedDirectory = Directory.CreateDirectory(Path.Combine(root, "Wybrane Gdańsk Cafe\u0301"));
+                using var destinationSelection = new BclStorageFolder(pickedDirectory);
+                source.Text = "";
+                host.Services.Storage.Folders = [sourceSelection];
+                host.Dispatcher.Post(() => Find<Button>(surface, "OrganizerBrowseSource").PerformClick());
+                host.ProcessPendingWork();
+                Assert.Equal(media, source.Text);
+
+                host.Services.Storage.Folders = [destinationSelection];
+                host.Dispatcher.Post(() => Find<Button>(surface, "OrganizerBrowseDestination").PerformClick());
+                host.ProcessPendingWork();
+                Assert.Equal(pickedDirectory.FullName, destination.Text);
+                Analyze();
+                Assert.Single(Find<ExperienceScrollPanel>(surface, "OrganizerRows").Controls);
+                Assert.Contains(pickedDirectory.FullName, Find<TextBox>(surface, "OrganizerDetails").Text);
             }
             await services.ShutdownAsync();
         }
