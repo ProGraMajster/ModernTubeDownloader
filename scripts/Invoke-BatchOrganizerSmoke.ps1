@@ -71,9 +71,16 @@ if ($BatchWorkflowSmoke) {
     if ($OrganizerWorkflowSmoke) {
         Invoke-NodeAction (Find-Node 'BatchOrganize' $batchRoot) $batchRoot 'Invoke' | Out-Null
         $organizer = (Wait-ExperienceRoot 'OrganizerWindow').rootId
-        $target = Join-Path ($dataRoot + '-media') 'organized-native-list'
+        $target = Join-Path ($dataRoot + '-media') ('organized (Zażółć)-Cafe' + [char]0x301)
         Wait-Node 'OrganizerDestination' $organizer 'Enabled' | Out-Null
-        Invoke-NodeAction (Find-Node 'OrganizerDestination' $organizer) $organizer 'SetValue' $target | Out-Null
+        Invoke-NodeAction (Find-Node 'OrganizerDestination' $organizer) $organizer 'SetValue' 'relative' | Out-Null
+        Invoke-NodeAction (Find-Node 'OrganizerPlan' $organizer) $organizer 'Invoke' | Out-Null
+        Wait-Node 'OrganizerPlan' $organizer 'Enabled' | Out-Null
+        $errorStatus = Find-Node 'OrganizerStatus' $organizer
+        $expectedReason = $labels.'Organizer.Error.PathType'
+        if (($errorStatus.name + $errorStatus.value) -notlike "*$expectedReason*") { throw 'Organizer did not explain the invalid destination.' }
+        [void](Capture-WorkflowDialog 'OrganizerWindow' 'Organizer.Title' 'organizer-destination-error')
+        Invoke-NodeAction (Find-Node 'OrganizerDestination' $organizer) $organizer 'SetValue' ($target.Replace('\', '/') + '/') | Out-Null
         Invoke-NodeAction (Find-Node 'OrganizerPlan' $organizer) $organizer 'Invoke' | Out-Null
         Wait-Node 'OrganizerPlan' $organizer 'Enabled' | Out-Null
         Invoke-NodeAction (Find-Node 'OrganizerSelectPage' $organizer) $organizer 'Invoke' | Out-Null

@@ -1,5 +1,6 @@
 using ModernFormsNext;
 using ModernFormsNext.Testing;
+using ModernFormsNext.WindowKit.Platform.Storage.FileIO;
 using ModernTubeDownloader.Batch;
 using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Views;
@@ -119,5 +120,97 @@ public sealed partial class BatchDashboardPresentationTests
             await services.ShutdownAsync();
         }
         finally { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task OrganizerKeepsListEditableWhenSuggestionFailsAndShowsFieldSpecificErrors()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "mtd-organizer-path-ui-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var services = await CreateServicesAsync(Path.Combine(root, "profile"));
+            var media = Directory.CreateDirectory(Path.Combine(root, "Pobrane Cafe\u0301")).FullName;
+            services.Settings.Current.FinalOutputDirectory = media;
+            await File.WriteAllTextAsync(Path.Combine(media, "Playlist"), "keep");
+            var session = new BatchImportSession { FileName = "Playlist.txt" };
+            session.Entries.Add(new() { Url = "https://example.test/missing" });
+
+            using (var host = ModernFormsTestHost.Create())
+            {
+                services.Appearance.Initialize();
+                services.Localization.SetLanguage("pl");
+                using var form = new OrganizerForm(services, session);
+                host.Show(form, 1220, 900);
+                var surface = Assert.Single(form.Controls);
+                var status = Find<Label>(surface, "OrganizerStatus");
+                var source = Find<TextBox>(surface, "OrganizerSource");
+                var destination = Find<TextBox>(surface, "OrganizerDestination");
+
+                void AwaitRun()
+                {
+                    var deadline = DateTime.UtcNow.AddSeconds(10);
+                    do { host.ProcessPendingWork(); Thread.Sleep(5); }
+                    while (Find<Button>(surface, "OrganizerCancel").Enabled && DateTime.UtcNow < deadline);
+                    Assert.False(Find<Button>(surface, "OrganizerCancel").Enabled);
+                }
+
+                void Analyze()
+                {
+                    host.Dispatcher.Post(() => Find<Button>(surface, "OrganizerPlan").PerformClick());
+                    AwaitRun();
+                }
+
+                AwaitRun();
+                Assert.Contains(services.Localization["Organizer.Error.ListFolder"], status.Text);
+                Assert.Contains(services.Localization["Organizer.Error.NotDirectory"], status.Text);
+                Assert.Equal(media, source.Text);
+                Assert.Equal("", destination.Text);
+
+                destination.Text = Path.Combine(root, "Wynik");
+                source.Text = Path.Combine(root, "brak");
+                Analyze();
+                Assert.StartsWith(services.Localization["Organizer.Source"], status.Text);
+                Assert.Contains(services.Localization["Organizer.Error.FolderMissing"], status.Text);
+
+                source.Text = media;
+                destination.Text = "relative";
+                Analyze();
+                Assert.StartsWith(services.Localization["Organizer.Destination"], status.Text);
+                Assert.Contains(session.FileName, status.Text);
+                Assert.Contains(services.Localization["Organizer.Error.PathType"], status.Text);
+
+                var final = Path.Combine(root, "Wynik (Zażółć)");
+                destination.Text = final.Replace('\\', '/') + "/";
+                Analyze();
+                Assert.Single(Find<ExperienceScrollPanel>(surface, "OrganizerRows").Controls);
+                Assert.Contains(final, Find<TextBox>(surface, "OrganizerDetails").Text);
+                Assert.False(Directory.Exists(final));
+                Assert.Equal("keep", File.ReadAllText(Path.Combine(media, "Playlist")));
+
+                using var sourceSelection = new BclStorageFolder(new DirectoryInfo(media));
+                var pickedDirectory = Directory.CreateDirectory(Path.Combine(root, "Wybrane Gdańsk Cafe\u0301"));
+                using var destinationSelection = new BclStorageFolder(pickedDirectory);
+                source.Text = "";
+                host.Services.Storage.Folders = [sourceSelection];
+                host.Dispatcher.Post(() => Find<Button>(surface, "OrganizerBrowseSource").PerformClick());
+                host.ProcessPendingWork();
+                Assert.Equal(media, source.Text);
+
+                host.Services.Storage.Folders = [destinationSelection];
+                host.Dispatcher.Post(() => Find<Button>(surface, "OrganizerBrowseDestination").PerformClick());
+                host.ProcessPendingWork();
+                Assert.Equal(pickedDirectory.FullName, destination.Text);
+                Analyze();
+                Assert.Single(Find<ExperienceScrollPanel>(surface, "OrganizerRows").Controls);
+                Assert.Contains(pickedDirectory.FullName, Find<TextBox>(surface, "OrganizerDetails").Text);
+            }
+            await services.ShutdownAsync();
+        }
+        finally
+        {
+            AppTypography.SetScale(100);
+            AppearancePresentation.Current = new();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
     }
 }
