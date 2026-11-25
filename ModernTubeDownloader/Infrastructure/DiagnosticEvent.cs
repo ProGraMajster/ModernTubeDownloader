@@ -20,7 +20,8 @@ public sealed record DiagnosticEvent(DiagnosticModule Module, DiagnosticStage St
 public sealed record DiagnosticCounters(long? Items = null, long? Total = null, long? Files = null, long? Directories = null,
     long? Bytes = null, long? Errors = null, long? Matches = null, long? Missing = null, long? Duplicates = null,
     long? Conflicts = null, long? History = null, long? Queue = null, long? Active = null, long? Live = null,
-    long? Code = null, long? Context = null, long? HttpStatus = null, long? ExitCode = null, long? Dropped = null, long? WorkingSet = null, long? PrivateMemory = null,
+    long? Code = null, long? Context = null, long? HttpStatus = null, long? ExitCode = null, long? Quality = null, long? Container = null,
+    bool? CookieFile = null, bool? SponsorMark = null, double? MediaSeconds = null, long? Dropped = null, long? WorkingSet = null, long? PrivateMemory = null,
     long? ManagedHeap = null, long? Threads = null, double? CpuPercent = null, long? Gc0 = null,
     long? Gc1 = null, long? Gc2 = null, long? WaitMs = null, long? MediaFiles = null, long? MetadataFiles = null);
 

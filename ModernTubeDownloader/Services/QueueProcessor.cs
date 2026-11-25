@@ -254,7 +254,8 @@ public sealed class QueueProcessor : IDisposable
                     logger.Event(new(DiagnosticModule.Downloads, DiagnosticStage.Run, DiagnosticOutcome.Failed, DiagnosticLevel.Error,
                         item.Id, DurationMs: (long)(timing.UtcNow - started).TotalMilliseconds, Exception: ex,
                         Counts: new(Items: attempt, Total: maxAttempts, Code: (int)failure.Category, HttpStatus: failure.HttpStatus,
-                            ExitCode: failure.ExitCode, Context: (int)stage)));
+                            ExitCode: failure.ExitCode, Context: (int)stage, Quality: QualityPreset.Find(item.QualityPresetId).MaximumHeight,
+                            Container: (int)item.PreferredVideoContainer)));
                     if (!retry)
                     {
                         queue.Update(item.Id, current =>

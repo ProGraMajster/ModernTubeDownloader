@@ -307,8 +307,8 @@ public sealed class DownloadJobExecutor(
             var finalDuration = await ffmpeg.TryProbeDurationAsync(finalPath).ConfigureAwait(false);
             if (requestedRange.Mode == MediaRangeMode.Custom)
             {
-                logger.Info($"Segment finalized QueueItemId={item.Id} RequestedRange={requestedRange.DisplayText} FinalDurationSeconds=" +
-                    (finalDuration?.ToString("0.###", CultureInfo.InvariantCulture) ?? "unknown"));
+                logger.Event(new(DiagnosticModule.Downloads, DiagnosticStage.Validate, DiagnosticOutcome.Completed, OperationId: item.Id,
+                    Counts: new(MediaSeconds: finalDuration is { } seconds && double.IsFinite(seconds) ? seconds : null)));
             }
 
             if (settings.Current.StoreMetadataJson && !string.IsNullOrWhiteSpace(item.RawMetadataJson))

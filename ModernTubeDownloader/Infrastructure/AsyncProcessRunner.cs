@@ -32,7 +32,8 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
         var tool = Path.GetFileNameWithoutExtension(request.FileName).ToLowerInvariant() switch
         { "yt-dlp" => 1, "ffmpeg" => 2, "ffprobe" => 3, "deno" => 4, _ => 0 };
         logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Run, DiagnosticOutcome.Requested, OperationId: operation,
-            ParentOperationId: parent, Counts: new(Context: tool)));
+            ParentOperationId: parent, Counts: new(Context: tool, CookieFile: request.Arguments.Contains("--cookies"),
+                SponsorMark: request.Arguments.Contains("--sponsorblock-mark"))));
         var standardOutput = new ConcurrentQueue<string>();
         var standardError = new ConcurrentQueue<string>();
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
