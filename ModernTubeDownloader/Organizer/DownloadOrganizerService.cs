@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -35,7 +36,10 @@ public sealed partial class DownloadOrganizerService : IDisposable
     private sealed record MetadataEvidence(string Identity, string VideoId);
     private sealed record PlanLookup(Dictionary<string, DownloadHistoryEntry[]> History,
         Dictionary<string, DownloadQueueItem[]> Queue, Dictionary<string, string[]> CompanionsByStem,
-        Dictionary<string, OrganizerFile> Fingerprints);
+        Dictionary<string, OrganizerFile> Fingerprints)
+    {
+        public Dictionary<string, MetadataEvidence?> Sidecars { get; } = new(OrganizerPathSafety.Comparer);
+    }
     private volatile bool paused;
     private TaskCompletionSource pauseCompletion = NewSignal();
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -53,28 +57,45 @@ public sealed partial class DownloadOrganizerService : IDisposable
     private void QueueReferencesChanged(object? sender, QueueChangedEventArgs args) => Interlocked.Increment(ref referenceVersion);
     private void HistoryReferencesChanged(object? sender, EventArgs args) => Interlocked.Increment(ref referenceVersion);
 
-    public static string SuggestDestination(string root, string listName)
+    public static string SuggestDestination(string root, string listName) => SuggestDestination(root, listName, null);
+
+    internal string SuggestDestinationWithDiagnostics(string root, string listName)
     {
-        root = DirectoryFor(root, "Organizer.Error.OutputFolder", allowRoot: true);
-        try { return OrganizerPathSafety.DirectoryPath(Path.Combine(root, OrganizerPathSafety.ListName(listName))); }
+        var operationId = Guid.NewGuid();
+        try
+        {
+            return SuggestDestination(root, listName, (type, result) =>
+                logger.Info($"Organizer destination volume check. OperationId={operationId:N} Type={type} Result={result}"));
+        }
+        catch (OrganizerPathException error)
+        {
+            LogFailure(nameof(SuggestDestination), error, operationId);
+            throw;
+        }
+    }
+
+    private static string SuggestDestination(string root, string listName, Action<DriveType, string>? volumeChecked)
+    {
+        root = DirectoryFor(root, "Organizer.Error.OutputFolder", allowRoot: true, volumeChecked: volumeChecked);
+        try { return OrganizerPathSafety.DirectoryPath(Path.Combine(root, OrganizerPathSafety.ListName(listName)), volumeChecked: volumeChecked); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         { throw new OrganizerPathException("Organizer.Error.ListFolder", listName, error); }
     }
 
     private static string DirectoryFor(string path, string contextKey, string? listName = null,
-        bool mustExist = false, bool allowRoot = false)
+        bool mustExist = false, bool allowRoot = false, Action<DriveType, string>? volumeChecked = null)
     {
-        try { return OrganizerPathSafety.DirectoryPath(path, mustExist, allowRoot); }
+        try { return OrganizerPathSafety.DirectoryPath(path, mustExist, allowRoot, volumeChecked); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         { throw new OrganizerPathException(contextKey, listName, error); }
     }
 
-    internal void LogFailure(string operation, Exception error)
+    internal void LogFailure(string operation, Exception error, Guid? operationId = null)
     {
         var path = error as OrganizerPathException;
         var cause = path?.InnerException ?? error;
         var native = cause.InnerException ?? cause;
-        logger.Warning($"Organizer {operation} failed. Context={path?.ContextKey ?? "-"} " +
+        logger.Warning($"Organizer {operation} failed. OperationId={operationId?.ToString("N") ?? "-"} Context={path?.ContextKey ?? "-"} " +
             $"Reason={SafeError(error)} Type={native.GetType().Name} HResult=0x{native.HResult:X8} " +
             $"Origin={native.TargetSite?.DeclaringType?.Name}.{native.TargetSite?.Name}");
     }
@@ -89,7 +110,11 @@ public sealed partial class DownloadOrganizerService : IDisposable
 
     public Task<OrganizerPlan> BuildPlanAsync(IReadOnlyList<OrganizerSourceList> lists, string scanRoot, bool recursive,
         bool requireJson = true, CancellationToken token = default) =>
-        RunOwnedAsync(ct => BuildPlanCoreAsync(lists, scanRoot, recursive, requireJson, ct), token);
+        BuildPlanAsync(lists, scanRoot, recursive, requireJson, Guid.NewGuid(), token);
+
+    internal Task<OrganizerPlan> BuildPlanAsync(IReadOnlyList<OrganizerSourceList> lists, string scanRoot, bool recursive,
+        bool requireJson, Guid operationId, CancellationToken token) =>
+        RunOwnedAsync(ct => BuildPlanCoreAsync(lists, scanRoot, recursive, requireJson, operationId, ct), token, operationId);
 
     public async Task StopAsync()
     {
@@ -106,7 +131,7 @@ public sealed partial class DownloadOrganizerService : IDisposable
     }
 
     private Task<T> RunOwnedAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken token,
-        [CallerMemberName] string operationName = "")
+        Guid? operationId = null, [CallerMemberName] string operationName = "")
     {
         lock (workSync)
         {
@@ -116,17 +141,34 @@ public sealed partial class DownloadOrganizerService : IDisposable
             {
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
                 var entered = false;
+                var elapsed = Stopwatch.StartNew();
+                var outcome = "Failed";
+                if (operationId is not null) logger.Info($"Organizer {operationName} started. OperationId={operationId:N}");
                 try
                 {
                     await operationGate.WaitAsync(linked.Token).ConfigureAwait(false); entered = true;
-                    return await operation(linked.Token).ConfigureAwait(false);
+                    var result = await operation(linked.Token).ConfigureAwait(false);
+                    outcome = "Succeeded";
+                    return result;
                 }
-                catch (Exception error) when (error is not OperationCanceledException)
+                catch (OperationCanceledException) when (linked.IsCancellationRequested)
                 {
-                    LogFailure(operationName, error);
+                    outcome = "Cancelled";
                     throw;
                 }
-                finally { if (entered) operationGate.Release(); Interlocked.Decrement(ref activeCount); SetPaused(false); }
+                catch (Exception error)
+                {
+                    LogFailure(operationName, error, operationId);
+                    throw;
+                }
+                finally
+                {
+                    if (entered) operationGate.Release();
+                    Interlocked.Decrement(ref activeCount);
+                    SetPaused(false);
+                    if (operationId is not null)
+                        logger.Info($"Organizer {operationName} finished. OperationId={operationId:N} Outcome={outcome} ElapsedMs={elapsed.ElapsedMilliseconds}");
+                }
             });
             activeTasks.Add(task);
             _ = task.ContinueWith(completed => { lock (workSync) activeTasks.Remove(completed); }, CancellationToken.None,
@@ -136,9 +178,13 @@ public sealed partial class DownloadOrganizerService : IDisposable
     }
 
     private async Task<OrganizerPlan> BuildPlanCoreAsync(IReadOnlyList<OrganizerSourceList> lists, string scanRoot,
-        bool recursive, bool requireJson, CancellationToken token)
+        bool recursive, bool requireJson, Guid operationId, CancellationToken token)
     {
-        scanRoot = DirectoryFor(scanRoot, "Organizer.Source", mustExist: true, allowRoot: true);
+        var plan = new OrganizerPlan { Id = operationId, Recursive = recursive, RequireJson = requireJson };
+        using var trace = new PlanProgress(logger, plan, lists.Count, progress => ProgressChanged?.Invoke(this, progress));
+        trace.Report("Organizer.Phase.Validating");
+        scanRoot = DirectoryFor(scanRoot, "Organizer.Source", mustExist: true, allowRoot: true, volumeChecked: trace.VolumeChecked);
+        plan.ScanRoot = scanRoot;
         if (recursive && OrganizerPathSafety.Comparer.Equals(scanRoot, Path.GetPathRoot(scanRoot)))
             throw new OrganizerPathException("Organizer.Source", null, new IOException("Organizer.Error.RootRecursive"));
         if (IsProtected(scanRoot))
@@ -148,12 +194,24 @@ public sealed partial class DownloadOrganizerService : IDisposable
         var destinations = new List<OrganizerSourceList>(lists.Count);
         foreach (var list in lists)
         {
-            var destination = DirectoryFor(list.DestinationDirectory, "Organizer.Destination", list.Name);
+            token.ThrowIfCancellationRequested();
+            var destination = DirectoryFor(list.DestinationDirectory, "Organizer.Destination", list.Name, volumeChecked: trace.VolumeChecked);
             if (IsProtected(destination))
                 throw new OrganizerPathException("Organizer.Destination", list.Name, new IOException("Organizer.Error.OutsideRoot"));
             destinations.Add(list with { DestinationDirectory = destination });
         }
-        var plan = new OrganizerPlan { ScanRoot = scanRoot, Recursive = recursive, RequireJson = requireJson };
+        trace.Report("Organizer.Phase.ReadingLists", 0, destinations.Count);
+        var input = new List<(OrganizerSourceList List, IReadOnlyList<BatchImportEntry> Rows)>(destinations.Count);
+        foreach (var list in destinations)
+        {
+            await PauseBoundary(token).ConfigureAwait(false);
+            var rows = list.Entries ?? await ReadListAsync(list, token).ConfigureAwait(false);
+            if (rows.Count > MaximumPlanEntries - trace.LinkCount) throw new IOException("Organizer.Error.Limit");
+            trace.LinkCount += rows.Count;
+            input.Add((list, rows));
+            trace.Report("Organizer.Phase.ReadingLists", input.Count, destinations.Count);
+        }
+        trace.Report("Organizer.Phase.Scanning");
         var files = new HashSet<string>(OrganizerPathSafety.Comparer);
         var directories = new Stack<string>(); directories.Push(scanRoot);
         while (directories.TryPop(out var directory))
@@ -171,12 +229,18 @@ public sealed partial class DownloadOrganizerService : IDisposable
                     if (++plan.ScannedFiles > MaximumScanFiles) throw new IOException("Organizer.Error.Limit");
                     if (Path.GetFileName(entry).Contains(".part", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) { plan.SkippedFiles++; continue; }
                     files.Add(Path.GetFullPath(entry));
-                    if (plan.ScannedFiles % 100 == 0) Report("Organizer.Phase.Scanning", plan.ScannedFiles, 0, 0, 0);
+                    if (plan.ScannedFiles % 100 == 0) trace.Report("Organizer.Phase.Scanning", plan.ScannedFiles);
                 }
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { throw new OrganizerPathException("Organizer.Source", null, error); }
+            {
+                try { OrganizerPathSafety.RecheckVolumeOnMissing(directory, error); }
+                catch (Exception unavailable) when (unavailable is IOException or UnauthorizedAccessException)
+                { throw new OrganizerPathException("Organizer.Source", null, unavailable); }
+                throw new OrganizerPathException("Organizer.Source", null, error);
+            }
         }
+        trace.Report("Organizer.Phase.Matching");
         var media = files.Where(file => MediaExtensions.Contains(Path.GetExtension(file))).ToHashSet(OrganizerPathSafety.Comparer);
         plan.ScannedMediaFiles = media.Count;
         var byStem = media.GroupBy(file => Path.Combine(Path.GetDirectoryName(file)!, Path.GetFileNameWithoutExtension(file)), OrganizerPathSafety.Comparer)
@@ -203,14 +267,14 @@ public sealed partial class DownloadOrganizerService : IDisposable
             await PauseBoundary(token).ConfigureAwait(false);
             var stem = json.EndsWith(".info.json", StringComparison.OrdinalIgnoreCase) ? json[..^10] : json[..^5];
             if (!byStem.TryGetValue(stem, out var mediaFiles)) continue;
-            var identity = await MetadataIdentityAsync(json, token).ConfigureAwait(false);
+            var identity = (await ReadPlanSidecarAsync(json, lookup, token).ConfigureAwait(false))?.Identity;
             if (identity is null) continue;
             if (!known.TryGetValue(identity, out var matches)) known[identity] = matches = new(OrganizerPathSafety.Comparer);
             foreach (var file in mediaFiles) matches.Add(file);
         }
-        foreach (var list in destinations)
+        trace.Report("Organizer.Phase.BuildingPlan", 0, trace.LinkCount);
+        foreach (var (list, rows) in input)
         {
-            var rows = list.Entries ?? await ReadListAsync(list, token).ConfigureAwait(false);
             var listIdentities = new HashSet<string>(StringComparer.Ordinal);
             foreach (var row in rows)
             {
@@ -219,6 +283,7 @@ public sealed partial class DownloadOrganizerService : IDisposable
                 var match = new OrganizerMatch { ListName = list.Name, Url = row.Url, Identity = row.Identity, DestinationDirectory = list.DestinationDirectory,
                     RequestedRange = row.Range, RequestedQuality = row.Quality };
                 plan.Matches.Add(match);
+                trace.Report("Organizer.Phase.BuildingPlan", plan.Matches.Count, trace.LinkCount);
                 if (row.ErrorKey is not null || !TryIdentity(row.Url, out var identity)) { match.Status = OrganizerMatchStatus.Invalid; match.ReasonKey = "Organizer.Reason.Invalid"; continue; }
                 match.Identity = identity;
                 var listIdentity = identity + "|" + row.Quality + "|" + JsonSerializer.Serialize(row.Range, JsonDefaults.Options);
@@ -250,8 +315,54 @@ public sealed partial class DownloadOrganizerService : IDisposable
             .Select(match => match.Identity).Distinct(StringComparer.Ordinal))
             if (known.TryGetValue(identity, out var matchingFiles)) identifiedFiles.ExceptWith(matchingFiles);
         plan.UnmatchedIdentifiedMediaFiles = identifiedFiles.Count;
-        Report("Organizer.Phase.Planned", plan.Matches.Count, plan.Matches.Count, 0, plan.Matches.Sum(match => match.Bytes));
+        token.ThrowIfCancellationRequested();
+        // A volume can disappear while enumerating, reading sidecars or hashing media.
+        DirectoryFor(scanRoot, "Organizer.Source", mustExist: true, allowRoot: true, volumeChecked: trace.VolumeChecked);
+        foreach (var list in destinations)
+        {
+            token.ThrowIfCancellationRequested();
+            DirectoryFor(list.DestinationDirectory, "Organizer.Destination", list.Name, volumeChecked: trace.VolumeChecked);
+        }
         return plan;
+    }
+
+    private sealed class PlanProgress(IAppLogger logger, OrganizerPlan plan, int listCount, Action<OrganizerProgress> publish) : IDisposable
+    {
+        private readonly Stopwatch stageClock = Stopwatch.StartNew();
+        private readonly HashSet<(DriveType Type, string Result)> volumes = [];
+        private string phase = "";
+        private long lastProgress;
+        public int LinkCount { get; set; }
+
+        public void VolumeChecked(DriveType driveType, string result) => volumes.Add((driveType, result));
+
+        public void Report(string nextPhase, int completed = 0, int total = 0)
+        {
+            if (phase != nextPhase)
+            {
+                FinishStage();
+                phase = nextPhase;
+                stageClock.Restart();
+                logger.Info($"Organizer stage started. OperationId={plan.Id:N} Stage={phase}");
+            }
+            else if (Stopwatch.GetElapsedTime(lastProgress) < TimeSpan.FromMilliseconds(125) && (total == 0 || completed < total)) return;
+            lastProgress = Stopwatch.GetTimestamp();
+            publish(new OrganizerProgress(phase, completed, total, 0, 0) { OperationId = plan.Id });
+        }
+
+        private void FinishStage()
+        {
+            if (phase.Length > 0)
+                logger.Info($"Organizer stage finished. OperationId={plan.Id:N} Stage={phase} ElapsedMs={stageClock.ElapsedMilliseconds} " +
+                    $"Lists={listCount} Links={LinkCount} ScannedFiles={plan.ScannedFiles}");
+        }
+
+        public void Dispose()
+        {
+            FinishStage();
+            foreach (var (type, result) in volumes)
+                logger.Info($"Organizer volume check. OperationId={plan.Id:N} Type={type} Result={result}");
+        }
     }
 
     /// <summary>Explicitly resolves a candidate already proven to have the requested source identity.</summary>
@@ -317,8 +428,9 @@ public sealed partial class DownloadOrganizerService : IDisposable
             var hasJson = false;
             foreach (var json in new[] { stem + ".json", stem + ".info.json" }.Where(files.Contains))
             {
-                var evidence = await MetadataEvidenceAsync(json, token, match.VerifiedVideoId).ConfigureAwait(false);
-                if (evidence is null || evidence.Identity != match.Identity)
+                var evidence = await ReadPlanSidecarAsync(json, lookup, token).ConfigureAwait(false);
+                if (evidence is null || evidence.Identity != match.Identity ||
+                    match.VerifiedVideoId is { } expectedId && evidence.VideoId != expectedId)
                     throw new IOException("Organizer.Error.JsonIdentity");
                 match.VerifiedVideoId ??= evidence.VideoId;
                 match.Files.Add(await DescribeForPlanAsync(json, Path.Combine(match.DestinationDirectory, Path.GetFileName(json)), false, lookup, token).ConfigureAwait(false)); hasJson = true;
@@ -345,7 +457,7 @@ public sealed partial class DownloadOrganizerService : IDisposable
         {
             match.Status = OrganizerMatchStatus.Attention;
             match.ReasonKey = SafeError(error);
-            LogFailure(nameof(PopulateMatchAsync), error);
+            LogFailure(nameof(PopulateMatchAsync), error, plan.Id);
         }
     }
 
@@ -368,6 +480,13 @@ public sealed partial class DownloadOrganizerService : IDisposable
         if (!YtDlpMetadataService.TryValidateSourceUrl(url ?? "", out var normalized, out _)) return false;
         identity = BatchImportParser.Identity(normalized); return true;
     }
+    private static async Task<MetadataEvidence?> ReadPlanSidecarAsync(string file, PlanLookup lookup, CancellationToken token)
+    {
+        if (!lookup.Sidecars.TryGetValue(file, out var evidence))
+            lookup.Sidecars[file] = evidence = await MetadataEvidenceAsync(file, token).ConfigureAwait(false);
+        return evidence;
+    }
+
     private static async Task<string?> MetadataIdentityAsync(string file, CancellationToken token, string? expectedId = null)
         => (await MetadataEvidenceAsync(file, token, expectedId).ConfigureAwait(false))?.Identity;
     private static async Task<MetadataEvidence?> MetadataEvidenceAsync(string file, CancellationToken token, string? expectedId = null)

@@ -183,6 +183,7 @@ public sealed partial class BatchDashboardPresentationTests
                 destination.Text = final.Replace('\\', '/') + "/";
                 Analyze();
                 Assert.Single(Find<ExperienceScrollPanel>(surface, "OrganizerRows").Controls);
+                Assert.StartsWith(services.Localization["Organizer.Phase.Planned"], status.Text);
                 Assert.Contains(final, Find<TextBox>(surface, "OrganizerDetails").Text);
                 Assert.False(Directory.Exists(final));
                 Assert.Equal("keep", File.ReadAllText(Path.Combine(media, "Playlist")));

@@ -139,6 +139,9 @@ public sealed partial class ApplicationUpdateService : IDisposable
         try
         {
             if (initialized) return;
+            logger.Info($"Application updater initialization started. AppVersion={CurrentVersion} " +
+                $"ProtocolAssemblyVersion={typeof(UpdaterRequest).Assembly.GetName().Version} DependencyLoad=InProcess " +
+                $"RunnerFiles={DescribeInstallerFiles()}");
             await InitializeCoreAsync(token);
             if (!StateUnavailable && pendingStartupResultKey is { } startupResult)
             {
@@ -147,6 +150,8 @@ public sealed partial class ApplicationUpdateService : IDisposable
                 pendingStartupResultKey = null;
             }
             initialized = true;
+            logger.Info($"Application updater initialization finished. AppVersion={CurrentVersion} Status={StatusKey} " +
+                $"StateAvailable={!StateUnavailable} InstallerPending={InstallationPending}");
         }
         finally { gate.Release(); }
         // Panels exist before the background monitor finishes restoring state.
@@ -469,6 +474,20 @@ public sealed partial class ApplicationUpdateService : IDisposable
     // starts the packaged updater copied to its owned runner directory.
     internal string InstallerSourceDirectory { get; set; } = Path.Combine(AppContext.BaseDirectory, "updater");
     internal Func<ProcessStartInfo, Process?> InstallerProcessFactory { get; set; } = Process.Start;
+
+    private string DescribeInstallerFiles()
+    {
+        const string name = "ModernTubeDownloader.Updater";
+        var executable = File.Exists(Path.Combine(InstallerSourceDirectory, name + ".exe"));
+        var deps = File.Exists(Path.Combine(InstallerSourceDirectory, name + ".deps.json"));
+        var runtime = File.Exists(Path.Combine(InstallerSourceDirectory, name + ".runtimeconfig.json"));
+        string assembly;
+        try { assembly = AssemblyName.GetAssemblyName(Path.Combine(InstallerSourceDirectory, name + ".dll")).Version?.ToString() ?? "Unknown"; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or BadImageFormatException)
+        { assembly = $"{error.GetType().Name}/0x{error.HResult:X8}"; }
+        return $"Exe:{executable},DllVersion:{assembly},Deps:{deps},RuntimeConfig:{runtime}";
+    }
+
     internal Action<Process> InstallerProcessStopper { get; set; } = process => process.Kill();
     private bool startupAbortBlocked;
     internal bool StartupAbortBlocked
@@ -510,6 +529,8 @@ public sealed partial class ApplicationUpdateService : IDisposable
         var runner = Path.Combine(root, "runner-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(runner);
         var source = InstallerSourceDirectory;
+        logger.Info($"Application updater preparing runner. AppVersion={CurrentVersion} Restart={restart} Startup={startup} " +
+            $"RunnerFiles={DescribeInstallerFiles()}");
         foreach (var file in Directory.EnumerateFiles(source)) File.Copy(file, Path.Combine(runner, Path.GetFileName(file)));
         using var parent = Process.GetCurrentProcess();
         var request = new UpdaterRequest(AppContext.BaseDirectory, State.StagedArchive!, State.StagedHash!, parent.Id, parent.StartTime.ToUniversalTime().Ticks, restart,

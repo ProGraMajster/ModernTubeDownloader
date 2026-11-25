@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using ModernFormsNext;
+using ModernFormsNext.WindowKit.Threading;
 using ModernTubeDownloader.Batch;
 using ModernTubeDownloader.Organizer;
 using ModernTubeDownloader.Services;
@@ -26,6 +28,7 @@ internal sealed class OrganizerForm : Form
         move = Button("OrganizerMove"), pause = Button("OrganizerPause"), cancel = Button("OrganizerCancel"), close = Button("OrganizerClose"),
         refreshJournals = Button("OrganizerRefreshJournals"), recover = Button("OrganizerRecover"), undo = Button("OrganizerUndo");
     private readonly DashboardProgress progress = new() { Minimum = 0, Maximum = 1000, AccessibleAutomationId = "OrganizerProgress" };
+    private readonly ModernFormsNext.Timer progressTimer = new() { Interval = 125 };
     private readonly List<OrganizerSourceList> lists = [];
     private readonly List<OrganizerJournalSummary> recent = [];
     private readonly List<(Panel Panel, CheckBox Selected, Label Title, Label State, Button Details)> visibleRows = [];
@@ -34,7 +37,8 @@ internal sealed class OrganizerForm : Form
     private OrganizerMatch? selectedMatch;
     private CancellationTokenSource? operation;
     private bool disposed, arranging, arrangingRows, rebuilding, closeRequested;
-    private int page, selectedList = -1, progressQueued;
+    private int page, selectedList = -1;
+    private Guid? analysisOperation;
     private OrganizerProgress? latestProgress;
     public Func<Form, IDisposable?>? RegisterDialog { get; set; }
     private static Button Button(string id) => new DashboardButton { AccessibleAutomationId = id };
@@ -70,11 +74,8 @@ internal sealed class OrganizerForm : Form
         destination.TextChanged += (_, _) => { if (!rebuilding && selectedList >= 0 && selectedList < lists.Count) { lists[selectedList] = lists[selectedList] with { DestinationDirectory = destination.Text }; InvalidatePlan(); } };
         source.TextChanged += (_, _) => InvalidatePlan(); recursive.CheckedChanged += (_, _) => InvalidatePlan(); requireJson.CheckedChanged += (_, _) => InvalidatePlan();
         browseSource.Click += async (_, _) => await PickFolderAsync(source); browseDestination.Click += async (_, _) => await PickFolderAsync(destination);
-        planButton.Click += async (_, _) => await RunAsync(async token =>
-        {
-            plan = await services.Organizer.BuildPlanAsync(lists.ToArray(), source.Text, recursive.Checked, requireJson.Checked, token);
-            selection.Clear(); selectedMatch = null; page = 0; RenderRows();
-        });
+        planButton.Click += async (_, _) => await AnalyzeAsync();
+        progressTimer.Tick += (_, _) => RenderProgress();
         filter.SelectedIndexChanged += (_, _) => { if (!rebuilding) { page = 0; RenderRows(); } };
         selectPage.Click += (_, _) => { foreach (var item in Filtered().Skip(page * DownloadOrganizerService.PageSize).Take(DownloadOrganizerService.PageSize).Where(item => item.Status == OrganizerMatchStatus.Found)) selection.Add(item.Id); RenderRows(); };
         previous.Click += (_, _) => { page = Math.Max(0, page - 1); RenderRows(); }; next.Click += (_, _) => { page++; RenderRows(); };
@@ -94,63 +95,83 @@ internal sealed class OrganizerForm : Form
         Closing += (_, args) => { if (operation is not null) { args.Cancel = true; closeRequested = true; operation.Cancel(); } };
         SizeChanged += (_, _) => Arrange(); body.SizeChanged += (_, _) => Arrange(); body.ViewportChanged += (_, _) => Arrange();
         rows.ViewportChanged += (_, _) => ArrangeRows(); AppTypography.RegisterLayout(surface, Arrange);
-        OrganizerPathException? destinationError = null;
-        if (session is not null)
-            destinationError = AddList(new(session.FileName, session.OutputDirectory ?? "", Entries: session.Snapshot()));
         Localize(); RenderLists(); RenderRows(); Arrange();
         Shown += async (_, _) => await RunAsync(async token =>
         {
+            if (session is not null)
+                await PrepareListsAsync([new(session.FileName, session.OutputDirectory ?? "", Entries: session.Snapshot())], token);
             await RefreshJournalsAsync(token);
-            if (destinationError is not null) ShowError(destinationError);
         });
+    }
+
+    private async Task AnalyzeAsync()
+    {
+        if (operation is not null || disposed) return;
+        var id = Guid.NewGuid();
+        await RunAsync(async token =>
+        {
+            InvalidatePlan();
+            var result = await services.Organizer.BuildPlanAsync(lists.ToArray(), source.Text, recursive.Checked, requireJson.Checked, id, token);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (disposed) return;
+                token.ThrowIfCancellationRequested();
+                var watch = Stopwatch.StartNew();
+                SetProgress("Organizer.Phase.PreparingPreview");
+                plan = result;
+                selection.Clear();
+                selectedMatch = null;
+                page = 0;
+                try { RenderRows(); }
+                catch { plan = null; throw; }
+                SetProgress("Organizer.Phase.Planned", result.Matches.Count, result.Matches.Count);
+                services.Logger.Info($"Organizer preview prepared. OperationId={id:N} Rows={result.Matches.Count} ElapsedMs={watch.ElapsedMilliseconds}");
+            });
+        }, id);
     }
 
     private async Task AddListsAsync()
     {
-        var dialog = new OpenFileDialog { AllowMultiple = true, Title = services.Localization["Organizer.AddLists"] };
-        dialog.AddFilter("TXT / CSV / JSON", "*.txt", "*.csv", "*.json");
-        if (await dialog.ShowDialog(this) != DialogResult.OK) return;
-        await RunAsync(_ =>
+        await RunAsync(async token =>
         {
+            var dialog = new OpenFileDialog { AllowMultiple = true, Title = services.Localization["Organizer.AddLists"] };
+            dialog.AddFilter("TXT / CSV / JSON", "*.txt", "*.csv", "*.json");
+            if (await dialog.ShowDialog(this) != DialogResult.OK || disposed) return;
+            token.ThrowIfCancellationRequested();
             var files = dialog.FileNames.Distinct(StringComparer.OrdinalIgnoreCase)
                 .Where(file => !lists.Any(list => string.Equals(list.SourceFile, file, StringComparison.OrdinalIgnoreCase))).ToArray();
             if (files.Length > 100 - lists.Count) throw new IOException("Organizer.Error.Limit");
 
-            OrganizerPathException? firstError = null;
-            foreach (var file in files)
-            {
-                var error = AddList(new(Path.GetFileName(file), "", file));
-                if (firstError is null && error is not null)
-                {
-                    selectedList = lists.Count - 1;
-                    firstError = error;
-                }
-            }
-            InvalidatePlan(); RenderLists();
-            if (firstError is not null) ShowError(firstError);
-            return Task.CompletedTask;
+            await PrepareListsAsync(files.Select(file => new OrganizerSourceList(Path.GetFileName(file), "", file)).ToArray(), token);
         });
     }
 
-    private OrganizerPathException? AddList(OrganizerSourceList list)
+    private async Task PrepareListsAsync(IReadOnlyList<OrganizerSourceList> incoming, CancellationToken token)
     {
-        OrganizerPathException? failure = null;
-        if (string.IsNullOrWhiteSpace(list.DestinationDirectory))
+        var defaultRoot = source.Text;
+        var prepared = await Task.Run(() => incoming.Select(list =>
         {
+            token.ThrowIfCancellationRequested();
+            if (!string.IsNullOrWhiteSpace(list.DestinationDirectory)) return (List: list, Error: (OrganizerPathException?)null);
             try
             {
-                var stem = Path.GetFileNameWithoutExtension(list.Name);
-                var folder = DownloadOrganizerService.SuggestDestination(services.Settings.Current.FinalOutputDirectory, stem);
-                list = list with { DestinationDirectory = folder };
+                var folder = services.Organizer.SuggestDestinationWithDiagnostics(defaultRoot, Path.GetFileNameWithoutExtension(list.Name));
+                return (List: list with { DestinationDirectory = folder }, Error: (OrganizerPathException?)null);
             }
-            catch (OrganizerPathException error)
-            {
-                services.Organizer.LogFailure(nameof(DownloadOrganizerService.SuggestDestination), error);
-                failure = error;
-            }
-        }
-        lists.Add(list);
-        return failure;
+            catch (OrganizerPathException error) { return (List: list, Error: (OrganizerPathException?)error); }
+        }).ToArray(), token);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (disposed) return;
+            token.ThrowIfCancellationRequested();
+            var firstError = Array.FindIndex(prepared, item => item.Error is not null);
+            if (firstError >= 0) selectedList = lists.Count + firstError;
+            lists.AddRange(prepared.Select(item => item.List));
+            InvalidatePlan();
+            RenderLists();
+            if (firstError >= 0) ShowError(prepared[firstError].Error!);
+            else status.Text = "";
+        });
     }
 
     private async Task PickFolderAsync(TextBox target)
@@ -270,20 +291,49 @@ internal sealed class OrganizerForm : Form
         foreach (var journal in recent) journals.Items.Add($"{journal.CreatedAt.ToLocalTime():g} · {services.Localization["Organizer.Journal." + journal.State]} · {journal.EntryCount}");
         journals.SelectedIndex = recent.Count > 0 ? 0 : -1; RefreshEnabled();
     }
-    private async Task RunAsync(Func<CancellationToken, Task> action)
+    private async Task RunAsync(Func<CancellationToken, Task> action, Guid? analysisId = null)
     {
         if (operation is not null || disposed) return;
-        using var cancellation = new CancellationTokenSource(); operation = cancellation; RefreshEnabled();
-        latestProgress = null;
-        status.Text = services.Localization["Organizer.Working"];
+        using var cancellation = new CancellationTokenSource();
+        operation = cancellation;
+        analysisOperation = analysisId;
+        Interlocked.Exchange(ref latestProgress, null);
+        RefreshEnabled();
+        SetProgress(analysisId is null ? "Organizer.Working" : "Organizer.Phase.Validating");
+        progressTimer.Start();
         try { await action(cancellation.Token); }
-        catch (Exception error) { ShowError(error); }
-        finally { operation = null; if (!disposed) { services.Organizer.SetPaused(false); RefreshEnabled(); Localize(); if (closeRequested) Close(); } }
+        catch (Exception error)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (error is not OperationCanceledException) services.Organizer.LogFailure("UI", error, analysisId);
+                ShowError(error);
+            });
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (disposed) return;
+                if (analysisId is null) RenderProgress();
+                progressTimer.Stop();
+                progress.IsIndeterminate = false;
+                analysisOperation = null;
+                operation = null;
+                if (status.Text == services.Localization["Organizer.Working"]) status.Text = "";
+                services.Organizer.SetPaused(false);
+                RefreshEnabled();
+                Localize();
+                if (closeRequested) Close();
+            });
+        }
     }
     private void ShowError(Exception error)
     {
         if (disposed) return;
-        latestProgress = null;
+        Interlocked.Exchange(ref latestProgress, null);
+        progress.IsIndeterminate = false;
+        progress.Value = 0;
         var text = services.Localization;
         var reason = text[DownloadOrganizerService.SafeError(error)];
         if (error is OrganizerPathException pathError)
@@ -295,15 +345,23 @@ internal sealed class OrganizerForm : Form
         else status.Text = reason;
     }
 
-    private void ProgressChanged(object? sender, OrganizerProgress value)
+    private void ProgressChanged(object? sender, OrganizerProgress value) => Interlocked.Exchange(ref latestProgress, value);
+
+    private void RenderProgress()
     {
-        latestProgress = value; if (disposed || Interlocked.Exchange(ref progressQueued, 1) != 0) return;
-        Application.RunOnUIThread(() =>
-        {
-            Interlocked.Exchange(ref progressQueued, 0); if (disposed || operation is null || latestProgress is not { } current) return;
-            status.Text = services.Localization[current.Phase] + " · " + current.CompletedFiles + " / " + (current.TotalFiles == 0 ? "—" : current.TotalFiles.ToString()) + " · " + DashboardStyle.Bytes(current.CompletedBytes) + " / " + DashboardStyle.Bytes(current.TotalBytes) + (current.CurrentName is null ? "" : " · " + current.CurrentName);
-            progress.Value = current.TotalBytes > 0 ? (int)Math.Clamp(current.CompletedBytes * 1000d / current.TotalBytes, 0, 1000) : current.TotalFiles > 0 ? current.CompletedFiles * 1000 / current.TotalFiles : 0;
-        });
+        if (Interlocked.Exchange(ref latestProgress, null) is { } current && current.OperationId == analysisOperation)
+            SetProgress(current.Phase, current.CompletedFiles, current.TotalFiles, current.CompletedBytes, current.TotalBytes, current.CurrentName);
+        if (progress.IsIndeterminate && AppearancePresentation.Current.Global.Animations) progress.Invalidate();
+    }
+
+    private void SetProgress(string phase, int completed = 0, int total = 0, long bytes = 0, long totalBytes = 0, string? name = null)
+    {
+        progress.IsIndeterminate = total <= 0 && totalBytes <= 0 && phase != "Organizer.Phase.Planned";
+        progress.Value = totalBytes > 0 ? (int)Math.Clamp(bytes * 1000d / totalBytes, 0, 1000)
+            : total > 0 ? (int)Math.Clamp(completed * 1000d / total, 0, 1000) : 0;
+        status.Text = services.Localization[phase] + (total > 0 ? $" · {completed} / {total}" : completed > 0 ? $" · {completed}" : "") +
+            (totalBytes > 0 ? $" · {DashboardStyle.Bytes(bytes)} / {DashboardStyle.Bytes(totalBytes)}" : "") +
+            (name is null ? "" : " · " + name);
     }
     private void RefreshEnabled()
     {
@@ -392,7 +450,14 @@ internal sealed class OrganizerForm : Form
     private void LanguageChanged(object? sender, EventArgs args) => Application.RunOnUIThread(() => { if (!disposed) { Localize(); RenderRows(); if (selectedMatch is not null) ShowDetails(selectedMatch); } });
     protected override void Dispose(bool disposing)
     {
-        if (disposing && !disposed) { disposed = true; operation?.Cancel(); services.Organizer.ProgressChanged -= ProgressChanged; services.Localization.LanguageChanged -= LanguageChanged; }
+        if (disposing && !disposed)
+        {
+            disposed = true;
+            operation?.Cancel();
+            progressTimer.Dispose();
+            services.Organizer.ProgressChanged -= ProgressChanged;
+            services.Localization.LanguageChanged -= LanguageChanged;
+        }
         base.Dispose(disposing);
     }
 }

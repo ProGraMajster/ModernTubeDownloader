@@ -75,7 +75,10 @@ public sealed class OrganizerJournal
 
 public sealed record OrganizerJournalSummary(Guid Id, DateTimeOffset CreatedAt, OrganizerJournalState State, int EntryCount, string? ErrorCode);
 
-public sealed record OrganizerProgress(string Phase, int CompletedFiles, int TotalFiles, long CompletedBytes, long TotalBytes, string? CurrentName = null);
+public sealed record OrganizerProgress(string Phase, int CompletedFiles, int TotalFiles, long CompletedBytes, long TotalBytes, string? CurrentName = null)
+{
+    public Guid? OperationId { get; init; }
+}
 
 /// <summary>Test seam at durable boundaries; never used to suppress an I/O error.</summary>
 public interface IOrganizerFaultObserver

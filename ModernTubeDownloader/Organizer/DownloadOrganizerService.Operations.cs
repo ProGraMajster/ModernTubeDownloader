@@ -467,7 +467,8 @@ public sealed partial class DownloadOrganizerService
             OperationCanceledException => "Organizer.Error.Cancelled",
             UnauthorizedAccessException or System.Security.SecurityException => "Organizer.Error.Permission",
             DriveNotFoundException => "Organizer.Error.DriveUnavailable",
-            IOException { HResult: unchecked((int)0x80070015) or unchecked((int)0x80070037) or unchecked((int)0x8007048F) }
+            IOException { HResult: unchecked((int)0x8007000F) or unchecked((int)0x80070015) or unchecked((int)0x80070037)
+                or unchecked((int)0x80070458) or unchecked((int)0x8007048F) }
                 => "Organizer.Error.DriveUnavailable",
             _ => "Organizer.Error.Access"
         };

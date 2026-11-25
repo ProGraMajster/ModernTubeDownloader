@@ -2,6 +2,73 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.3.2",
+      "languages": {
+        "en": [
+          {
+            "category": "new",
+            "title": "New",
+            "items": [
+              "Update diagnostics record the installed launcher version and installer stages."
+            ]
+          },
+          {
+            "category": "improved",
+            "title": "Improvements",
+            "items": [
+              "File Organizer shows the current analysis stage and lets you cancel while it prepares a dry run."
+            ]
+          },
+          {
+            "category": "fixed",
+            "title": "Fixes",
+            "items": [
+              "The update service can run without loading the external installer assembly into the application.",
+              "File Organizer rechecks volume availability during analysis and shows a final success, error or cancellation status."
+            ]
+          },
+          {
+            "category": "limitations",
+            "title": "Known issues",
+            "items": [
+              "If updates do not work in your 1.3.1 installation, extract the new package to a new folder and keep the existing application profile."
+            ]
+          }
+        ],
+        "pl": [
+          {
+            "category": "new",
+            "title": "Nowości",
+            "items": [
+              "Diagnostyka aktualizacji zapisuje wersję instalatora i etapy instalacji."
+            ]
+          },
+          {
+            "category": "improved",
+            "title": "Ulepszenia",
+            "items": [
+              "Organizator plików pokazuje aktualny etap analizy i pozwala anulować przygotowanie podglądu."
+            ]
+          },
+          {
+            "category": "fixed",
+            "title": "Poprawki",
+            "items": [
+              "Usługa aktualizacji działa bez ładowania biblioteki zewnętrznego instalatora do aplikacji.",
+              "Organizator plików ponownie sprawdza dostępność dysku i pokazuje końcowy stan analizy."
+            ]
+          },
+          {
+            "category": "limitations",
+            "title": "Znane ograniczenia",
+            "items": [
+              "Jeśli aktualizacja w wersji 1.3.1 nie działa, rozpakuj nową paczkę do nowego folderu i zachowaj istniejący profil aplikacji."
+            ]
+          }
+        ]
+      }
+    },
+    {
       "version": "1.3.1",
       "languages": {
         "en": [

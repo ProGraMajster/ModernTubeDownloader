@@ -109,6 +109,7 @@ public sealed class OrganizerPathRegressionTests(ITestOutputHelper output)
         var unavailable = await Assert.ThrowsAsync<OrganizerPathException>(() =>
             service.BuildPlanAsync([input with { DestinationDirectory = Path.Combine(absentDrive!, "Organized") }], f.Source, false));
         Assert.Equal("Organizer.Error.DriveUnavailable", unavailable.Message);
+        Assert.IsAssignableFrom<IOException>(unavailable.InnerException?.InnerException);
         Assert.Equal("Organizer.Error.Permission", DownloadOrganizerService.SafeError(new UnauthorizedAccessException()));
     }
 
@@ -154,6 +155,36 @@ public sealed class OrganizerPathRegressionTests(ITestOutputHelper output)
             Assert.True(File.Exists(Path.Combine(nested.FullName, "video.mp4")));
         }
         finally { await SubstAsync(letter, "/D"); }
+    }
+
+    [Fact]
+    public async Task VolumeRemovedAfterScanFailsTheWholePreview()
+    {
+        await using var f = new Fixture();
+        var recording = await f.SeedAsync(queue: false);
+        var root = Enumerable.Range('R', 9).Reverse().Select(letter => $"{(char)letter}:\\")
+            .First(drive => new DriveInfo(drive).DriveType == DriveType.NoRootDirectory);
+        var letter = root[..2];
+        await SubstAsync(letter, f.Source);
+        var removed = false;
+        try
+        {
+            var service = f.Service();
+            service.ProgressChanged += (_, progress) =>
+            {
+                if (progress.Phase != "Organizer.Phase.Matching" || removed) return;
+                SubstAsync(letter, "/D").GetAwaiter().GetResult();
+                removed = true;
+            };
+            var list = new OrganizerSourceList("Fixture", f.Destination, Entries: [new() { Url = recording.SourceUrl }]);
+            var failure = await Assert.ThrowsAsync<OrganizerPathException>(() => service.BuildPlanAsync([list], root, false));
+            Assert.True(removed);
+            Assert.Equal("Organizer.Source", failure.ContextKey);
+            Assert.Equal("Organizer.Error.DriveUnavailable", failure.Message);
+            Assert.True(File.Exists(recording.FinalPath));
+            Assert.False(Directory.Exists(f.Destination));
+        }
+        finally { if (!removed) await SubstAsync(letter, "/D"); }
     }
 
     [Fact]
