@@ -195,9 +195,13 @@ public sealed partial class DownloadOrganizerService : IDisposable
         foreach (var list in lists)
         {
             token.ThrowIfCancellationRequested();
-            var destination = DirectoryFor(list.DestinationDirectory, "Organizer.Destination", list.Name, volumeChecked: trace.VolumeChecked);
+            var requested = list.RetryDestinationSuggestion
+                ? Path.Combine(scanRoot, OrganizerPathSafety.ListName(Path.GetFileNameWithoutExtension(list.Name)))
+                : list.DestinationDirectory;
+            var destination = DirectoryFor(requested, "Organizer.Destination", list.Name, volumeChecked: trace.VolumeChecked);
             if (IsProtected(destination))
                 throw new OrganizerPathException("Organizer.Destination", list.Name, new IOException("Organizer.Error.OutsideRoot"));
+            plan.ResolvedDestinations.Add(destination);
             destinations.Add(list with { DestinationDirectory = destination });
         }
         trace.Report("Organizer.Phase.ReadingLists", 0, destinations.Count);

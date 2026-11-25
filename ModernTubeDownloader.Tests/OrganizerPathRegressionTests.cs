@@ -183,6 +183,15 @@ public sealed class OrganizerPathRegressionTests(ITestOutputHelper output)
             Assert.Equal("Organizer.Error.DriveUnavailable", failure.Message);
             Assert.True(File.Exists(recording.FinalPath));
             Assert.False(Directory.Exists(f.Destination));
+
+            await SubstAsync(letter, f.Source);
+            try
+            {
+                var retry = await service.BuildPlanAsync([list with { RetryDestinationSuggestion = true, DestinationDirectory = "" }], root, false);
+                Assert.Equal(Path.Combine(root, "Fixture"), Assert.Single(retry.ResolvedDestinations));
+                Assert.Equal(OrganizerMatchStatus.Found, Assert.Single(retry.Matches).Status);
+            }
+            finally { await SubstAsync(letter, "/D"); }
         }
         finally { if (!removed) await SubstAsync(letter, "/D"); }
     }

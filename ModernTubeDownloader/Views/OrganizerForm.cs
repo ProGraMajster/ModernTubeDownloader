@@ -71,7 +71,7 @@ internal sealed class OrganizerForm : Form
         source.Text = services.Settings.Current.FinalOutputDirectory;
         add.Click += async (_, _) => await AddListsAsync(); remove.Click += (_, _) => RemoveList();
         listChoice.SelectedIndexChanged += (_, _) => SelectList();
-        destination.TextChanged += (_, _) => { if (!rebuilding && selectedList >= 0 && selectedList < lists.Count) { lists[selectedList] = lists[selectedList] with { DestinationDirectory = destination.Text }; InvalidatePlan(); } };
+        destination.TextChanged += (_, _) => { if (!rebuilding && selectedList >= 0 && selectedList < lists.Count) { lists[selectedList] = lists[selectedList] with { DestinationDirectory = destination.Text, RetryDestinationSuggestion = false }; InvalidatePlan(); } };
         source.TextChanged += (_, _) => InvalidatePlan(); recursive.CheckedChanged += (_, _) => InvalidatePlan(); requireJson.CheckedChanged += (_, _) => InvalidatePlan();
         browseSource.Click += async (_, _) => await PickFolderAsync(source); browseDestination.Click += async (_, _) => await PickFolderAsync(destination);
         planButton.Click += async (_, _) => await AnalyzeAsync();
@@ -106,8 +106,13 @@ internal sealed class OrganizerForm : Form
 
     private async Task AnalyzeAsync()
     {
-        if (operation is not null || disposed) return;
         var id = Guid.NewGuid();
+        services.Logger.Info($"Organizer analysis clicked. OperationId={id:N} Lists={lists.Count} Busy={operation is not null}");
+        if (operation is not null || disposed || lists.Count == 0)
+        {
+            services.Logger.Info($"Organizer analysis ignored. OperationId={id:N} Busy={operation is not null} Closed={disposed} Lists={lists.Count}");
+            return;
+        }
         await RunAsync(async token =>
         {
             InvalidatePlan();
@@ -118,6 +123,12 @@ internal sealed class OrganizerForm : Form
                 token.ThrowIfCancellationRequested();
                 var watch = Stopwatch.StartNew();
                 SetProgress("Organizer.Phase.PreparingPreview");
+                for (var i = 0; i < lists.Count; i++)
+                {
+                    if (lists[i].RetryDestinationSuggestion)
+                        lists[i] = lists[i] with { DestinationDirectory = result.ResolvedDestinations[i], RetryDestinationSuggestion = false };
+                }
+                SelectList();
                 plan = result;
                 selection.Clear();
                 selectedMatch = null;
@@ -158,7 +169,13 @@ internal sealed class OrganizerForm : Form
                 var folder = services.Organizer.SuggestDestinationWithDiagnostics(defaultRoot, Path.GetFileNameWithoutExtension(list.Name));
                 return (List: list with { DestinationDirectory = folder }, Error: (OrganizerPathException?)null);
             }
-            catch (OrganizerPathException error) { return (List: list, Error: (OrganizerPathException?)error); }
+            catch (OrganizerPathException error)
+            {
+                // Keep a failed automatic suggestion pending. Explicit entries
+                // and other validation failures still require user input.
+                return (List: list with { RetryDestinationSuggestion = error.Message == "Organizer.Error.DriveUnavailable" },
+                    Error: (OrganizerPathException?)error);
+            }
         }).ToArray(), token);
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
@@ -301,9 +318,11 @@ internal sealed class OrganizerForm : Form
         RefreshEnabled();
         SetProgress(analysisId is null ? "Organizer.Working" : "Organizer.Phase.Validating");
         progressTimer.Start();
+        var outcome = "Succeeded";
         try { await action(cancellation.Token); }
         catch (Exception error)
         {
+            outcome = error is OperationCanceledException ? "Cancelled" : "Failed";
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (error is not OperationCanceledException) services.Organizer.LogFailure("UI", error, analysisId);
@@ -312,6 +331,8 @@ internal sealed class OrganizerForm : Form
         }
         finally
         {
+            if (analysisId is not null)
+                services.Logger.Info($"Organizer analysis finished. OperationId={analysisId:N} Outcome={outcome}");
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (disposed) return;
