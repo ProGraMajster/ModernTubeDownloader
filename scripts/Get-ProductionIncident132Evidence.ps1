@@ -85,18 +85,27 @@ function Get-FolderEvidence([string]$Role, [string]$Requested) {
 $sessionCounts = [ordered]@{ supported = 0; explicitTerminalMarker = 0; metadataMissing = 0; invalidSchemaIdOrPhase = 0; unreadable = 0; rootUnreadable = $false }
 $batch = Join-Path $ProfileRoot 'Batch'
 try {
-    if ([IO.Directory]::Exists($batch)) {
+    $batchAttributes = try { [IO.File]::GetAttributes($batch) }
+        catch [IO.FileNotFoundException] { $null }
+        catch [IO.DirectoryNotFoundException] { $null }
+    if ($null -ne $batchAttributes) {
+        if (($batchAttributes -band [IO.FileAttributes]::ReparsePoint) -or
+            !($batchAttributes -band [IO.FileAttributes]::Directory)) { throw [IO.InvalidDataException]::new() }
         foreach ($directory in ([IO.Directory]::EnumerateDirectories($batch) | Where-Object { [IO.Path]::GetFileName($_) -match '^[0-9a-f]{32}$' })) {
             $id = [IO.Path]::GetFileName($directory)
             $metadata = Join-Path $directory 'session.json'
             try {
                 if ([IO.File]::GetAttributes($directory) -band [IO.FileAttributes]::ReparsePoint) { throw [IO.InvalidDataException]::new() }
-                if (![IO.File]::Exists($metadata)) {
+                $metadataAttributes = try { [IO.File]::GetAttributes($metadata) }
+                    catch [IO.FileNotFoundException] { $null }
+                    catch [IO.DirectoryNotFoundException] { $null }
+                if ($null -eq $metadataAttributes) {
                     if ([IO.File]::Exists((Join-Path $directory 'import-terminal.json'))) { $sessionCounts.explicitTerminalMarker++ }
                     else { $sessionCounts.metadataMissing++ }
                     continue
                 }
-                if (([IO.FileInfo]::new($metadata)).Length -gt 1MB) { throw [IO.InvalidDataException]::new() }
+                if (($metadataAttributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) -or
+                    ([IO.FileInfo]::new($metadata)).Length -gt 1MB) { throw [IO.InvalidDataException]::new() }
                 $session = [IO.File]::ReadAllText($metadata) | ConvertFrom-Json
                 $sessionId = [guid]::Empty
                 if ($session.schemaVersion -ne 1 -or ![guid]::TryParse([string]$session.id, [ref]$sessionId) -or
