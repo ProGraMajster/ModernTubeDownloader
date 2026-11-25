@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Models;
@@ -103,7 +104,7 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
                     { AdditionalData = PreserveFields(prior.RequestedRange.AdditionalData, updated.RequestedRange?.AdditionalData) } };
             }
             next.Add(updated.PersistenceCopy());
-            await AtomicJsonFile.WriteAsync(paths.HistoryFile, next, cancellationToken).ConfigureAwait(false);
+            await WriteHistoryAsync(next, cancellationToken).ConfigureAwait(false);
             hasObservedFile = true;
             lock (sync) { entries.Clear(); entries.AddRange(next); }
         }
@@ -122,7 +123,7 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
             List<DownloadHistoryEntry> next;
             lock (sync) next = entries.Select(entry => lookup.TryGetValue(entry.FinalPath, out var path)
                 ? entry with { FinalPath = path } : entry).ToList();
-            await AtomicJsonFile.WriteAsync(paths.HistoryFile, next, cancellationToken).ConfigureAwait(false);
+            await WriteHistoryAsync(next, cancellationToken).ConfigureAwait(false);
             hasObservedFile = true;
             lock (sync) { entries.Clear(); entries.AddRange(next); }
         }
@@ -136,13 +137,23 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
         try
         {
             EnsureWritable();
-            await AtomicJsonFile.WriteAsync(paths.HistoryFile, Snapshot(), cancellationToken).ConfigureAwait(false);
+            await WriteHistoryAsync(Snapshot(), cancellationToken).ConfigureAwait(false);
             hasObservedFile = true;
         }
         finally
         {
             saveGate.Release();
         }
+    }
+
+    private async Task WriteHistoryAsync(IReadOnlyList<DownloadHistoryEntry> snapshot, CancellationToken token)
+    {
+        var measured = logger.IsEnabled(DiagnosticLevel.Debug);
+        var started = measured ? Stopwatch.GetTimestamp() : 0;
+        await AtomicJsonFile.WriteAsync(paths.HistoryFile, snapshot, token).ConfigureAwait(false);
+        if (measured) logger.Event(new(DiagnosticModule.History, DiagnosticStage.Save, DiagnosticOutcome.Completed,
+            DiagnosticLevel.Debug, DurationMs: (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+            Counts: new(Items: snapshot.Count)));
     }
 
     private void EnsureWritable()

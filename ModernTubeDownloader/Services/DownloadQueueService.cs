@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Models;
 
@@ -398,7 +399,7 @@ public sealed class DownloadQueueService
                     if (item.FinalFile is { } file && lookup.TryGetValue(file, out var destination)) item.FinalFile = destination;
                 writingRevision = revision;
             }
-            try { await persistence.SaveAsync(snapshot, token).ConfigureAwait(false); }
+            try { await WriteQueueAsync(snapshot, token).ConfigureAwait(false); }
             catch (Exception error) { ReportPersistenceFailure(error); throw; }
             lock (sync)
             {
@@ -426,13 +427,23 @@ public sealed class DownloadQueueService
             {
                 DownloadQueueItem[] snapshot; long writingRevision;
                 lock (sync) { snapshot = items.Select(item => item.PersistenceCopy()).ToArray(); writingRevision = revision; }
-                await persistence.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
+                await WriteQueueAsync(snapshot, cancellationToken).ConfigureAwait(false);
                 lock (sync) savedRevision = writingRevision;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception error) { ReportPersistenceFailure(error); throw; }
         }
         finally { checkpointGate.Release(); }
+    }
+
+    private async Task WriteQueueAsync(DownloadQueueItem[] snapshot, CancellationToken token)
+    {
+        var measured = logger.IsEnabled(DiagnosticLevel.Debug);
+        var started = measured ? Stopwatch.GetTimestamp() : 0;
+        await persistence.SaveAsync(snapshot, token).ConfigureAwait(false);
+        if (measured) logger.Event(new(DiagnosticModule.Queue, DiagnosticStage.Save, DiagnosticOutcome.Completed,
+            DiagnosticLevel.Debug, DurationMs: (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+            Counts: new(Items: snapshot.Length)));
     }
 
     /// <summary>Explicit recovery only: probe, durable runtime checkpoint, then reopen admission.</summary>

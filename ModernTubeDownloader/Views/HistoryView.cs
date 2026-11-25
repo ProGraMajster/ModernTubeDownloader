@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ModernFormsNext;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Localization;
@@ -178,6 +179,19 @@ internal sealed partial class HistoryView : UserControl
         var all = services.History.Snapshot();
         var useDashboard = dashboard; var filter = dashboardFilter; var dateDays = days; var ascending = oldestFirst;
         var dateCutoff = dateDays == 0 ? DateTimeOffset.MinValue : DateTimeOffset.UtcNow.AddDays(-dateDays);
+        var logger = services.Logger;
+        var measured = logger.IsEnabled(DiagnosticLevel.Debug);
+        var operation = measured ? Guid.NewGuid() : (Guid?)null;
+        var started = measured ? Stopwatch.GetTimestamp() : 0;
+        void Record(DiagnosticOutcome outcome, int? matches = null, Exception? error = null)
+        {
+            if (measured || error is not null)
+                logger.Event(new(DiagnosticModule.History, DiagnosticStage.Match, outcome,
+                    error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Error, operation,
+                    DurationMs: measured ? (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds : null,
+                    Exception: error, Counts: new(Total: all.Count, Matches: matches)));
+        }
+        Record(DiagnosticOutcome.Started);
         try
         {
             // No controls, IO or callbacks on the worker; stale projections cannot publish.
@@ -192,16 +206,22 @@ internal sealed partial class HistoryView : UserControl
                 { token.ThrowIfCancellationRequested(); counts[id] = all.Count(e => e.CompletedAt >= dateCutoff && MatchesFilter(e,id)); }
                 return (matches, counts);
             }, token).ConfigureAwait(false);
+            Record(DiagnosticOutcome.Completed, result.matches.Length);
             Application.RunOnUIThread(() =>
             {
-                if (disposed || token.IsCancellationRequested || version != generation || !Visible) return;
+                if (disposed || token.IsCancellationRequested || version != generation || !Visible)
+                {
+                    if (measured) logger.Event(new(DiagnosticModule.History, DiagnosticStage.Controls, DiagnosticOutcome.Cancelled,
+                        DiagnosticLevel.Debug, operation));
+                    return;
+                }
                 filtered = result.matches; filterCounts = result.counts; historySnapshot = all; total = all.Count; dirty = false;
                 page = HistoryPage.Clamp(page, filtered.Length);
-                RenderPage();
+                RenderPage(operation);
             });
         }
-        catch (OperationCanceledException) { }
-        catch (Exception error) { services.Logger.Error("History projection failed.", error); }
+        catch (OperationCanceledException) { Record(DiagnosticOutcome.Cancelled); }
+        catch (Exception error) { Record(DiagnosticOutcome.Failed, error: error); }
     }
 
     private void ChangePage(int delta)
@@ -216,8 +236,10 @@ internal sealed partial class HistoryView : UserControl
         list.VerticalScrollProperties.Value = 0;
     }
 
-    private void RenderPage()
+    private void RenderPage(Guid? operation = null)
     {
+        var measured = services.Logger.IsEnabled(DiagnosticLevel.Debug);
+        var started = measured ? Stopwatch.GetTimestamp() : 0;
         using var timing = PerformanceDiagnostics.Measure("history.page.render");
         UiCrashDiagnostics.VerifyUiThread("history.page");
         var entries = filtered.Skip(page * HistoryPage.Size).Take(HistoryPage.Size).ToArray();
@@ -270,6 +292,9 @@ internal sealed partial class HistoryView : UserControl
         PerformanceDiagnostics.Set("history.visible", entries.Length);
         PerformanceDiagnostics.Set("history.matches", filtered.Length);
         PerformanceDiagnostics.Emit("history.page.ready");
+        if (measured) services.Logger.Event(new(DiagnosticModule.History, DiagnosticStage.Controls, DiagnosticOutcome.Completed,
+            DiagnosticLevel.Debug, operation, DurationMs: (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+            Counts: new(Items: entries.Length, Total: total, Matches: filtered.Length)));
     }
 
     private void ResizeCards()

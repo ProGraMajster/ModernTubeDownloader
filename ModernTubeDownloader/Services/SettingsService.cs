@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Settings;
 using ModernTubeDownloader.Authentication;
@@ -16,6 +17,7 @@ public sealed class SettingsService(AppPaths paths, IAppLogger logger)
 
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
+        var started = Stopwatch.GetTimestamp();
         try
         {
             // File.Exists also returns false for access errors. Only an actual missing
@@ -40,6 +42,9 @@ public sealed class SettingsService(AppPaths paths, IAppLogger logger)
             Normalize(Current);
             if (json is not null) UpdatePolicyNeedsConsent = Current.Updates.PolicyVersion < 1 && Current.Updates.AutomaticChecks && Current.Updates.Mode == UpdateInstallMode.NotifyOnly;
             LogSanitizer.RegisterCookieFilePath(Current.CookieFilePath);
+            logger.Event(new(DiagnosticModule.Settings, DiagnosticStage.Load, DiagnosticOutcome.Completed,
+                DurationMs: (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                Counts: new(Context: json is null ? 0 : 1)));
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -60,10 +65,13 @@ public sealed class SettingsService(AppPaths paths, IAppLogger logger)
         LogSanitizer.RegisterCookieFilePath(Current.CookieFilePath);
         if (Current.UseCookieFile)
             Current.CookieFilePath = CookieFileService.Validate(Current.CookieFilePath);
+        var started = Stopwatch.GetTimestamp();
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await AtomicJsonFile.WriteAsync(paths.SettingsFile, Current, cancellationToken).ConfigureAwait(false);
+            logger.Event(new(DiagnosticModule.Settings, DiagnosticStage.Save, DiagnosticOutcome.Completed, DiagnosticLevel.Debug,
+                DurationMs: (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds));
         }
         finally
         {

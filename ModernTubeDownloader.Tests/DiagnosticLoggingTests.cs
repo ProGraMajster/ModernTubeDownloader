@@ -37,7 +37,10 @@ public sealed class DiagnosticLoggingTests
         var state = new SettingsService(fixture.Paths, new NullAppLogger());
         await state.LoadAsync();
         Assert.True(state.Current.Diagnostics.Advanced && state.Current.Diagnostics.IncludeTrace);
-        Assert.Equal(new long?[] { 20, 40 }, Read(root).Select(x => x.Counts?.Items).Order().ToArray());
+        var rows = Read(root);
+        Assert.Contains(rows, x => x is { Module: DiagnosticModule.Settings, Stage: DiagnosticStage.Load, Outcome: DiagnosticOutcome.Completed });
+        Assert.Equal(new long?[] { 20, 40 }, rows.Where(x => x is { Module: DiagnosticModule.Application, Stage: DiagnosticStage.Run })
+            .Select(x => x.Counts?.Items).Order().ToArray());
     }
 
     [Fact]
