@@ -24,6 +24,7 @@ public sealed class AppSettings
     public Dictionary<string, System.Text.Json.JsonElement>? AdditionalSettings { get; set; }
     public StartupSettings Startup { get; set; } = new();
     public UpdateSettings Updates { get; set; } = new();
+    public DiagnosticSettings Diagnostics { get; set; } = new();
     public NotificationSettings Notifications { get; set; } = new();
     public AppThemeMode ThemeMode { get; set; } = AppThemeMode.System;
     public string Language { get; set; } = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.Equals("pl", StringComparison.OrdinalIgnoreCase)

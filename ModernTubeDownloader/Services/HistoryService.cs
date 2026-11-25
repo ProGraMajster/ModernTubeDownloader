@@ -14,6 +14,7 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
 
     public event EventHandler? Changed;
     public bool LoadFailed { get; private set; }
+    internal int Count { get { lock (sync) return entries.Count; } }
 
     public IReadOnlyList<DownloadHistoryEntry> Snapshot()
     {

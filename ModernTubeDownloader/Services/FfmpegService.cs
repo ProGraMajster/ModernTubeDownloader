@@ -112,7 +112,7 @@ public sealed class FfmpegService(
         }
 
         var result = await processRunner.RunAsync(
-            new ProcessRunRequest(tool.ExecutablePath, arguments, StandardOutputLine: HandleProgress, StandardErrorLine: line => logger.Info($"ffmpeg: {line}")),
+            new ProcessRunRequest(tool.ExecutablePath, arguments, StandardOutputLine: HandleProgress),
             cancellationToken).ConfigureAwait(false);
 
         if (!result.IsSuccess)
@@ -155,7 +155,7 @@ public sealed class FfmpegService(
         }
 
         var result = await processRunner.RunAsync(
-            new ProcessRunRequest(tool.ExecutablePath, arguments, StandardOutputLine: HandleProgress, StandardErrorLine: line => logger.Info($"ffmpeg: {line}")),
+            new ProcessRunRequest(tool.ExecutablePath, arguments, StandardOutputLine: HandleProgress),
             cancellationToken).ConfigureAwait(false);
         if (!result.IsSuccess)
             throw new ExternalProcessException(ErrorMessageTranslator.FromFfmpeg(result.StandardErrorText), result);

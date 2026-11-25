@@ -324,6 +324,14 @@ function Test-UpdaterCase([string]$CaseDirectory, [ValidateSet('ParentGate', 'Lo
         Assert-Condition ($helper.process.ExitCode -eq $expectedExit) "Unexpected updater exit code: $($helper.process.ExitCode), expected $expectedExit."
         Assert-Condition ([IO.File]::Exists($requestPath + '.result.json')) 'Updater did not write its result.'
         $result = Get-Content -LiteralPath ($requestPath + '.result.json') -Raw | ConvertFrom-Json
+        $diagnostics = @(Get-Content -LiteralPath ($requestPath + '.diagnostics.jsonl') | ForEach-Object { ConvertFrom-Json -InputObject $_ })
+        Assert-Condition ($diagnostics.Count -ge 4) 'Installer did not record its independent structured startup.'
+        $operationIds = @($diagnostics.operationId | Sort-Object -Unique)
+        Assert-Condition ($operationIds.Count -eq 1 -and $operationIds[0]) 'Installer did not retain one operation identity.'
+        Assert-Condition (@($diagnostics | Where-Object { $_.module -eq 'Updater' -and $_.stage -eq 'WaitForParent' -and $_.outcome -eq 'Started' }).Count -eq 1) 'Installer wait stage not logged.'
+        if ($Kind -eq 'LockedDll') {
+            Assert-Condition (@($diagnostics | Where-Object { $_.stage -eq 'Rollback' -and $_.outcome -eq 'Completed' }).Count -eq 1) 'Installer rollback stage not logged.'
+        }
         Assert-Condition ($result.success -is [bool] -and $result.success -eq $expectedSuccess) 'Updater result does not match the expected transaction outcome.'
         Assert-Condition ($helper.stdout.GetAwaiter().GetResult().Length -eq 0 -and $helper.stderr.GetAwaiter().GetResult().Length -eq 0) 'Updater produced unexpected console output.'
         $journalPath = Join-Path $installation '.mtd-update-backup/journal.json'

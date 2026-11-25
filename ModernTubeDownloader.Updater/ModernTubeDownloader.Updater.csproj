@@ -9,4 +9,7 @@
     <PublishSingleFile>false</PublishSingleFile>
     <PublishReadyToRun>false</PublishReadyToRun>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\ModernTubeDownloader\Infrastructure\DiagnosticEvent.cs" Link="Diagnostics\DiagnosticEvent.cs" />
+  </ItemGroup>
 </Project>

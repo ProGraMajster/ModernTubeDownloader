@@ -238,7 +238,9 @@ public sealed class QueueProcessor : IDisposable
                         current.FailureCategory = null;
                         current.FailureHttpStatus = null;
                     }, true);
-                    logger.Info($"Download completed QueueItemId={item.Id} Attempt={attempt} DurationMs={(timing.UtcNow - started).TotalMilliseconds:F0} Status={item.Status}");
+                    logger.Event(new(DiagnosticModule.Downloads, DiagnosticStage.Run, DiagnosticOutcome.Completed,
+                        OperationId: item.Id, DurationMs: (long)(timing.UtcNow - started).TotalMilliseconds,
+                        Counts: new(Items: attempt, Code: (int)item.Status)));
                     return;
                 }
                 catch (OperationCanceledException) { throw; }
@@ -249,7 +251,10 @@ public sealed class QueueProcessor : IDisposable
                     var stage = item.Status;
                     var failure = DownloadFailureClassifier.Classify(ex, stage);
                     var retry = failure.Retryable && attempt < maxAttempts;
-                    logger.Error($"Download failed QueueItemId={item.Id} MediaId={item.VideoId} Stage={stage} Attempt={attempt} MaxAttempts={maxAttempts} QualityPreset={item.QualityPresetId} Container={item.PreferredVideoContainer} VideoFormatId={item.SelectedFormats?.VideoFormatId ?? "unresolved"} AudioFormatId={item.SelectedFormats?.AudioFormatId ?? "none"} FailureCategory={failure.Category} HttpStatus={failure.HttpStatus?.ToString() ?? "none"} ExitCode={failure.ExitCode?.ToString() ?? "none"} Retryable={failure.Retryable} DurationMs={(timing.UtcNow - started).TotalMilliseconds:F0}", ex);
+                    logger.Event(new(DiagnosticModule.Downloads, DiagnosticStage.Run, DiagnosticOutcome.Failed, DiagnosticLevel.Error,
+                        item.Id, DurationMs: (long)(timing.UtcNow - started).TotalMilliseconds, Exception: ex,
+                        Counts: new(Items: attempt, Total: maxAttempts, Code: (int)failure.Category, HttpStatus: failure.HttpStatus,
+                            ExitCode: failure.ExitCode, Context: (int)stage)));
                     if (!retry)
                     {
                         queue.Update(item.Id, current =>

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using ModernFormsNext;
 using ModernFormsNext.WindowKit.Threading;
 using ModernTubeDownloader.Batch;
+using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Organizer;
 using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Theming;
@@ -98,6 +99,7 @@ internal sealed class OrganizerForm : Form
         Localize(); RenderLists(); RenderRows(); Arrange();
         Shown += async (_, _) => await RunAsync(async token =>
         {
+            services.Logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Startup, DiagnosticOutcome.Completed));
             if (session is not null)
                 await PrepareListsAsync([new(session.FileName, session.OutputDirectory ?? "", Entries: session.Snapshot())], token);
             await RefreshJournalsAsync(token);
@@ -107,20 +109,28 @@ internal sealed class OrganizerForm : Form
     private async Task AnalyzeAsync()
     {
         var id = Guid.NewGuid();
-        services.Logger.Info($"Organizer analysis clicked. OperationId={id:N} Lists={lists.Count} Busy={operation is not null}");
+        services.Logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Preview, DiagnosticOutcome.Requested,
+            OperationId: id, Counts: new(Items: lists.Count, Context: string.IsNullOrWhiteSpace(source.Text) ? 0 : 1,
+                Missing: lists.Count(list => string.IsNullOrWhiteSpace(list.DestinationDirectory)))));
         if (operation is not null || disposed || lists.Count == 0)
         {
-            services.Logger.Info($"Organizer analysis ignored. OperationId={id:N} Busy={operation is not null} Closed={disposed} Lists={lists.Count}");
+            services.Logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Preview, DiagnosticOutcome.Denied,
+                DiagnosticLevel.Warn, id, Counts: new(Code: operation is not null ? 1 : disposed ? 2 : 3)));
             return;
         }
         await RunAsync(async token =>
         {
             InvalidatePlan();
             var result = await services.Organizer.BuildPlanAsync(lists.ToArray(), source.Text, recursive.Checked, requireJson.Checked, id, token);
+            services.Logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Dispatcher, DiagnosticOutcome.Requested,
+                DiagnosticLevel.Debug, id));
+            var dispatch = Stopwatch.StartNew();
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (disposed) return;
                 token.ThrowIfCancellationRequested();
+                services.Logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Dispatcher, DiagnosticOutcome.Started,
+                    DiagnosticLevel.Debug, id, Counts: new(WaitMs: dispatch.ElapsedMilliseconds)));
                 var watch = Stopwatch.StartNew();
                 SetProgress("Organizer.Phase.PreparingPreview");
                 for (var i = 0; i < lists.Count; i++)
@@ -136,7 +146,8 @@ internal sealed class OrganizerForm : Form
                 try { RenderRows(); }
                 catch { plan = null; throw; }
                 SetProgress("Organizer.Phase.Planned", result.Matches.Count, result.Matches.Count);
-                services.Logger.Info($"Organizer preview prepared. OperationId={id:N} Rows={result.Matches.Count} ElapsedMs={watch.ElapsedMilliseconds}");
+                services.Logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Dispatcher, DiagnosticOutcome.Completed,
+                    DiagnosticLevel.Info, id, DurationMs: watch.ElapsedMilliseconds, Counts: new(Items: result.Matches.Count)));
             });
         }, id);
     }
@@ -318,11 +329,12 @@ internal sealed class OrganizerForm : Form
         RefreshEnabled();
         SetProgress(analysisId is null ? "Organizer.Working" : "Organizer.Phase.Validating");
         progressTimer.Start();
-        var outcome = "Succeeded";
+        var outcome = DiagnosticOutcome.Completed;
+        var elapsed = Stopwatch.StartNew();
         try { await action(cancellation.Token); }
         catch (Exception error)
         {
-            outcome = error is OperationCanceledException ? "Cancelled" : "Failed";
+            outcome = error is OperationCanceledException ? DiagnosticOutcome.Cancelled : DiagnosticOutcome.Failed;
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (error is not OperationCanceledException) services.Organizer.LogFailure("UI", error, analysisId);
@@ -331,8 +343,6 @@ internal sealed class OrganizerForm : Form
         }
         finally
         {
-            if (analysisId is not null)
-                services.Logger.Info($"Organizer analysis finished. OperationId={analysisId:N} Outcome={outcome}");
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (disposed) return;
@@ -345,6 +355,10 @@ internal sealed class OrganizerForm : Form
                 services.Organizer.SetPaused(false);
                 RefreshEnabled();
                 Localize();
+                if (analysisId is { } id)
+                    services.Logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Preview, outcome,
+                        outcome == DiagnosticOutcome.Failed ? DiagnosticLevel.Warn : DiagnosticLevel.Info, id,
+                        DurationMs: elapsed.ElapsedMilliseconds, Counts: new(Items: plan?.Matches.Count)));
                 if (closeRequested) Close();
             });
         }
@@ -356,7 +370,8 @@ internal sealed class OrganizerForm : Form
         progress.IsIndeterminate = false;
         progress.Value = 0;
         var text = services.Localization;
-        var reason = text[DownloadOrganizerService.SafeError(error)];
+        var reason = error is OperationCanceledException && analysisOperation is not null
+            ? text["Downloads.AnalysisCancelled"] : text[DownloadOrganizerService.SafeError(error)];
         if (error is OrganizerPathException pathError)
         {
             var context = text[pathError.ContextKey];
@@ -473,6 +488,7 @@ internal sealed class OrganizerForm : Form
     {
         if (disposing && !disposed)
         {
+            services.Logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Shutdown, DiagnosticOutcome.Completed));
             disposed = true;
             operation?.Cancel();
             progressTimer.Dispose();

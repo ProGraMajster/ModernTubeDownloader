@@ -64,8 +64,7 @@ public sealed partial class DownloadOrganizerService : IDisposable
         var operationId = Guid.NewGuid();
         try
         {
-            return SuggestDestination(root, listName, (type, result) =>
-                logger.Info($"Organizer destination volume check. OperationId={operationId:N} Type={type} Result={result}"));
+            return SuggestDestination(root, listName, (type, result) => LogVolume(logger, operationId, type, result));
         }
         catch (OrganizerPathException error)
         {
@@ -92,12 +91,27 @@ public sealed partial class DownloadOrganizerService : IDisposable
 
     internal void LogFailure(string operation, Exception error, Guid? operationId = null)
     {
-        var path = error as OrganizerPathException;
-        var cause = path?.InnerException ?? error;
-        var native = cause.InnerException ?? cause;
-        logger.Warning($"Organizer {operation} failed. OperationId={operationId?.ToString("N") ?? "-"} Context={path?.ContextKey ?? "-"} " +
-            $"Reason={SafeError(error)} Type={native.GetType().Name} HResult=0x{native.HResult:X8} " +
-            $"Origin={native.TargetSite?.DeclaringType?.Name}.{native.TargetSite?.Name}");
+        var code = SafeError(error) switch
+        {
+            "Organizer.Error.DriveUnavailable" => 1, "Organizer.Error.FolderMissing" => 2,
+            "Organizer.Error.Permission" => 3, "Organizer.Error.PathType" => 4, "Organizer.Error.NotDirectory" => 5,
+            "Organizer.Error.Reparse" => 6, "Organizer.Error.PathTraversal" => 7, "Organizer.Error.OutsideRoot" => 8, _ => 0
+        };
+        var context = (error as OrganizerPathException)?.ContextKey switch
+        {
+            "Organizer.Source" => 1, "Organizer.Destination" => 2, "Organizer.Error.OutputFolder" => 3,
+            "Organizer.Error.ListFolder" => 4, "Organizer.Error.InputList" => 5, _ => 0
+        };
+        logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Validate, DiagnosticOutcome.Failed,
+            DiagnosticLevel.Warn, operationId, Exception: error, Counts: new(Code: code, Context: context)));
+    }
+
+    private static void LogVolume(IAppLogger logger, Guid id, DriveType type, string result)
+    {
+        logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Validate,
+            result == "Accessible" ? DiagnosticOutcome.Completed : DiagnosticOutcome.Unavailable,
+            result == "Accessible" ? DiagnosticLevel.Debug : DiagnosticLevel.Warn, id,
+            Counts: new(Code: (int)type, Context: result switch { "Accessible" => 1, "Network" => 2, "RootAttributesFailed" => 3, _ => 4 })));
     }
     public void SetPaused(bool value)
     {
@@ -142,23 +156,33 @@ public sealed partial class DownloadOrganizerService : IDisposable
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
                 var entered = false;
                 var elapsed = Stopwatch.StartNew();
-                var outcome = "Failed";
-                if (operationId is not null) logger.Info($"Organizer {operationName} started. OperationId={operationId:N}");
+                var outcome = DiagnosticOutcome.Failed;
+                var id = operationId ?? Guid.NewGuid();
+                var stage = operationName switch
+                {
+                    "BuildPlanAsync" => DiagnosticStage.Plan, "MoveSelectedAsync" => DiagnosticStage.Move,
+                    "UndoAsync" => DiagnosticStage.Undo, "RecoverAsync" => DiagnosticStage.Recover, _ => DiagnosticStage.Run
+                };
+                var waitMs = 0L;
+                logger.Event(new(DiagnosticModule.Organizer, stage, DiagnosticOutcome.Requested, OperationId: id));
                 try
                 {
-                    await operationGate.WaitAsync(linked.Token).ConfigureAwait(false); entered = true;
+                    await operationGate.WaitAsync(linked.Token).ConfigureAwait(false);
+                    entered = true;
+                    waitMs = elapsed.ElapsedMilliseconds;
+                    logger.Event(new(DiagnosticModule.Organizer, stage, DiagnosticOutcome.Started, OperationId: id, Counts: new(WaitMs: waitMs)));
                     var result = await operation(linked.Token).ConfigureAwait(false);
-                    outcome = "Succeeded";
+                    outcome = DiagnosticOutcome.Completed;
                     return result;
                 }
                 catch (OperationCanceledException) when (linked.IsCancellationRequested)
                 {
-                    outcome = "Cancelled";
+                    outcome = DiagnosticOutcome.Cancelled;
                     throw;
                 }
                 catch (Exception error)
                 {
-                    LogFailure(operationName, error, operationId);
+                    LogFailure(operationName, error, id);
                     throw;
                 }
                 finally
@@ -166,8 +190,9 @@ public sealed partial class DownloadOrganizerService : IDisposable
                     if (entered) operationGate.Release();
                     Interlocked.Decrement(ref activeCount);
                     SetPaused(false);
-                    if (operationId is not null)
-                        logger.Info($"Organizer {operationName} finished. OperationId={operationId:N} Outcome={outcome} ElapsedMs={elapsed.ElapsedMilliseconds}");
+                    logger.Event(new(DiagnosticModule.Organizer, stage, outcome,
+                        outcome == DiagnosticOutcome.Failed ? DiagnosticLevel.Warn : DiagnosticLevel.Info, id,
+                        DurationMs: elapsed.ElapsedMilliseconds, Counts: new(WaitMs: waitMs)));
                 }
             });
             activeTasks.Add(task);
@@ -209,7 +234,7 @@ public sealed partial class DownloadOrganizerService : IDisposable
         foreach (var list in destinations)
         {
             await PauseBoundary(token).ConfigureAwait(false);
-            var rows = list.Entries ?? await ReadListAsync(list, token).ConfigureAwait(false);
+            var rows = list.Entries ?? await ReadListAsync(list, operationId, token).ConfigureAwait(false);
             if (rows.Count > MaximumPlanEntries - trace.LinkCount) throw new IOException("Organizer.Error.Limit");
             trace.LinkCount += rows.Count;
             input.Add((list, rows));
@@ -220,6 +245,7 @@ public sealed partial class DownloadOrganizerService : IDisposable
         var directories = new Stack<string>(); directories.Push(scanRoot);
         while (directories.TryPop(out var directory))
         {
+            trace.DirectoryCount++;
             await PauseBoundary(token).ConfigureAwait(false);
             try
             {
@@ -250,7 +276,11 @@ public sealed partial class DownloadOrganizerService : IDisposable
         var byStem = media.GroupBy(file => Path.Combine(Path.GetDirectoryName(file)!, Path.GetFileNameWithoutExtension(file)), OrganizerPathSafety.Comparer)
             .ToDictionary(group => group.Key, group => group.ToArray(), OrganizerPathSafety.Comparer);
         var known = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var sourceRead = Stopwatch.StartNew();
         var historyRows = history.Snapshot(); var queueRows = queue.Snapshot();
+        logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Load, DiagnosticOutcome.Completed,
+            DiagnosticLevel.Debug, operationId, DurationMs: sourceRead.ElapsedMilliseconds,
+            Counts: new(History: historyRows.Count, Queue: queueRows.Count)));
         var lookup = new PlanLookup(historyRows.GroupBy(entry => entry.FinalPath, OrganizerPathSafety.Comparer)
             .ToDictionary(group => group.Key, group => group.ToArray(), OrganizerPathSafety.Comparer),
             queueRows.Where(item => item.FinalFile is not null).GroupBy(item => item.FinalFile!, OrganizerPathSafety.Comparer)
@@ -327,6 +357,14 @@ public sealed partial class DownloadOrganizerService : IDisposable
             token.ThrowIfCancellationRequested();
             DirectoryFor(list.DestinationDirectory, "Organizer.Destination", list.Name, volumeChecked: trace.VolumeChecked);
         }
+        if (logger.IsEnabled(DiagnosticLevel.Debug))
+            logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Match, DiagnosticOutcome.Completed, DiagnosticLevel.Debug, operationId,
+                Counts: new(Items: plan.Matches.Count, Matches: plan.Matches.Count(x => x.Status == OrganizerMatchStatus.Found),
+                    Missing: plan.Matches.Count(x => x.Status == OrganizerMatchStatus.Missing),
+                    Duplicates: plan.Matches.Count(x => x.Status == OrganizerMatchStatus.Duplicate),
+                    Errors: plan.Matches.Count(x => x.Status == OrganizerMatchStatus.Invalid),
+                    Conflicts: plan.Matches.Count(x => x.Status == OrganizerMatchStatus.Conflict),
+                    MediaFiles: plan.ScannedMediaFiles, MetadataFiles: lookup.Sidecars.Count)));
         return plan;
     }
 
@@ -335,8 +373,17 @@ public sealed partial class DownloadOrganizerService : IDisposable
         private readonly Stopwatch stageClock = Stopwatch.StartNew();
         private readonly HashSet<(DriveType Type, string Result)> volumes = [];
         private string phase = "";
-        private long lastProgress;
+        private long lastProgress, lastLogged;
         public int LinkCount { get; set; }
+        public int DirectoryCount { get; set; }
+        private DiagnosticStage Stage => phase switch
+        {
+            "Organizer.Phase.Validating" => DiagnosticStage.Validate,
+            "Organizer.Phase.ReadingLists" => DiagnosticStage.Import,
+            "Organizer.Phase.Scanning" => DiagnosticStage.Scan,
+            "Organizer.Phase.Matching" => DiagnosticStage.Match,
+            _ => DiagnosticStage.Plan
+        };
 
         public void VolumeChecked(DriveType driveType, string result) => volumes.Add((driveType, result));
 
@@ -347,25 +394,32 @@ public sealed partial class DownloadOrganizerService : IDisposable
                 FinishStage();
                 phase = nextPhase;
                 stageClock.Restart();
-                logger.Info($"Organizer stage started. OperationId={plan.Id:N} Stage={phase}");
+                logger.Event(new(DiagnosticModule.Organizer, Stage, DiagnosticOutcome.Started, DiagnosticLevel.Debug, plan.Id));
             }
             else if (Stopwatch.GetElapsedTime(lastProgress) < TimeSpan.FromMilliseconds(125) && (total == 0 || completed < total)) return;
             lastProgress = Stopwatch.GetTimestamp();
+            if (logger.IsEnabled(DiagnosticLevel.Trace) && Stopwatch.GetElapsedTime(lastLogged).TotalSeconds >= 2)
+            {
+                lastLogged = lastProgress;
+                logger.Event(new(DiagnosticModule.Organizer, Stage, DiagnosticOutcome.Progress, DiagnosticLevel.Trace, plan.Id,
+                    Counts: new(Items: completed, Total: total, Files: plan.ScannedFiles, Directories: DirectoryCount)));
+            }
             publish(new OrganizerProgress(phase, completed, total, 0, 0) { OperationId = plan.Id });
         }
 
         private void FinishStage()
         {
             if (phase.Length > 0)
-                logger.Info($"Organizer stage finished. OperationId={plan.Id:N} Stage={phase} ElapsedMs={stageClock.ElapsedMilliseconds} " +
-                    $"Lists={listCount} Links={LinkCount} ScannedFiles={plan.ScannedFiles}");
+                logger.Event(new(DiagnosticModule.Organizer, Stage, DiagnosticOutcome.Completed, DiagnosticLevel.Debug, plan.Id,
+                    DurationMs: stageClock.ElapsedMilliseconds,
+                    Counts: new(Items: LinkCount, Total: listCount, Files: plan.ScannedFiles, Directories: DirectoryCount)));
         }
 
         public void Dispose()
         {
             FinishStage();
             foreach (var (type, result) in volumes)
-                logger.Info($"Organizer volume check. OperationId={plan.Id:N} Type={type} Result={result}");
+                LogVolume(logger, plan.Id, type, result);
         }
     }
 
@@ -395,10 +449,17 @@ public sealed partial class DownloadOrganizerService : IDisposable
             return match;
         }, token);
 
-    private static async Task<IReadOnlyList<BatchImportEntry>> ReadListAsync(OrganizerSourceList list, CancellationToken token)
+    private async Task<IReadOnlyList<BatchImportEntry>> ReadListAsync(OrganizerSourceList list, Guid operationId, CancellationToken token)
     {
         try
         {
+            if (logger.IsEnabled(DiagnosticLevel.Debug) && list.SourceFile is { } file)
+            {
+                var info = new FileInfo(file);
+                var format = Path.GetExtension(file).ToLowerInvariant() switch { ".txt" => 1, ".csv" => 2, ".json" => 3, _ => 0 };
+                logger.Event(new(DiagnosticModule.Organizer, DiagnosticStage.Import, DiagnosticOutcome.Progress,
+                    DiagnosticLevel.Debug, operationId, Counts: new(Bytes: info.Exists ? info.Length : null, Code: format)));
+            }
             var session = new BatchImportSession { FileName = list.Name };
             var rows = new List<BatchImportEntry>();
             await foreach (var raw in BatchImportParser.ParseAsync(list.SourceFile ?? throw new IOException("Organizer.Error.List"), token))

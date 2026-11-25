@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using ModernTubeDownloader.Infrastructure;
 
 namespace ModernTubeDownloader.Updates;
 
@@ -9,7 +10,8 @@ public sealed record UpdateJournal(string Installation, List<UpdateBackupEntry> 
 /// <summary>Write-ahead backup per file. Only validated application package paths are eligible.</summary>
 public static class UpdateTransaction
 {
-    public static void Install(string installation, string extracted, IReadOnlyList<string> files, Action<int>? beforeCopy = null)
+    public static void Install(string installation, string extracted, IReadOnlyList<string> files, Action<int>? beforeCopy = null,
+        Action<DiagnosticStage, DiagnosticOutcome, int?, Exception?>? observe = null)
     {
         installation = Path.GetFullPath(installation);
         UpdatePackageSecurity.EnsureNoReparsePoints(installation);
@@ -23,17 +25,26 @@ public static class UpdateTransaction
             var previous = ReadJournal(backup);
             if (!Path.GetFullPath(previous.Installation).Equals(installation, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("The backup belongs to another installation.");
-            if (!previous.Completed) Recover(backup, previous);
+            if (!previous.Completed)
+            {
+                observe?.Invoke(DiagnosticStage.Recover, DiagnosticOutcome.Started, previous.Files.Count, null);
+                Recover(backup, previous);
+                observe?.Invoke(DiagnosticStage.Recover, DiagnosticOutcome.Completed, previous.Files.Count, null);
+            }
             // This exact private backup folder is owned by the updater, never a user-data root.
             Directory.Delete(backup, true);
         }
         Directory.CreateDirectory(backup);
         var journal = new UpdateJournal(installation, [], false);
+        var stage = DiagnosticStage.Journal;
+        observe?.Invoke(stage, DiagnosticOutcome.Started, 0, null);
         SaveJournal(backup, journal);
+        observe?.Invoke(DiagnosticStage.Replace, DiagnosticOutcome.Started, files.Count, null);
         try
         {
             for (var index = 0; index < files.Count; index++)
             {
+                stage = DiagnosticStage.Replace;
                 var relative = UpdatePackageSecurity.ValidateRelativePath(files[index]);
                 var destination = Path.Combine(installation, relative.Replace('/', Path.DirectorySeparatorChar));
                 var source = Path.Combine(extracted, relative.Replace('/', Path.DirectorySeparatorChar));
@@ -50,17 +61,34 @@ public static class UpdateTransaction
                     File.Copy(destination, saved, false);
                 }
                 journal.Files.Add(new(relative, existed));
+                stage = DiagnosticStage.Journal;
                 SaveJournal(backup, journal); // Durable before touching the destination.
+                stage = DiagnosticStage.Replace;
                 beforeCopy?.Invoke(index);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                 File.Copy(source, destination, true);
+                if ((index + 1) % 100 == 0)
+                    observe?.Invoke(stage, DiagnosticOutcome.Progress, index + 1, null);
             }
+            stage = DiagnosticStage.Commit;
             SaveJournal(backup, journal with { Completed = true });
+            observe?.Invoke(stage, DiagnosticOutcome.Completed, files.Count, null);
         }
-        catch
+        catch (Exception error)
         {
-            Recover(backup, journal);
-            SaveJournal(backup, journal with { Completed = true });
+            observe?.Invoke(stage, DiagnosticOutcome.Failed, journal.Files.Count, error);
+            observe?.Invoke(DiagnosticStage.Rollback, DiagnosticOutcome.Started, journal.Files.Count, null);
+            try
+            {
+                Recover(backup, journal);
+                SaveJournal(backup, journal with { Completed = true });
+                observe?.Invoke(DiagnosticStage.Rollback, DiagnosticOutcome.Completed, journal.Files.Count, null);
+            }
+            catch (Exception recovery)
+            {
+                observe?.Invoke(DiagnosticStage.Rollback, DiagnosticOutcome.Failed, journal.Files.Count, recovery);
+                throw;
+            }
             throw;
         }
     }

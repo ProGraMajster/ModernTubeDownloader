@@ -21,6 +21,7 @@ public sealed class DownloadQueueService
     internal long ObservedTransferBytes { get { lock (sync) return observedTransferBytes; } }
     public QueueStorageSafety Storage { get; }
     public bool LoadFailed { get; private set; }
+    internal int Count { get { lock (sync) return items.Count; } }
     public bool IsReadOnly => LoadFailed || persistence.LoadFailed || dependencyAvailability?.Invoke() == false;
     public bool HasUnsavedChanges { get { lock (sync) return revision != savedRevision; } }
 

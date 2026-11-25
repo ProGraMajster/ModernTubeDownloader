@@ -28,6 +28,7 @@ public sealed class SettingsService(AppPaths paths, IAppLogger logger)
             LoadFailed = false;
             UpdatePolicyNeedsConsent = false;
             Current.Updates ??= new();
+            Current.Diagnostics ??= new();
             if (json is not null)
             {
                 using var document = JsonDocument.Parse(json);
