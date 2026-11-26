@@ -111,17 +111,28 @@ internal static class Program
         if (!PublishResult(new { success = true, operationId = id, restartPending = request.Restart })) return 1;
         if (!request.Restart) return 0;
         Record(DiagnosticStage.Restart, DiagnosticOutcome.Started);
+        int? restartExitCode = null;
         try
         {
             var start = new ProcessStartInfo(Path.Combine(request.Installation, "ModernTubeDownloader.exe"))
             { UseShellExecute = false, WorkingDirectory = request.Installation };
             using var restarted = Process.Start(start) ?? throw new IOException("The installed application process could not be started.");
+            using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            try { await restarted.WaitForExitAsync(grace.Token); }
+            catch (OperationCanceledException) when (grace.IsCancellationRequested) { }
+            if (restarted.HasExited)
+            {
+                restartExitCode = restarted.ExitCode;
+                throw new IOException("The installed application exited immediately after launch.");
+            }
             Record(DiagnosticStage.Restart, DiagnosticOutcome.Completed);
         }
         catch (Exception error)
         {
-            Record(DiagnosticStage.Restart, DiagnosticOutcome.Failed, new(Code: (int)UpdateOperation.Restart), error);
-            PublishResult(new { success = true, operationId = id, restartError = SafeFailure(new(UpdateOperation.Restart, error)) });
+            Record(DiagnosticStage.Restart, DiagnosticOutcome.Failed,
+                new(Code: (int)UpdateOperation.Restart, ExitCode: restartExitCode,
+                    Context: error is System.ComponentModel.Win32Exception native ? native.NativeErrorCode : null), error);
+            PublishResult(new { success = true, operationId = id, restartError = SafeFailure(new(UpdateOperation.Restart, error)), restartExitCode });
             return 3;
         }
         return PublishResult(new { success = true, operationId = id, restartPending = false }) ? 0 : 3;

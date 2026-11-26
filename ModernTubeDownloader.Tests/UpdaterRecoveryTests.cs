@@ -202,14 +202,24 @@ public sealed partial class ApplicationUpdateTests
         Assert.Equal(status, restarted.StatusKey);
     }
 
-    [Fact]
-    public async Task RealUpdaterCommitsEvenWhenRestartCannotExecuteThePayload()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RealUpdaterCommitsEvenWhenRestartFails(bool exitsImmediately)
     {
         using var fixture = new Fixture();
         var installation = Directory.CreateDirectory(Path.Combine(fixture.Root, "installation")).FullName;
         var executable = Path.Combine(installation, "ModernTubeDownloader.exe");
         await File.WriteAllTextAsync(executable, "original");
-        var archive = fixture.Zip(("ModernTubeDownloader.exe", "synthetic non-executable payload"));
+        string archive;
+        if (exitsImmediately)
+        {
+            // A valid apphost without its managed entry assembly launches and exits immediately.
+            archive = Path.Combine(fixture.Root, "apphost.zip");
+            using var zip = System.IO.Compression.ZipFile.Open(archive, System.IO.Compression.ZipArchiveMode.Create);
+            System.IO.Compression.ZipFileExtensions.CreateEntryFromFile(zip, CoreTests.FakeToolPath(), "ModernTubeDownloader.exe");
+        }
+        else archive = fixture.Zip(("ModernTubeDownloader.exe", "synthetic non-executable payload"));
         var id = Guid.NewGuid();
         var requestFile = Path.Combine(fixture.Root, "request.json");
         var request = new UpdaterRequest(installation, archive, Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(archive))),
@@ -227,12 +237,14 @@ public sealed partial class ApplicationUpdateTests
             await updater.WaitForExitAsync(timeout.Token);
             Assert.Equal(3, updater.ExitCode);
             Assert.True(ReadJournal(installation).Completed);
-            Assert.Equal("synthetic non-executable payload", await File.ReadAllTextAsync(executable));
+            if (exitsImmediately) Assert.Equal(await File.ReadAllBytesAsync(CoreTests.FakeToolPath()), await File.ReadAllBytesAsync(executable));
+            else Assert.Equal("synthetic non-executable payload", await File.ReadAllTextAsync(executable));
             var json = await File.ReadAllTextAsync(requestFile + ".result.json");
             using var result = JsonDocument.Parse(json);
             Assert.True(result.RootElement.GetProperty("success").GetBoolean());
             Assert.Equal(id, result.RootElement.GetProperty("operationId").GetGuid());
             Assert.Equal("restart", result.RootElement.GetProperty("restartError").GetProperty("operation").GetString());
+            Assert.Equal(exitsImmediately ? JsonValueKind.Number : JsonValueKind.Null, result.RootElement.GetProperty("restartExitCode").ValueKind);
             Assert.DoesNotContain(installation, json);
             var diagnostics = await File.ReadAllLinesAsync(requestFile + ".diagnostics.jsonl");
             Assert.Contains(diagnostics, line => line.Contains("Updater.Commit.Completed") && line.Contains(id.ToString()));
