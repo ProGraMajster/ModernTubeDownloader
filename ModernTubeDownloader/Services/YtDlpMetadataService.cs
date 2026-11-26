@@ -44,7 +44,8 @@ public sealed class YtDlpMetadataService(YtDlpProcessRunner runner, SettingsServ
             metadata.OriginalUrl ??= normalizedUrl;
             if (string.IsNullOrWhiteSpace(metadata.WebpageUrl))
                 metadata.WebpageUrl = normalizedUrl;
-            logger.Info($"Analyzed media id={metadata.Id}, formats={metadata.Formats.Count}.");
+            logger.Event(new(DiagnosticModule.Downloads, DiagnosticStage.Match, DiagnosticOutcome.Completed,
+                ParentOperationId: ProcessLogContext.ParentOperationId, Counts: new(Items: metadata.Formats.Count)));
             return metadata;
         }
         catch (JsonException ex)

@@ -8,7 +8,10 @@ public enum OrganizerJournalState { Prepared, Moving, UpdatingReferences, Comple
 public enum OrganizerFileState { Pending, Published, SourceRemoved }
 
 public sealed record OrganizerSourceList(string Name, string DestinationDirectory, string? SourceFile = null,
-    IReadOnlyList<BatchImportEntry>? Entries = null);
+    IReadOnlyList<BatchImportEntry>? Entries = null)
+{
+    internal bool RetryDestinationSuggestion { get; init; }
+}
 
 public sealed class OrganizerFile
 {
@@ -50,6 +53,7 @@ public sealed class OrganizerPlan
     public bool Recursive { get; set; }
     public bool RequireJson { get; set; } = true;
     public List<OrganizerMatch> Matches { get; set; } = [];
+    internal List<string> ResolvedDestinations { get; } = [];
     public int ScannedFiles { get; set; }
     public int SkippedFiles { get; set; }
     public int ScannedMediaFiles { get; set; }
@@ -75,7 +79,10 @@ public sealed class OrganizerJournal
 
 public sealed record OrganizerJournalSummary(Guid Id, DateTimeOffset CreatedAt, OrganizerJournalState State, int EntryCount, string? ErrorCode);
 
-public sealed record OrganizerProgress(string Phase, int CompletedFiles, int TotalFiles, long CompletedBytes, long TotalBytes, string? CurrentName = null);
+public sealed record OrganizerProgress(string Phase, int CompletedFiles, int TotalFiles, long CompletedBytes, long TotalBytes, string? CurrentName = null)
+{
+    public Guid? OperationId { get; init; }
+}
 
 /// <summary>Test seam at durable boundaries; never used to suppress an I/O error.</summary>
 public interface IOrganizerFaultObserver

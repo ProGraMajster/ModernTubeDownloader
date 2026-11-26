@@ -8,6 +8,7 @@ internal static class ProcessActivity
 {
     private static readonly ConcurrentDictionary<int, (string Name, long Start)> active = new();
     internal sealed record Activity(string Name, TimeSpan Elapsed);
+    internal static int Count => active.Count;
     public static IDisposable Track(int id, string executable)
     {
         var name = Path.GetFileNameWithoutExtension(executable).ToLowerInvariant();

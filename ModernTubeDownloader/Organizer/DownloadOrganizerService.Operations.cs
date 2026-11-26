@@ -385,7 +385,7 @@ public sealed partial class DownloadOrganizerService
     private void ValidateJournal(OrganizerJournal journal)
     {
         if (journal.SchemaVersion != 1 || !Enum.IsDefined(journal.State) || journal.Matches.Count is < 1 or > MaximumPlanEntries) throw new IOException("Organizer.Error.Journal");
-        journal.ScanRoot = OrganizerPathSafety.DirectoryPath(journal.ScanRoot, true);
+        journal.ScanRoot = DirectoryFor(journal.ScanRoot, "Organizer.Source", mustExist: true, allowRoot: true);
         if (IsProtected(journal.ScanRoot)) throw new IOException("Organizer.Error.OutsideRoot");
         var destinations = new HashSet<string>(OrganizerPathSafety.Comparer);
         foreach (var match in journal.Matches)
@@ -398,7 +398,7 @@ public sealed partial class DownloadOrganizerService
     }
     private void ValidateFile(OrganizerJournal journal, OrganizerMatch match, OrganizerFile file)
     {
-        var destination = OrganizerPathSafety.DirectoryPath(match.DestinationDirectory);
+        var destination = DirectoryFor(match.DestinationDirectory, "Organizer.Destination", match.ListName);
         if (IsProtected(destination) || file.Length < 0 || file.Sha256.Length != 64 || file.Sha256.Any(c => !Uri.IsHexDigit(c))) throw new IOException("Organizer.Error.Journal");
         OrganizerPathSafety.CheckFile(file.Destination, destination);
         if (!OrganizerPathSafety.Comparer.Equals(Path.GetDirectoryName(file.Destination), destination)) throw new IOException("Organizer.Error.OutsideRoot");
@@ -457,6 +457,20 @@ public sealed partial class DownloadOrganizerService
         var path = Path.Combine(directory, key + ".json"); OrganizerPathSafety.CheckAncestors(path);
         await AtomicJsonFile.WriteRawJsonAsync(path, JsonSerializer.Serialize(new FileCheckpoint(file.Destination, file.State, file.TransferStarted, file.UndoCompleted), JsonDefaults.Options)).ConfigureAwait(false);
     }
-    public static string SafeError(Exception error) => error is OperationCanceledException ? "Organizer.Error.Cancelled" :
-        error.Message.StartsWith("Organizer.", StringComparison.Ordinal) && !error.Message.Contains(' ') ? error.Message : "Organizer.Error.Access";
+    public static string SafeError(Exception error)
+    {
+        if (error.Message.StartsWith("Organizer.", StringComparison.Ordinal) && !error.Message.Any(char.IsWhiteSpace))
+            return error.Message;
+
+        return error switch
+        {
+            OperationCanceledException => "Organizer.Error.Cancelled",
+            UnauthorizedAccessException or System.Security.SecurityException => "Organizer.Error.Permission",
+            DriveNotFoundException => "Organizer.Error.DriveUnavailable",
+            IOException { HResult: unchecked((int)0x8007000F) or unchecked((int)0x80070015) or unchecked((int)0x80070037)
+                or unchecked((int)0x80070458) or unchecked((int)0x8007048F) }
+                => "Organizer.Error.DriveUnavailable",
+            _ => "Organizer.Error.Access"
+        };
+    }
 }

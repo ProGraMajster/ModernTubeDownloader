@@ -31,6 +31,7 @@ internal sealed partial class SettingsView : UserControl
     private readonly NotificationSettingsPanel notificationCard;
     private readonly StartupSettingsPanel startupCard;
     private readonly UpdateSettingsPanel updatesCard;
+    private readonly DiagnosticsSettingsPanel diagnosticsCard;
     private readonly TextScaleSettingsPanel textScaleCard;
     private readonly PersonalizationSettingsPanel personalizationCard;
     private readonly InterfaceSettingsPanel interfaceCard;
@@ -458,17 +459,18 @@ internal sealed partial class SettingsView : UserControl
         notificationCard = new NotificationSettingsPanel(services);
         startupCard = new StartupSettingsPanel(services);
         updatesCard = new UpdateSettingsPanel(services);
+        diagnosticsCard = new DiagnosticsSettingsPanel(services);
         textScaleCard = new TextScaleSettingsPanel(services);
         personalizationCard = new PersonalizationSettingsPanel(services);
         interfaceCard = new InterfaceSettingsPanel(services);
         updatesCard.InstallRequested += (_, _) => InstallUpdateRequested?.Invoke(this, EventArgs.Empty);
         scroll.Controls.AddRange([generalCard, toolsCard, behaviorCard, resilienceCard, liveCard, notificationCard, subtitlesCard, sponsorCard,
-            cookiesCard, appearanceCard, interfaceCard, textScaleCard, personalizationCard, browserCard, remoteCard, updatesCard, startupCard, advancedCard, actionsCard]);
+            cookiesCard, appearanceCard, interfaceCard, textScaleCard, personalizationCard, browserCard, remoteCard, updatesCard, startupCard, diagnosticsCard, advancedCard, actionsCard]);
         foreach (var card in scroll.Controls) logicalCardHeights[card] = card.Height;
         foreach (var (name, cards) in new (string, Control[])[] {
             ("General", [appearanceCard, toolsCard]), ("Downloads", [generalCard, behaviorCard, resilienceCard, subtitlesCard, sponsorCard]),
             ("Live", [liveCard]), ("Notifications", [notificationCard]), ("Authentication", [cookiesCard]), ("Browser", [browserCard]),
-            ("WebRemote", [remoteCard]), ("Updates", [updatesCard]), ("Startup", [startupCard]), ("Personalization", [interfaceCard, textScaleCard, personalizationCard]), ("Advanced", [advancedCard]) })
+            ("WebRemote", [remoteCard]), ("Updates", [updatesCard]), ("Startup", [startupCard]), ("Personalization", [interfaceCard, textScaleCard, personalizationCard]), ("Advanced", [advancedCard]), ("Diagnostics", [diagnosticsCard]) })
         {
             foreach (var card in cards) cardCategories[card] = name;
             var button = new DashboardButton { AccessibleAutomationId = "SettingsCategory" + name, Width = 160, Height = 36, Margin = new Padding(0, 0, 8, 8) };
@@ -709,6 +711,7 @@ internal sealed partial class SettingsView : UserControl
         notificationCard.LayoutForWidth(cardWidth);
         startupCard.LayoutForWidth(cardWidth);
         updatesCard.LayoutForWidth(cardWidth);
+        diagnosticsCard.LayoutForWidth(cardWidth);
         textScaleCard.LayoutForWidth(cardWidth);
         personalizationCard.LayoutForWidth(cardWidth);
         interfaceCard.LayoutForWidth(cardWidth);
@@ -718,14 +721,14 @@ internal sealed partial class SettingsView : UserControl
         remoteCard.Height = AppTypography.TextHeight((remoteRequireAuth.Checked ? 472 : 372) + (remoteHttps.Checked ? 264 : 158) + (remoteQr.Visible ? 150 : 0));
         var top = displayOrigin.Y;
         foreach (var card in new[] { generalCard, toolsCard, behaviorCard, resilienceCard, liveCard, notificationCard, subtitlesCard, sponsorCard,
-                     cookiesCard, appearanceCard, interfaceCard, textScaleCard, personalizationCard, browserCard, remoteCard, updatesCard, startupCard, advancedCard, actionsCard })
+                     cookiesCard, appearanceCard, interfaceCard, textScaleCard, personalizationCard, browserCard, remoteCard, updatesCard, startupCard, diagnosticsCard, advancedCard, actionsCard })
         {
             if (card != actionsCard) card.Visible = currentCategory == "All" || cardCategories.GetValueOrDefault(card) == currentCategory || dashboard && currentCategory == "General" && new Control[] { interfaceCard, textScaleCard }.Contains(card);
             if (!card.Visible) { if (dashboard) card.SetBounds(0, 0, 0, 0); continue; }
-            if (card != textScaleCard && card != remoteCard && card != personalizationCard && card != interfaceCard) card.Height = AppTypography.TextHeight(logicalCardHeights.GetValueOrDefault(card, card.Height));
+            if (card != diagnosticsCard && card != textScaleCard && card != remoteCard && card != personalizationCard && card != interfaceCard) card.Height = AppTypography.TextHeight(logicalCardHeights.GetValueOrDefault(card, card.Height));
             card.SetBounds(page + displayOrigin.X, top, cardWidth, card.Height);
             top = card.Bottom + services.Appearance.Profile.Settings.SectionSpacing;
-            if (!ReferenceEquals(card, actionsCard) && !ReferenceEquals(card, notificationCard) && !ReferenceEquals(card, startupCard) && !ReferenceEquals(card, updatesCard) && !ReferenceEquals(card, textScaleCard) && card != personalizationCard && card != interfaceCard)
+            if (!ReferenceEquals(card, actionsCard) && !ReferenceEquals(card, notificationCard) && !ReferenceEquals(card, startupCard) && !ReferenceEquals(card, diagnosticsCard) && !ReferenceEquals(card, updatesCard) && !ReferenceEquals(card, textScaleCard) && card != personalizationCard && card != interfaceCard)
                 ResizeSectionHeader(card);
         }
 
@@ -835,10 +838,10 @@ internal sealed partial class SettingsView : UserControl
         save.SetBounds(24, 22, 166, 40);
         logs.SetBounds(200, 22, 178, 40);
         feedback.SetBounds(394, 30, Math.Max(120, cardWidth - 418), 28);
-        foreach (var card in logicalCardHeights.Keys) if (card != textScaleCard && card != personalizationCard && card != interfaceCard) AppTypography.ReflowRows(card, true);
+        foreach (var card in logicalCardHeights.Keys) if (card != diagnosticsCard && card != textScaleCard && card != personalizationCard && card != interfaceCard) AppTypography.ReflowRows(card, true);
         // Compact cards trim only spare bottom space, never any visible setting.
         if (services.Appearance.Profile.Settings.CompactCards)
-            foreach (var card in cardCategories.Keys.Where(c => c.Visible && c != personalizationCard && c != interfaceCard && c != textScaleCard))
+            foreach (var card in cardCategories.Keys.Where(c => c.Visible && c != diagnosticsCard && c != personalizationCard && c != interfaceCard && c != textScaleCard))
                 card.Height = Math.Max(AppTypography.TextHeight(100), card.Controls.Where(c => c.Visible).Select(c => c.Bottom + 12).DefaultIfEmpty(card.Height).Max());
         if (dashboard) foreach (var card in scroll.Controls.Where(c => c.Visible)) { DownloadsVisual.Card(card);
             var headings = card.Controls.OfType<Label>().OrderBy(c => c.Top).Take(2).ToArray();
@@ -885,7 +888,7 @@ internal sealed partial class SettingsView : UserControl
     {
         "Downloads" => AppIconKind.Download, "Live" => AppIconKind.Live,
         "Authentication" or "Browser" or "WebRemote" => AppIconKind.Link,
-        "Updates" => AppIconKind.Retry, "Notifications" => AppIconKind.Info,
+        "Updates" => AppIconKind.Retry, "Notifications" or "Diagnostics" => AppIconKind.Info,
         "Startup" => AppIconKind.Play, "Personalization" => AppIconKind.Queue,
         _ => AppIconKind.Settings
     };

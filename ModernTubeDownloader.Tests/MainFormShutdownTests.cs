@@ -93,8 +93,8 @@ public sealed class MainFormShutdownTests
                 Assert.Null(services.Updates.State.LastInstallerRequest);
                 Assert.Empty(Directory.EnumerateDirectories(updates, "runner-*"));
                 var logs = ReadLogs(paths.LogDirectory);
-                Assert.Contains("SHUTDOWN-UI-C01 original experience fault", logs);
-                Assert.Contains("services will still be stopped and exit installation is blocked", logs);
+                Assert.DoesNotContain("SHUTDOWN-UI-C01 original experience fault", logs);
+                Assert.Contains("MainForm.ShutdownAndCloseAsync", logs);
             }
             Assert.True(File.Exists(archivePath));
         }

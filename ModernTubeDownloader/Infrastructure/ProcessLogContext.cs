@@ -10,6 +10,8 @@ internal static class ProcessLogContext
         var previous = current.Value; current.Value = new(jobId, attempt, role);
         return new Scope(() => current.Value = previous);
     }
+    internal static Guid? ParentOperationId => current.Value?.JobId;
+
     internal static string Describe(ProcessRunRequest request)
     {
         var context = current.Value;

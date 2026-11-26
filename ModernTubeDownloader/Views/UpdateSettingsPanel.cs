@@ -59,7 +59,12 @@ internal sealed class UpdateSettingsPanel : Panel
         install.Click += (_, _) => InstallRequested?.Invoke(this, EventArgs.Empty);
         later.Click += (_, _) => _ = RunAsync(() => services.Updates.DeferAsync(false));
         skip.Click += (_, _) => _ = RunAsync(() => services.Updates.DeferAsync(true));
-        onExit.CheckedChanged += (_, _) => { if (!busy && services.Updates.Ready) _ = RunAsync(() => services.Updates.SetInstallOnExitAsync(onExit.Checked)); };
+        onExit.CheckedChanged += (_, _) =>
+        {
+            if (busy || !services.Updates.Ready) return;
+            var enabled = onExit.Checked;
+            _ = RunAsync(() => services.Updates.SetInstallOnExitAsync(enabled));
+        };
         notes.Click += NotesClicked;
         SizeChanged += (_, _) => LayoutForWidth(Width);
         services.Updates.Changed += UpdateChanged;
@@ -127,7 +132,7 @@ internal sealed class UpdateSettingsPanel : Panel
             services.Localization[state.LastStartupResultKey ?? "Updates.StartupNotAttempted"]);
         versions.Text = services.Localization.Get("Updates.Versions", services.Updates.CurrentVersion, state.Available?.Version ?? "—");
         status.Text = services.Localization[actionFailed ? "Updates.Failed" : services.Updates.StatusKey];
-        AppUi.BindForeground(status, actionFailed || services.Updates.StatusKey is "Updates.Failed" or "Updates.InstallFailed" ? AppThemeTokens.Error : ready ? AppThemeTokens.Success : AppThemeTokens.TextSecondary);
+        AppUi.BindForeground(status, actionFailed || state.InstallationFailed || state.InstallerRestartUnconfirmed || services.Updates.StatusKey == "Updates.Failed" ? AppThemeTokens.Error : ready ? AppThemeTokens.Success : AppThemeTokens.TextSecondary);
         progress.Value = (int)Math.Clamp(services.Updates.Progress, 0, 100);
         download.Enabled = !busy && state.Available is not null && !ready;
         install.Enabled = !busy && ready && !services.Updates.InstallationPending;

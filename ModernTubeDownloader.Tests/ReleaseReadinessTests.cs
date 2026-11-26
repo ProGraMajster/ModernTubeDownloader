@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.Json;
 using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Theming;
 
@@ -29,19 +30,21 @@ public sealed class ReleaseReadinessTests : IDisposable
     }
 
     [Fact]
-    public void FatalFallbackLoggerWritesTheCompleteExceptionToAppDataLogs()
+    public void FatalFallbackLoggerWritesSafeCriticalEventToAppDataLogs()
     {
         var paths = AppPaths.Create(root);
         var exception = new InvalidOperationException("release-readiness-sentinel");
 
         FatalErrorReporter.Log(paths, logger: null, "Fatal test message.", exception);
 
-        var log = Assert.Single(Directory.GetFiles(paths.LogDirectory, "ModernTubeDownloader-*.log"));
+        var log = Assert.Single(Directory.GetFiles(paths.LogDirectory, "MTD-events-v1-*.log"));
         var contents = File.ReadAllText(log);
-        Assert.Contains("[FTL] ModernTubeDownloader fatal crash", contents, StringComparison.Ordinal);
-        Assert.Contains("Fatal test message.", contents, StringComparison.Ordinal);
-        Assert.Contains(nameof(InvalidOperationException), contents, StringComparison.Ordinal);
-        Assert.Contains("release-readiness-sentinel", contents, StringComparison.Ordinal);
+        var record = JsonSerializer.Deserialize<DiagnosticRecord>(contents, DiagnosticRecord.Json)!;
+        Assert.Equal(DiagnosticLevel.Fatal, record.LogLevel);
+        Assert.Equal(DiagnosticError.InvalidOperation, record.ExceptionType);
+        Assert.Equal(exception.HResult, record.HResult);
+        Assert.DoesNotContain("Fatal test message.", contents, StringComparison.Ordinal);
+        Assert.DoesNotContain("release-readiness-sentinel", contents, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -55,13 +58,14 @@ public sealed class ReleaseReadinessTests : IDisposable
 
         FatalErrorReporter.Log(paths, logger: null, "Fatal UI exception.", exception);
 
-        var artifact = Assert.Single(Directory.GetFiles(Path.Combine(root, "CrashReports"), "ModernTubeDownloader-crash-*.log"));
+        var artifact = Assert.Single(Directory.GetFiles(paths.LogDirectory, "MTD-events-v1-*.log"));
         var contents = File.ReadAllText(artifact);
-        Assert.Matches(@"ModernFormsNext: \d+\.\d+\.\d+\+[0-9a-f]{40}", contents);
-        Assert.Contains("UI thread id:", contents, StringComparison.Ordinal);
-        Assert.Contains("Active view: Settings", contents, StringComparison.Ordinal);
-        Assert.Contains("settings.remote.save", contents, StringComparison.Ordinal);
-        Assert.Contains(nameof(InvalidOperationException), contents, StringComparison.Ordinal);
+        var record = JsonSerializer.Deserialize<DiagnosticRecord>(contents, DiagnosticRecord.Json)!;
+        Assert.Equal(DiagnosticLevel.Fatal, record.LogLevel);
+        Assert.Equal(DiagnosticError.InvalidOperation, record.ExceptionType);
+        Assert.NotNull(record.Counts?.Context);
+        Assert.True(record.Counts?.Items > 0);
+        Assert.True(record.Counts?.Total > 0);
         Assert.DoesNotContain("private-id", contents, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-bearer", contents, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-token", contents, StringComparison.Ordinal);

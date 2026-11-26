@@ -1,4 +1,5 @@
 using ModernTubeDownloader.Models;
+using ModernTubeDownloader.Infrastructure;
 
 namespace ModernTubeDownloader.Batch;
 
@@ -16,18 +17,39 @@ public sealed partial class BatchImportService
     public async Task InitializeAsync(CancellationToken token = default)
     {
         if (queue.LoadFailed) return;
+        var id = Guid.NewGuid();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        int read = 0, failures = 0;
+        void OnUnreadable(Exception error)
+        {
+            failures++;
+            var cause = error.Data["BatchDiagnosticCode"] is int code ? code : error switch
+            {
+                System.Text.Json.JsonException => 6, UnauthorizedAccessException => 7, IOException => 8, _ => 0
+            };
+            logger.Event(new(DiagnosticModule.Batch, DiagnosticStage.Recover, DiagnosticOutcome.Failed, DiagnosticLevel.Warn,
+                id, Exception: error, Counts: new(Code: cause)));
+        }
+        logger.Event(new(DiagnosticModule.Batch, DiagnosticStage.Recover, DiagnosticOutcome.Started, OperationId: id));
         try
         {
             await foreach (var summary in store.UnfinishedSessionsAsync(token,
-                error => logger.Error("Batch session recovery requires attention; original data was retained.", error)).ConfigureAwait(false))
+                OnUnreadable).ConfigureAwait(false))
             {
-                try { await OpenAsync(summary.Id, token).ConfigureAwait(false); }
+                try { await OpenAsync(summary.Id, token).ConfigureAwait(false); read++; }
                 catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
-                { logger.Error("Batch session recovery failed for " + summary.Id, error); }
+                { OnUnreadable(error); }
             }
         }
         catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
-        { logger.Error("Batch session recovery requires attention; original data was retained.", error); }
+        { OnUnreadable(error); }
+        finally
+        {
+            logger.Event(new(DiagnosticModule.Batch, DiagnosticStage.Recover,
+                token.IsCancellationRequested ? DiagnosticOutcome.Cancelled : failures > 0 ? DiagnosticOutcome.Failed : DiagnosticOutcome.Completed,
+                failures > 0 ? DiagnosticLevel.Warn : DiagnosticLevel.Info, id,
+                DurationMs: clock.ElapsedMilliseconds, Counts: new(Items: read, Errors: failures, Code: 1)));
+        }
     }
 
     private void TrackSession(BatchImportSession session)

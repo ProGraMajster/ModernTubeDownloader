@@ -23,7 +23,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ModernTubeDownloader.Updater\ModernTubeDownloader.Updater.csproj" />
+    <ProjectReference Include="..\ModernTubeDownloader.Updater\ModernTubeDownloader.Updater.csproj" ReferenceOutputAssembly="false" />
+    <!-- The GUI compiles the shared update protocol and never loads the installer executable's DLL. -->
+    <Compile Include="..\ModernTubeDownloader.Updater\UpdatePackageSecurity.cs" Link="Updates\UpdatePackageSecurity.cs" />
+    <Compile Include="..\ModernTubeDownloader.Updater\StartupUpdateAdmission.cs" Link="Updates\StartupUpdateAdmission.cs" />
+    <Compile Include="..\ModernTubeDownloader.Updater\UpdaterRequest.cs" Link="Updates\UpdaterRequest.cs" />
     <ProjectReference Include="..\ModernTubeDownloader.Authentication\ModernTubeDownloader.Authentication.csproj" />
     <ProjectReference Include="..\ModernTubeDownloader.NativeHost\ModernTubeDownloader.NativeHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
