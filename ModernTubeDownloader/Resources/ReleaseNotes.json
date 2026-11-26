@@ -9,29 +9,31 @@
             "category": "new",
             "title": "New",
             "items": [
-              "Update diagnostics record the installed launcher version and installer stages."
+              "Settings → Diagnostics is available in Modern Dashboard and Classic. Enable DEBUG or TRACE without restarting, then export a filtered diagnostic ZIP to share with a bug report."
             ]
           },
           {
             "category": "improved",
             "title": "Improvements",
             "items": [
-              "File Organizer shows the current analysis stage and lets you cancel while it prepares a dry run."
+              "File Organizer shows the current analysis stage, supports cancellation during preview and reuses local scan results within the same analysis.",
+              "Optional performance samples help correlate memory, CPU and active work with visible symptoms."
             ]
           },
           {
             "category": "fixed",
             "title": "Fixes",
             "items": [
-              "The update service can run without loading the external installer assembly into the application.",
-              "File Organizer rechecks volume availability during analysis and shows a final success, error or cancellation status."
+              "File Organizer retries a suggested destination after its drive becomes available. Each preview clears stale results and reports success, failure or cancellation.",
+              "The update service runs independently of the installer DLL. The installer verifies original hashes during rollback and distinguishes verified recovery, partial or unknown recovery and restart failure.",
+              "The install-on-exit checkbox now saves the user's selection before refreshing the panel."
             ]
           },
           {
             "category": "limitations",
             "title": "Known issues",
             "items": [
-              "If updates do not work in your 1.3.1 installation, extract the new package to a new folder and keep the existing application profile."
+              "Updates started by 1.3.0 or 1.3.1 use that version's installer and can still fail on a journal write. If updates fail, close the app, back up the profile, verify the 1.3.2 ZIP and extract it into a new writable folder. Launch the new executable with the existing profile."
             ]
           }
         ],
@@ -40,29 +42,31 @@
             "category": "new",
             "title": "Nowości",
             "items": [
-              "Diagnostyka aktualizacji zapisuje wersję instalatora i etapy instalacji."
+              "Ustawienia → Diagnostyka są dostępne w Modern Dashboard i Classic. Włącz DEBUG lub TRACE bez restartu, a następnie wyeksportuj przefiltrowany ZIP i dołącz go do zgłoszenia."
             ]
           },
           {
             "category": "improved",
             "title": "Ulepszenia",
             "items": [
-              "Organizator plików pokazuje aktualny etap analizy i pozwala anulować przygotowanie podglądu."
+              "Organizator plików pokazuje aktualny etap analizy, pozwala anulować podgląd i wykorzystuje wyniki lokalnego skanowania w obrębie jednej analizy.",
+              "Opcjonalne próbki wydajności pomagają powiązać zużycie pamięci, CPU i aktywne zadania z objawami."
             ]
           },
           {
             "category": "fixed",
             "title": "Poprawki",
             "items": [
-              "Usługa aktualizacji działa bez ładowania biblioteki zewnętrznego instalatora do aplikacji.",
-              "Organizator plików ponownie sprawdza dostępność dysku i pokazuje końcowy stan analizy."
+              "Organizator ponawia sugestię celu po odzyskaniu dostępu do dysku. Podgląd czyści stare wyniki i pokazuje sukces, błąd lub anulowanie.",
+              "Usługa aktualizacji działa niezależnie od biblioteki instalatora. Instalator weryfikuje skróty oryginałów przy przywracaniu i odróżnia zweryfikowane, częściowe lub nieznane odzyskanie od błędu restartu.",
+              "Opcja instalacji przy zamykaniu zapisuje wybór przed odświeżeniem panelu."
             ]
           },
           {
             "category": "limitations",
             "title": "Znane ograniczenia",
             "items": [
-              "Jeśli aktualizacja w wersji 1.3.1 nie działa, rozpakuj nową paczkę do nowego folderu i zachowaj istniejący profil aplikacji."
+              "Aktualizacja z 1.3.0 lub 1.3.1 używa instalatora tej wersji. Zapis dziennika może się czasem nie powieść. Zamknij aplikację, wykonaj kopię profilu i wypakuj zweryfikowany ZIP 1.3.2 do nowego zapisywalnego folderu. Uruchom nowy EXE z dotychczasowym profilem."
             ]
           }
         ]
