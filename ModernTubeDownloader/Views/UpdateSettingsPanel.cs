@@ -59,7 +59,12 @@ internal sealed class UpdateSettingsPanel : Panel
         install.Click += (_, _) => InstallRequested?.Invoke(this, EventArgs.Empty);
         later.Click += (_, _) => _ = RunAsync(() => services.Updates.DeferAsync(false));
         skip.Click += (_, _) => _ = RunAsync(() => services.Updates.DeferAsync(true));
-        onExit.CheckedChanged += (_, _) => { if (!busy && services.Updates.Ready) _ = RunAsync(() => services.Updates.SetInstallOnExitAsync(onExit.Checked)); };
+        onExit.CheckedChanged += (_, _) =>
+        {
+            if (busy || !services.Updates.Ready) return;
+            var enabled = onExit.Checked;
+            _ = RunAsync(() => services.Updates.SetInstallOnExitAsync(enabled));
+        };
         notes.Click += NotesClicked;
         SizeChanged += (_, _) => LayoutForWidth(Width);
         services.Updates.Changed += UpdateChanged;
