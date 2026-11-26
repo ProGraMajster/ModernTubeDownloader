@@ -155,7 +155,8 @@ public sealed class CookieAuthenticationTests : IDisposable
             Assert.DoesNotContain(secret,json);Assert.DoesNotContain("http_headers",json);
             FatalErrorReporter.Log(paths,null,"Authentication test",new InvalidOperationException(metadata.Redact(secret)));
             Assert.All(Directory.EnumerateFiles(paths.LogDirectory),file=>Assert.DoesNotContain(secret,File.ReadAllText(file)));
-            Assert.All(Directory.EnumerateFiles(Path.Combine(root,"CrashReports")),file=>Assert.DoesNotContain(secret,File.ReadAllText(file)));
+            Assert.Contains(Directory.EnumerateFiles(paths.LogDirectory, "MTD-events-v1-*.log"),
+                file => File.ReadAllText(file).Contains("\"logLevel\":\"Fatal\"", StringComparison.Ordinal));
         }
         Assert.False(File.Exists(path));
     }

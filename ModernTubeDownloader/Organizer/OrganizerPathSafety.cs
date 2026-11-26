@@ -4,20 +4,53 @@ internal static class OrganizerPathSafety
 {
     internal static readonly StringComparer Comparer = StringComparer.OrdinalIgnoreCase;
 
-    internal static string DirectoryPath(string path, bool mustExist = false, bool allowRoot = false)
+    internal static string DirectoryPath(string path, bool mustExist = false, bool allowRoot = false,
+        Action<DriveType, string>? volumeChecked = null)
     {
         var full = LocalPath(path);
         var root = Path.GetPathRoot(full)!;
         if (!allowRoot && Comparer.Equals(full, root)) throw new IOException("Organizer.Error.Root");
-        var drive = new DriveInfo(root);
-        if (drive.DriveType == DriveType.Network) throw new IOException("Organizer.Error.PathType");
-        if (drive.DriveType is DriveType.NoRootDirectory or DriveType.Unknown)
-            throw new IOException("Organizer.Error.DriveUnavailable");
-        File.GetAttributes(root); // Preserve access and not-ready errors from the volume.
+        CheckVolume(root, volumeChecked);
 
         var attributes = CheckAncestors(full, directoriesOnly: true);
         if (mustExist && attributes is null) throw new IOException("Organizer.Error.FolderMissing");
         return full;
+    }
+
+    private static void CheckVolume(string root, Action<DriveType, string>? volumeChecked = null)
+    {
+        var driveType = new DriveInfo(root).DriveType;
+        if (driveType == DriveType.Network)
+        {
+            volumeChecked?.Invoke(driveType, "Network");
+            throw new IOException("Organizer.Error.PathType");
+        }
+
+        try
+        {
+            File.GetAttributes(root); // Directory.Exists and DriveInfo.IsReady discard native I/O errors.
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            volumeChecked?.Invoke(driveType, "RootAttributesFailed");
+            if (error is FileNotFoundException or DirectoryNotFoundException)
+                throw new IOException("Organizer.Error.DriveUnavailable", error);
+            throw;
+        }
+
+        // Unknown volume types cannot prove this is a local path.
+        if (driveType is DriveType.NoRootDirectory or DriveType.Unknown)
+        {
+            volumeChecked?.Invoke(driveType, "Unclassified");
+            throw new IOException("Organizer.Error.DriveUnavailable");
+        }
+        volumeChecked?.Invoke(driveType, "Accessible");
+    }
+
+    internal static void RecheckVolumeOnMissing(string path, Exception error)
+    {
+        if (error is FileNotFoundException or DirectoryNotFoundException)
+            CheckVolume(Path.GetPathRoot(path)!);
     }
 
     internal static string LocalPath(string path)
@@ -82,8 +115,11 @@ internal static class OrganizerPathSafety
         {
             current = Path.Combine(current, segment);
             try { attributes = File.GetAttributes(current); }
-            catch (FileNotFoundException) { return null; }
-            catch (DirectoryNotFoundException) { return null; }
+            catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException)
+            {
+                CheckVolume(root); // A missing child is allowed only while the root remains accessible.
+                return null;
+            }
 
             if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.System)) != 0)
                 throw new IOException("Organizer.Error.Reparse");

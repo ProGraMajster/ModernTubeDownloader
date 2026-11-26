@@ -42,6 +42,7 @@ public sealed class AppServices : IDisposable
 
     public AppPaths Paths { get; }
     public IAppLogger Logger { get; }
+    internal DiagnosticsService Diagnostics { get; private set; } = null!;
     public SettingsService Settings { get; }
     public LocalizationService Localization { get; }
     public AppAppearanceService Appearance { get; }
@@ -74,11 +75,14 @@ public sealed class AppServices : IDisposable
         bool deferWorkStart = false)
     {
         using var createTiming = PerformanceDiagnostics.Measure("services.create");
+        var startup = System.Diagnostics.Stopwatch.StartNew();
         paths.EnsureCreated();
         var logger = new FileAppLogger(paths.LogDirectory);
+        logger.Event(new(DiagnosticModule.Application, DiagnosticStage.Startup, DiagnosticOutcome.Started));
         var experience = UserExperienceService.OpenAsync(paths, logger, AppBranding.Version).GetAwaiter().GetResult();
         var settings = new SettingsService(paths, logger);
         using (PerformanceDiagnostics.Measure("settings.load")) settings.LoadAsync().GetAwaiter().GetResult();
+        logger.SetDetail(settings.Current.Diagnostics.Advanced, settings.Current.Diagnostics.IncludeTrace);
         if (experience.State.ExistingProfile && !experience.SettingsExisted) settings.PreserveLegacyUpdatePolicyWithoutSettings();
         else if (!experience.State.ExistingProfile && !experience.SettingsExisted) settings.Current.Updates.PolicyVersion = 1;
         var localization = new LocalizationService(settings.Current.Language);
@@ -96,19 +100,32 @@ public sealed class AppServices : IDisposable
         var ytDlpRunner = new YtDlpProcessRunner(processRunner, tools, logger, authentication);
         var metadata = new YtDlpMetadataService(ytDlpRunner, settings, logger);
         var history = new HistoryService(paths, logger);
+        var stageClock = System.Diagnostics.Stopwatch.StartNew();
         using (PerformanceDiagnostics.Measure("history.load")) history.LoadAsync().GetAwaiter().GetResult();
+        logger.Event(new(DiagnosticModule.History, DiagnosticStage.Load,
+            history.LoadFailed ? DiagnosticOutcome.Failed : DiagnosticOutcome.Completed,
+            history.LoadFailed ? DiagnosticLevel.Warn : DiagnosticLevel.Info,
+            DurationMs: stageClock.ElapsedMilliseconds, Counts: new(Items: history.Count)));
         var queueStore = new QueuePersistenceService(paths, logger);
         var liveStore = new LiveSessionPersistenceService(paths, logger);
         // A damaged shared History makes this a diagnostic runtime. Do not
         // migrate/normalize otherwise valid stores before recovery and reopen.
+        stageClock.Restart();
         using (PerformanceDiagnostics.Measure("live.migrate"))
             if (!history.LoadFailed) liveStore.MigrateLegacyQueueAsync(settings).GetAwaiter().GetResult();
+        logger.Event(new(DiagnosticModule.Migration, DiagnosticStage.Load,
+            history.LoadFailed ? DiagnosticOutcome.Skipped : DiagnosticOutcome.Completed, DurationMs: stageClock.ElapsedMilliseconds));
         var live = new LiveSessionService(liveStore, settings, logger, () => !history.LoadFailed);
         using (PerformanceDiagnostics.Measure("live.load")) live.LoadAsync().GetAwaiter().GetResult();
         var storageSafety = new QueueStorageSafety(directories: () =>
             [paths.RootDirectory, paths.AuthenticationDirectory, settings.Current.TemporaryDirectory, settings.Current.FinalOutputDirectory]);
         var queue = new DownloadQueueService(queueStore, logger, settings, storageSafety, () => !history.LoadFailed);
+        stageClock.Restart();
         using (PerformanceDiagnostics.Measure("queue.load")) queue.LoadAsync().GetAwaiter().GetResult();
+        logger.Event(new(DiagnosticModule.Queue, DiagnosticStage.Load,
+            queue.LoadFailed ? DiagnosticOutcome.Failed : DiagnosticOutcome.Completed,
+            queue.LoadFailed ? DiagnosticLevel.Warn : DiagnosticLevel.Info,
+            DurationMs: stageClock.ElapsedMilliseconds, Counts: new(Items: queue.Count)));
         if (live.LoadFailed)
             storageSafety.Report(new IOException("LIVE storage could not be loaded; preserve original data before recovery."), persistence: true);
         if (history.LoadFailed)
@@ -161,6 +178,8 @@ public sealed class AppServices : IDisposable
         services.Updates.UpdatePrepared += (_, version) => services.Notifications?.UpdateReady(version);
         services.Batch.AnalysisCompleted += (_, counts) => services.Notifications?.BatchCompleted(counts.Analyzed, counts.Total);
         services.WebRemote = new WebRemoteHost(services);
+        services.Diagnostics = new(services, logger, startup.ElapsedMilliseconds);
+        logger.Event(new(DiagnosticModule.Application, DiagnosticStage.Startup, DiagnosticOutcome.Completed, DurationMs: startup.ElapsedMilliseconds));
         if (!deferWorkStart) services.StartWorkAsync().GetAwaiter().GetResult();
         return services;
     }
@@ -177,6 +196,9 @@ public sealed class AppServices : IDisposable
 
     public async Task ShutdownAsync()
     {
+        var shutdown = System.Diagnostics.Stopwatch.StartNew();
+        var operation = Guid.NewGuid();
+        Logger.Event(new(DiagnosticModule.Application, DiagnosticStage.Shutdown, DiagnosticOutcome.Started, OperationId: operation));
         // A failed journal/checkpoint must still drain every process owner. Keep
         // the failure observable so an updater cannot treat this as a clean exit.
         var failures = new List<Exception>();
@@ -199,6 +221,10 @@ public sealed class AppServices : IDisposable
         if (!Queue.IsReadOnly) await Drain("queue checkpoint", () => Queue.SaveAsync()).ConfigureAwait(false);
         if (!Settings.LoadFailed) await Drain("settings checkpoint", () => Settings.SaveAsync()).ConfigureAwait(false);
         if (!History.LoadFailed) await Drain("history checkpoint", () => History.SaveAsync()).ConfigureAwait(false);
+        Logger.Event(new(DiagnosticModule.Application, DiagnosticStage.Shutdown,
+            failures.Count == 0 ? DiagnosticOutcome.Completed : DiagnosticOutcome.Failed,
+            failures.Count == 0 ? DiagnosticLevel.Info : DiagnosticLevel.Error, OperationId: operation,
+            DurationMs: shutdown.ElapsedMilliseconds, Counts: new(Errors: failures.Count)));
         if (failures.Count != 0) throw new AggregateException("Application shutdown preserved one or more storage/service failures.", failures);
     }
 
@@ -208,6 +234,7 @@ public sealed class AppServices : IDisposable
             return;
 
         disposed = true;
+        Diagnostics.Dispose();
         WebRemote.Dispose();
         Updates.Dispose();
         Batch.Dispose();

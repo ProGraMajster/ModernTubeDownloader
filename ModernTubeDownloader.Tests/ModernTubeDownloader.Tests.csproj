@@ -17,8 +17,9 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\docs\releases\v1.3.1.md" Link="OfficialReleaseNotes.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\docs\releases\v1.3.2.md" Link="OfficialReleaseNotes.md" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="..\ModernTubeDownloader\ModernTubeDownloader.csproj" />
+    <Compile Include="..\ModernTubeDownloader.Updater\UpdateTransaction.cs" Link="Updates\UpdateTransaction.cs" />
     <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Testing\ModernFormsNext.Testing.csproj" />
     <ProjectReference Include="..\ModernTubeDownloader.FakeTool\ModernTubeDownloader.FakeTool.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\ModernTubeDownloader.NativeHost\ModernTubeDownloader.NativeHost.csproj" ReferenceOutputAssembly="false" />

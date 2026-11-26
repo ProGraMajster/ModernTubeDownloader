@@ -21,11 +21,12 @@ const allowedBinary = new Set([
   'ModernTubeDownloader/Assets/AppIcon.png', 'ModernTubeDownloader/Assets/AppIcon.ico',
   ...[16, 32, 48, 128].map(n => `browser-extension/assets/icon${n}.png`)
 ]);
-// Reviewed native captures of isolated synthetic profiles, documented in ONBOARDING.md.
-// Bind these two onboarding assets to the reviewed bytes, not a general PNG exemption.
+// Bind reviewed native captures from isolated synthetic profiles to their exact bytes.
 const reviewedPreviewHashes = new Map([
   ['ModernTubeDownloader/Assets/PreviewClassic.png', '32cd4eed3719c33e89734e6486e6388d893409ffd429afcb97b467bae5f0896c'],
-  ['ModernTubeDownloader/Assets/PreviewModern.png', 'ad6810ad6f31d3360c30bb1a231d145512ee423e78264de263ed65195dedc5df']
+  ['ModernTubeDownloader/Assets/PreviewModern.png', 'ad6810ad6f31d3360c30bb1a231d145512ee423e78264de263ed65195dedc5df'],
+  ['docs/diagnostics-1.3.2/classic.png', '25adb027fa9ccdd3e9e363e76ca57d0614d9d9aa428ca1ceeba34e89976a7e94'],
+  ['docs/diagnostics-1.3.2/modern.png', 'b3d7dcb31c8b0948cf6fc1c01dbd9b3c6b47e4bfc421df6e59cf66d8ee32aa84']
 ]);
 const findings = [];
 // Reviewed synthetic security-test inputs only; never exempt an entire test file.

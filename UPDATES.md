@@ -57,13 +57,16 @@ eligible release after the user changes policy.
 `ModernTubeDownloader.Updater` has no UI, framework, worker, authentication or registry
 dependencies. The GUI copies its files to staging, then launches a request with the
 current PID and start-time identity. The updater waits for actual parent exit,
-verifies/extracts again, journals each file's backup before replacement and rolls back
-on copying failure. One private `.mtd-update-backup` holds the prior managed files.
-An interrupted incomplete journal is recovered before the next transaction.
-Read-only destination attributes are respected. Recovery skips unchanged destinations
-when a denied copy left them intact; one locked changed file does not prevent recovery
-of the other files. If any restoration still fails, the journal remains incomplete for
-the next recovery attempt and the failure is reported instead of claiming success.
+verifies and extracts the archive again. It takes ownership of the normalized installation
+path and publishes a plan with the original SHA-256 values in a private
+`.mtd-update-backup`. A durable per-file marker precedes each write. The journal is
+replaced at transaction completion. Only Windows sharing and lock violations at that
+replacement boundary get up to three short retries.
+
+The next updater verifies and recovers an incomplete current-format journal before
+it installs anything. It preserves incomplete legacy journals that lack verification
+evidence. Recovery verifies restored bytes against the recorded originals. A blocked
+or unverifiable file can leave a partial or unknown recovery, with the journal retained.
 Only validated package files are changed; unlisted installation files are preserved.
 No AppData, queues, history, LIVE, cookies, registrations, logs, downloads, certificates
 or appearance profiles are updated. Install now uses the normal work warning/shutdown.
@@ -72,14 +75,22 @@ Only the normal shutdown path, after Batch/queue/LIVE and durable saves finish, 
 external installer. `ShouldInstallOnExit` excludes deferral, skipped versions, pending
 installers and a previous installation failure. The pending process is tracked by PID
 and start time; its result is read on the next application start. Failure or a disappeared
-updater without a result is shown as an installation failure and does not arm a retry on
-every exit. Manual retry remains available. No elevation is requested.
+updater without a result is shown as an unknown installation state and disarms automatic
+installation. The UI distinguishes verified, partial and unknown recovery, including when
+the staged ZIP has disappeared. A committed installation and its automatic restart have
+separate results. Manual retry remains available. No elevation is requested.
 
 ZIP validation rejects traversal, absolute/ADS/device/invalid paths, symlinks,
 case-insensitive duplicates, unknown root directories and user-data files. File count,
 compressed/uncompressed sizes and depth are bounded. Existing reparse points are
-rejected. Failed updates leave the old installation intact and record diagnostics.
+rejected. The installer records safe operation codes, exception types and HRESULTs.
 The optional restart goes through the application's normal single-instance startup.
+
+An update from 1.3.0 or 1.3.1 still runs that version's updater first. For a failed
+installation or a 1.3.1 updater that cannot start, exit the app, back up its profile
+and extract the full verified ZIP to a new writable folder. Start the new executable
+with the existing profile. Keep the existing installation and transaction evidence
+while verifying the replacement. Do not mix individual DLLs between installations.
 
 Validation must include the real updater process against an isolated synthetic
 installation. Never use a user's existing installation as an update fixture.

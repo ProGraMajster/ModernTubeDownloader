@@ -189,6 +189,9 @@ public sealed partial class ApplicationUpdateTests
         using var service = new ApplicationUpdateService(paths, settings, http, new NullAppLogger(), new Source(Release()), "1.1.0");
         await service.RunAutomaticCycleAsync();
         service.State.LastInstallerRequest = Path.Combine(paths.RootDirectory, "Updates", "runner-synthetic", "request.json");
+        using var active = Process.GetCurrentProcess();
+        service.State.LastInstallerProcessId = active.Id;
+        service.State.LastInstallerStartUtcTicks = active.StartTime.ToUniversalTime().Ticks;
         Assert.True(service.InstallationPending);
         await service.SetInstallOnExitAsync(true); await service.RunAutomaticCycleAsync();
         Assert.False(service.State.InstallOnExit); Assert.False(service.ShouldInstallOnExit);
@@ -239,7 +242,7 @@ public sealed partial class ApplicationUpdateTests
     {
         using var fixture = new Fixture(); var install = Path.Combine(fixture.Root, "installation"); Directory.CreateDirectory(install);
         var executable = Path.Combine(install, "ModernTubeDownloader.exe"); await File.WriteAllTextAsync(executable, "old executable");
-        // A real filesystem failure occurs after the EXE and added DLL have been copied.
+        // Static obstructions fail during preparation. A sharing lock fails at the write boundary.
         var blocked = Path.Combine(install, "blocked.dll");
         if (obstruction == "directory") Directory.CreateDirectory(blocked);
         else await File.WriteAllTextAsync(blocked, "original blocked DLL");
@@ -267,8 +270,14 @@ public sealed partial class ApplicationUpdateTests
             Assert.Equal("private settings", await File.ReadAllTextAsync(Path.Combine(install, "settings.json")));
             foreach (var pair in before) Assert.Equal(pair.Value, SHA256.HashData(await File.ReadAllBytesAsync(pair.Key)));
             using var result = JsonDocument.Parse(await File.ReadAllTextAsync(requestFile + ".result.json")); Assert.False(result.RootElement.GetProperty("success").GetBoolean());
-            using var journal = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(install, ".mtd-update-backup", "journal.json")));
-            Assert.True(journal.RootElement.GetProperty("Completed").GetBoolean());
+            var journalPath = Path.Combine(install, ".mtd-update-backup", "journal.json");
+            if (obstruction == "locked")
+            {
+                using var journal = JsonDocument.Parse(await File.ReadAllTextAsync(journalPath));
+                Assert.True(journal.RootElement.GetProperty("Completed").GetBoolean());
+                Assert.Equal("restored", result.RootElement.GetProperty("recovery").GetString());
+            }
+            else Assert.False(File.Exists(journalPath));
         }
         finally
         {
@@ -295,12 +304,13 @@ public sealed partial class ApplicationUpdateTests
         FileStream? held = null;
         try
         {
-            Assert.Throws<AggregateException>(() => UpdateTransaction.Install(installation, extracted, files, index =>
+            var failure = Assert.Throws<UpdateTransactionException>(() => UpdateTransaction.Install(installation, extracted, files, index =>
             {
                 if (index != 2) return;
                 held = new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None);
                 throw new IOException("Synthetic failure while a replaced file is locked by another process.");
             }));
+            Assert.Equal(UpdateRecoveryStatus.Partial, failure.Recovery);
             Assert.Equal("old exe", await File.ReadAllTextAsync(executable));
             using var journal = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(installation, ".mtd-update-backup", "journal.json")));
             Assert.False(journal.RootElement.GetProperty("Completed").GetBoolean());

@@ -227,9 +227,9 @@ public sealed partial class WorkflowIntegrationTests(ITestOutputHelper output) :
         services.Dispose();
         var log = string.Join('\n', Directory.EnumerateFiles(paths.LogDirectory, "*.log").Select(File.ReadAllText));
         Assert.DoesNotContain(cookiePath, log);
-        Assert.Contains("--cookies <cookie-file>", log);
+        Assert.Contains("\"cookieFile\":true", log);
         Assert.False(Directory.EnumerateFiles(paths.RootDirectory, "test cookies.txt", SearchOption.AllDirectories).Any());
-        Assert.Contains("SponsorBlockMode=Mark", log);
+        Assert.Contains("\"sponsorMark\":true", log);
     }
 
     [Fact]
@@ -638,8 +638,8 @@ public sealed partial class WorkflowIntegrationTests(ITestOutputHelper output) :
         Assert.Equal(range, Assert.Single(services.History.Snapshot()).RequestedRange);
         await services.ShutdownAsync();
         services.Dispose();
-        Assert.Contains("FinalDurationSeconds=8", await File.ReadAllTextAsync(
-            Assert.Single(Directory.GetFiles(paths.LogDirectory, "*.log"))), StringComparison.Ordinal);
+        Assert.Contains(ReadDiagnosticEvents(paths), row => row.Module == DiagnosticModule.Downloads &&
+            row.Stage == DiagnosticStage.Validate && row.OperationId == item.Id && row.Counts?.MediaSeconds == 8);
 
         var queue = new QueuePersistenceService(paths, new NullAppLogger());
         Assert.Equal(range, Assert.Single(await queue.LoadAsync()).RequestedRange);
@@ -692,18 +692,16 @@ public sealed partial class WorkflowIntegrationTests(ITestOutputHelper output) :
         await services.ShutdownAsync();
         services.Dispose();
         var log = string.Join('\n', Directory.EnumerateFiles(paths.LogDirectory, "*.log").Select(File.ReadAllText));
-        Assert.True(log.Split("Analyzed media id=retry403", StringSplitOptions.None).Length >= 3,
-            "The retry must analyze metadata again before downloading.");
-        Assert.Contains($"QueueItemId={item.Id}", log);
-        Assert.Contains("Stage=DownloadingVideo", log);
-        Assert.Contains("Attempt=1", log);
-        Assert.Contains("FailureCategory=HttpForbidden", log);
-        Assert.Contains("HttpStatus=403", log);
-        Assert.Contains("QualityPreset=720", log);
-        Assert.Contains("Container=Auto", log);
+        var events = ReadDiagnosticEvents(paths);
+        Assert.True(events.Count(row => row.Module == DiagnosticModule.Downloads && row.Stage == DiagnosticStage.Match &&
+            row.Outcome == DiagnosticOutcome.Completed) >= 2, "The retry must analyze metadata again before downloading.");
+        Assert.Contains(events, row => row.Module == DiagnosticModule.Downloads && row.Outcome == DiagnosticOutcome.Failed &&
+            row.OperationId == item.Id && row.Counts is { Context: (int)DownloadStatus.DownloadingVideo, Items: 1,
+                Code: (int)DownloadFailureCategory.HttpForbidden, HttpStatus: 403, Quality: 720, Container: (int)PreferredVideoContainer.Auto });
         Assert.DoesNotContain("https://example.test/watch?id=retry403", log);
         Assert.DoesNotContain(cookiePath, log);
-        Assert.True(log.Split("--cookies <cookie-file>", StringSplitOptions.None).Length >= 4,
+        Assert.True(events.Count(row => row.Module == DiagnosticModule.Tools && row.Outcome == DiagnosticOutcome.Requested &&
+            row.Counts?.CookieFile == true) >= 3,
             "Initial analysis, media attempt, and retry analysis must all use the cookies file.");
     }
 
@@ -735,9 +733,12 @@ public sealed partial class WorkflowIntegrationTests(ITestOutputHelper output) :
         Assert.Single(Directory.GetDirectories(sessionRoot));
         await services.ShutdownAsync();
         services.Dispose();
-        var log = string.Join('\n', Directory.EnumerateFiles(paths.LogDirectory, "*.log").Select(File.ReadAllText));
-        Assert.True(log.Split("Analyzed media id=resume503", StringSplitOptions.None).Length >= 3);
+        Assert.True(ReadDiagnosticEvents(paths).Count(row => row.Module == DiagnosticModule.Downloads &&
+            row.Stage == DiagnosticStage.Match && row.Outcome == DiagnosticOutcome.Completed) >= 2);
     }
+
+    private static DiagnosticRecord[] ReadDiagnosticEvents(AppPaths paths) => Directory.EnumerateFiles(paths.LogDirectory, "*.log")
+        .SelectMany(File.ReadLines).Select(line => System.Text.Json.JsonSerializer.Deserialize<DiagnosticRecord>(line, DiagnosticRecord.Json)!).ToArray();
 
     [Fact]
     public async Task PlaylistAnalyzeBatchQueueDownloadAndHistory_PreservePerEntryContext()

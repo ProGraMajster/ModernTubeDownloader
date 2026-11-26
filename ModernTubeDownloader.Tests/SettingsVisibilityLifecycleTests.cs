@@ -127,7 +127,8 @@ public sealed class SettingsVisibilityLifecycleTests
         Assert.True(settings.Visible);
         var categories = Descendants(settings).OfType<Button>()
             .Where(button => button.AccessibleAutomationId?.StartsWith("SettingsCategory", StringComparison.Ordinal) == true).ToArray();
-        Assert.Equal(11, categories.Length);
+        Assert.Equal(12, categories.Length);
+        Assert.Contains(categories, button => button.AccessibleAutomationId == "SettingsCategoryDiagnostics");
         Assert.All(categories, button => Assert.True(button.Visible && button.Width > 0 && button.Height > 0,
             $"Category {button.AccessibleAutomationId} lost its geometry: {button.Bounds}."));
         var scroll = Descendants(settings).Single(control => control.AccessibleAutomationId == "SettingsScroll");

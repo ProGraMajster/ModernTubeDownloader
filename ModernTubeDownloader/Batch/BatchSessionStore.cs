@@ -63,6 +63,13 @@ public sealed class BatchSessionStore(string root)
         try { await AtomicJsonFile.WriteAsync(Path.Combine(Folder(session.Id), "session.json"), session.MetadataSnapshot(), token).ConfigureAwait(false); }
         finally { session.MetadataWriteGate.Release(); }
     }
+    internal static InvalidDataException InvalidSession(int code)
+    {
+        var error = new InvalidDataException("Batch.Error.Session");
+        error.Data["BatchDiagnosticCode"] = code;
+        return error;
+    }
+
     internal async IAsyncEnumerable<BatchImportSession> UnfinishedSessionsAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token, Action<Exception>? onUnreadable = null)
     {
@@ -76,7 +83,10 @@ public sealed class BatchSessionStore(string root)
             {
                 value = await AtomicJsonFile.ReadAsync<BatchImportSession>(Path.Combine(directory, "session.json"), token).ConfigureAwait(false);
                 if (value is null && await IsTerminalImportAsync(directory, id, token).ConfigureAwait(false)) continue;
-                if (value is null || value.SchemaVersion != 1 || value.Id != id || !Enum.IsDefined(value.WorkflowPhase)) throw new InvalidDataException("Batch.Error.Session");
+                if (value is null) throw InvalidSession(1);
+                if (value.SchemaVersion != 1) throw InvalidSession(2);
+                if (value.Id != id) throw InvalidSession(3);
+                if (!Enum.IsDefined(value.WorkflowPhase)) throw InvalidSession(4);
             }
             catch (Exception error) when (onUnreadable is not null && (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException))
             { onUnreadable(error); continue; }
@@ -170,8 +180,10 @@ public sealed class BatchSessionStore(string root)
     private async Task<BatchImportSession> LoadCoreAsync(Guid id, CancellationToken token)
     {
         var session = await AtomicJsonFile.ReadAsync<BatchImportSession>(Path.Combine(Folder(id), "session.json"), token)
-            ?? throw new InvalidDataException("Batch.Error.Session");
-        if (session.SchemaVersion != 1 || session.Id != id) throw new InvalidDataException("Batch.Error.Session");
+            ?? throw InvalidSession(1);
+        if (session.SchemaVersion != 1) throw InvalidSession(2);
+        if (session.Id != id) throw InvalidSession(3);
+        if (!Enum.IsDefined(session.WorkflowPhase)) throw InvalidSession(4);
         await ReadRows(Path.Combine(Folder(id), "entries.jsonl"), false);
         await ReadRows(Path.Combine(Folder(id), "updates.jsonl"), true);
         session.Paused = true;
@@ -183,7 +195,7 @@ public sealed class BatchSessionStore(string root)
 
         async Task ReadRows(string path, bool journal)
         {
-            if (!File.Exists(path)) { if (!journal) throw new InvalidDataException("Batch.Error.Session"); return; }
+            if (!File.Exists(path)) { if (!journal) throw InvalidSession(5); return; }
             var torn = false;
             using (var reader = new StreamReader(path, Encoding.UTF8))
             {
