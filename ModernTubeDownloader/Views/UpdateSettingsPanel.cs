@@ -127,7 +127,7 @@ internal sealed class UpdateSettingsPanel : Panel
             services.Localization[state.LastStartupResultKey ?? "Updates.StartupNotAttempted"]);
         versions.Text = services.Localization.Get("Updates.Versions", services.Updates.CurrentVersion, state.Available?.Version ?? "—");
         status.Text = services.Localization[actionFailed ? "Updates.Failed" : services.Updates.StatusKey];
-        AppUi.BindForeground(status, actionFailed || services.Updates.StatusKey is "Updates.Failed" or "Updates.InstallFailed" ? AppThemeTokens.Error : ready ? AppThemeTokens.Success : AppThemeTokens.TextSecondary);
+        AppUi.BindForeground(status, actionFailed || state.InstallationFailed || state.InstallerRestartUnconfirmed || services.Updates.StatusKey == "Updates.Failed" ? AppThemeTokens.Error : ready ? AppThemeTokens.Success : AppThemeTokens.TextSecondary);
         progress.Value = (int)Math.Clamp(services.Updates.Progress, 0, 100);
         download.Enabled = !busy && state.Available is not null && !ready;
         install.Enabled = !busy && ready && !services.Updates.InstallationPending;

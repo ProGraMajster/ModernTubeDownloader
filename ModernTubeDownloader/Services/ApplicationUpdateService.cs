@@ -11,6 +11,8 @@ using ModernTubeDownloader.Updates;
 namespace ModernTubeDownloader.Services;
 
 public sealed record ApplicationRelease(string Version, string Notes, Uri Page, Uri Archive, Uri Checksum);
+public enum InstallerRecoveryStatus { Unknown, Partial, Restored }
+
 public sealed class ApplicationUpdateState
 {
     [System.Text.Json.Serialization.JsonExtensionData]
@@ -26,6 +28,8 @@ public sealed class ApplicationUpdateState
     public int? LastInstallerProcessId { get; set; }
     public long? LastInstallerStartUtcTicks { get; set; }
     public bool InstallationFailed { get; set; }
+    public InstallerRecoveryStatus InstallerRecovery { get; set; }
+    public bool InstallerRestartUnconfirmed { get; set; }
     public string? AutomaticInstallSuppressedVersion { get; set; }
     public string? LastStartupAttemptVersion { get; set; }
     public DateTimeOffset? LastStartupAttemptAt { get; set; }
@@ -119,6 +123,13 @@ public sealed partial class ApplicationUpdateService : IDisposable
     public bool Ready => initialized && !StateUnavailable && HasStagedArchive;
     public bool InstallationPending => State.LastInstallerRequest is not null && !State.InstallationFailed;
     public bool ShouldInstallOnExit => Ready && State.InstallOnExit && !IsDeferred && !State.InstallationFailed && !InstallationPending;
+    private string? InstallerNotice => OutcomeNotice(State);
+    private static string? OutcomeNotice(ApplicationUpdateState state) => state.InstallationFailed ? state.InstallerRecovery switch
+    {
+        InstallerRecoveryStatus.Partial => "Updates.RollbackPartial",
+        InstallerRecoveryStatus.Restored => "Updates.RollbackRestored",
+        _ => "Updates.InstallFailed"
+    } : state.InstallerRestartUnconfirmed ? "Updates.InstalledRestartUnconfirmed" : null;
     private bool IsDeferred => State.Available is null || State.Available.Version == State.SkippedVersion || State.RemindAfter > DateTimeOffset.UtcNow;
 
     public ApplicationUpdateService(AppPaths paths, SettingsService settings, HttpClient http, IAppLogger logger,
@@ -186,55 +197,37 @@ public sealed partial class ApplicationUpdateService : IDisposable
         }
         try
         {
+            // Recovery evidence is independent of the ZIP used to start the installer.
+            if (State.LastInstallerRequest is { } request)
+                await ConsumeInstallerResultAsync(request, token);
+
             if (State.Available is not null) ValidateRelease(State.Available);
             if (State.Available is null || !IsNewer(State.Available.Version, CurrentVersion))
-            { State.Available = null; ClearStaging(); State.InstallationFailed = false; }
+            {
+                State.Available = null;
+                ClearStaging();
+            }
             else if (State.StagedArchive is not null)
             {
                 ValidateStagedPath();
-                await UpdatePackageSecurity.VerifyAsync(State.StagedArchive, State.StagedHash ?? "", token);
-            }
-            if (State.LastInstallerRequest is { } request)
-            {
-                if (!IsOwnedPath(request) || Path.GetFileName(request) != "request.json") throw new InvalidDataException("Unexpected installer result path.");
-                UpdatePackageSecurity.EnsureNoReparsePoints(request);
-                var result = request + ".result.json";
-                UpdatePackageSecurity.EnsureNoReparsePoints(result);
-                if (File.Exists(result))
+                try { await UpdatePackageSecurity.VerifyAsync(State.StagedArchive, State.StagedHash ?? "", token); }
+                catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException)
                 {
-                    if (new FileInfo(result).Length > 65536) throw new InvalidDataException("Installer result exceeds the limit.");
-                    using var json = JsonDocument.Parse(await File.ReadAllTextAsync(result, token));
-                    State.InstallationFailed = !json.RootElement.GetProperty("success").GetBoolean();
-                    var runnerName = Path.GetFileName(Path.GetDirectoryName(request));
-                    Guid? operation = runnerName is { Length: 39 } && runnerName.StartsWith("runner-", StringComparison.Ordinal) &&
-                        Guid.TryParseExact(runnerName[7..], "N", out var parsed) ? parsed : null;
-                    logger.Event(new(DiagnosticModule.Updater, DiagnosticStage.Result,
-                        State.InstallationFailed ? DiagnosticOutcome.Failed : DiagnosticOutcome.Completed,
-                        State.InstallationFailed ? DiagnosticLevel.Warn : DiagnosticLevel.Info, operation));
-                    if (State.LastStartupResultKey == "Updates.StartupInstalling")
-                        State.LastStartupResultKey = State.InstallationFailed ? "Updates.InstallFailed" : "Updates.Current";
-                    State.LastInstallerRequest = null;
-                    State.LastInstallerProcessId = null; State.LastInstallerStartUtcTicks = null;
-                    State.InstallOnExit = false;
-                    await SaveAsync(token);
-                }
-                else if (!InstallerProcessIsRunning())
-                {
-                    State.LastInstallerRequest = null; State.InstallationFailed = true; State.InstallOnExit = false;
-                    if (State.LastStartupResultKey == "Updates.StartupInstalling")
-                        State.LastStartupResultKey = "Updates.InstallFailed";
-                    State.LastInstallerProcessId = null; State.LastInstallerStartUtcTicks = null;
+                    ClearStaging();
+                    logger.Event(new(DiagnosticModule.Updater, DiagnosticStage.Checksum, DiagnosticOutcome.Unavailable,
+                        DiagnosticLevel.Warn, Exception: error));
                     await SaveAsync(token);
                 }
             }
             if (IsDeferred || State.InstallationFailed) State.InstallOnExit = false;
-            StatusKey = State.InstallationFailed ? "Updates.InstallFailed" : InstallationPending ? "Updates.InstallPending" : HasStagedArchive ? "Updates.Ready" : "Updates.Idle";
+            StatusKey = InstallerNotice ?? (InstallationPending ? "Updates.InstallPending" : HasStagedArchive ? "Updates.Ready" : "Updates.Idle");
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception error)
         {
-            ClearStaging(); State.LastInstallerRequest = null; StateUnavailable = true;
-            Fail("Stored update state or staged package failed validation; no installation is armed.", error);
+            ClearStaging(); StateUnavailable = true;
+            logger.Error("Stored update state or staged package failed validation; no installation is armed.", error);
+            StatusKey = InstallerNotice ?? "Updates.Failed";
         }
     }
 
@@ -252,7 +245,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
                 }
                 catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { break; }
                 catch (Exception error) { Fail("This application update attempt failed; the monitor will retry later.", error); }
-                await Task.Delay(TimeSpan.FromMinutes(15), lifetime.Token);
+                await Task.Delay(InstallationPending ? TimeSpan.FromSeconds(1) : TimeSpan.FromMinutes(15), lifetime.Token);
             }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
@@ -263,6 +256,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
     {
         await InitializeAsync(token);
         if (StateUnavailable) return;
+        await ObserveInstallerAsync(token);
         var options = settings.Current.Updates;
         if (!options.AutomaticChecks || InstallationPending) return;
         var interval = options.Frequency == UpdateCheckFrequency.Weekly ? TimeSpan.FromDays(7) : TimeSpan.FromDays(1);
@@ -342,14 +336,14 @@ public sealed partial class ApplicationUpdateService : IDisposable
             var available = latest is not null && IsNewer(latest.Version, CurrentVersion) ? latest : null;
             var next = State.Copy();
             if (next.Available?.Version != available?.Version || available is null)
-            { next.StagedArchive = null; next.StagedHash = null; next.InstallOnExit = false; next.InstallationFailed = false; }
+            { next.StagedArchive = null; next.StagedHash = null; next.InstallOnExit = false; }
             next.Available = available;
             next.LastCheck = DateTimeOffset.UtcNow;
             // A failed or canceled durable write is not a successful check. Keep
             // the previous release/staging and retry eligibility until commit.
             await SaveAsync(next, token);
             State = next;
-            Publish(State.InstallationFailed ? "Updates.InstallFailed" : Ready ? "Updates.Ready" : State.Available is null ? "Updates.Current" : "Updates.Available");
+            Publish(InstallerNotice ?? (InstallationPending ? "Updates.InstallPending" : Ready ? "Updates.Ready" : State.Available is null ? "Updates.Current" : "Updates.Available"));
             RecordCheck(DiagnosticOutcome.Completed);
         }
         catch (OperationCanceledException error) when (!callerToken.IsCancellationRequested && !lifetime.IsCancellationRequested)
@@ -388,7 +382,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
             {
                 ValidateStagedPath();
                 await UpdatePackageSecurity.VerifyAsync(State.StagedArchive!, State.StagedHash!, token);
-                Publish(State.InstallationFailed ? "Updates.InstallFailed" : "Updates.Ready");
+                Publish(InstallerNotice ?? "Updates.Ready");
                 transferOutcome = DiagnosticOutcome.Completed;
                 return;
             }
@@ -438,7 +432,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
                 Counts: new(Files: extracted.Count)));
             File.Move(partial, staged, true); partial = null;
             State.StagedArchive = staged; State.StagedHash = fields[0]; Progress = 100;
-            await SaveAsync(token); Publish("Updates.Ready"); UpdatePrepared?.Invoke(this, release.Version);
+            await SaveAsync(token); Publish(InstallerNotice ?? "Updates.Ready"); UpdatePrepared?.Invoke(this, release.Version);
             transferOutcome = DiagnosticOutcome.Completed;
         }
         catch (OperationCanceledException) { transferOutcome = DiagnosticOutcome.Cancelled; throw; }
@@ -472,6 +466,85 @@ public sealed partial class ApplicationUpdateService : IDisposable
     }
 
     private static bool IsStableVersion(string version) => Regex.IsMatch(version, @"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$");
+    private async Task<bool> ConsumeInstallerResultAsync(string request, CancellationToken token)
+    {
+        if (!IsOwnedPath(request) || Path.GetFileName(request) != "request.json")
+            throw new InvalidDataException("Unexpected installer result path.");
+        UpdatePackageSecurity.EnsureNoReparsePoints(request);
+        var result = request + ".result.json";
+        UpdatePackageSecurity.EnsureNoReparsePoints(result);
+        // Opening the target of the installer's atomic result replacement can
+        // itself obstruct that replacement on Windows.
+        if (InstallerProcessIsRunning()) return false;
+
+        var runner = Path.GetFileName(Path.GetDirectoryName(request));
+        Guid? operation = runner is { Length: 39 } && runner.StartsWith("runner-", StringComparison.Ordinal) &&
+            Guid.TryParseExact(runner[7..], "N", out var id) ? id : null;
+        var success = false;
+        var restartUnconfirmed = false;
+        var recovery = InstallerRecoveryStatus.Unknown;
+        try
+        {
+            await using var stream = new FileStream(result, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096, true);
+            if (stream.Length > 65536) throw new InvalidDataException("Installer result exceeds the limit.");
+            using var document = await JsonDocument.ParseAsync(stream, new JsonDocumentOptions { AllowDuplicateProperties = false }, token);
+            var json = document.RootElement;
+            if (json.ValueKind != JsonValueKind.Object || !json.TryGetProperty("success", out var completed) ||
+                completed.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new InvalidDataException("Installer result has no valid success flag.");
+            if (json.TryGetProperty("operationId", out var reportedId) &&
+                (reportedId.ValueKind != JsonValueKind.String || !reportedId.TryGetGuid(out var parsedId) || parsedId != operation))
+                throw new InvalidDataException("Unexpected installer operation identity.");
+            success = completed.GetBoolean();
+            restartUnconfirmed = success && ((json.TryGetProperty("restartError", out var launch) && launch.ValueKind == JsonValueKind.Object) ||
+                (json.TryGetProperty("restartPending", out var pending) && pending.ValueKind == JsonValueKind.True));
+            if (!success && json.TryGetProperty("recovery", out var report) && report.ValueKind == JsonValueKind.String)
+                recovery = report.GetString() switch
+                {
+                    "restored" => InstallerRecoveryStatus.Restored,
+                    "partial" => InstallerRecoveryStatus.Partial,
+                    _ => InstallerRecoveryStatus.Unknown
+                };
+        }
+        catch (FileNotFoundException) { }
+        catch (DirectoryNotFoundException) { }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+        {
+            logger.Event(new(DiagnosticModule.Updater, DiagnosticStage.Result, DiagnosticOutcome.Unavailable,
+                DiagnosticLevel.Warn, operation, Exception: error));
+        }
+
+        var next = State.Copy();
+        next.InstallationFailed = !success;
+        next.InstallerRecovery = recovery;
+        next.InstallerRestartUnconfirmed = restartUnconfirmed;
+        if (next.LastStartupResultKey == "Updates.StartupInstalling")
+            next.LastStartupResultKey = OutcomeNotice(next) ?? "Updates.Current";
+        next.LastInstallerRequest = null;
+        next.LastInstallerProcessId = null;
+        next.LastInstallerStartUtcTicks = null;
+        next.InstallOnExit = false;
+        await SaveAsync(next, token);
+        State = next;
+        logger.Event(new(DiagnosticModule.Updater, DiagnosticStage.Result, success ? DiagnosticOutcome.Completed : DiagnosticOutcome.Failed,
+            success ? DiagnosticLevel.Info : DiagnosticLevel.Warn, operation, Counts: new(Context: (int)recovery, Code: restartUnconfirmed ? 1 : 0)));
+        return true;
+    }
+
+    private async Task ObserveInstallerAsync(CancellationToken token)
+    {
+        if (!InstallationPending) return;
+        await gate.WaitAsync(token);
+        string? status = null;
+        try
+        {
+            if (State.LastInstallerRequest is { } request && await ConsumeInstallerResultAsync(request, token))
+                status = InstallerNotice ?? (Ready ? "Updates.Ready" : "Updates.Current");
+        }
+        finally { gate.Release(); }
+        if (status is not null) Publish(status);
+    }
+
     private bool InstallerProcessIsRunning()
     {
         if (State.LastInstallerProcessId is not { } id || State.LastInstallerStartUtcTicks is not { } ticks) return false;
@@ -580,6 +653,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
         await File.WriteAllTextAsync(requestFile, JsonSerializer.Serialize(request), token);
         CheckStartupAdmission();
         State.LastInstallerRequest = requestFile; State.InstallationFailed = false; State.InstallOnExit = false;
+        State.InstallerRecovery = InstallerRecoveryStatus.Unknown; State.InstallerRestartUnconfirmed = false;
         if (startup)
         {
             State.LastStartupAttemptVersion = State.Available.Version;
@@ -648,6 +722,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
                 throw new IOException("The pending startup updater could neither be stopped nor disarmed; normal exit is blocked.", error);
             }
             State.InstallOnExit = false; State.InstallationFailed = true; State.LastInstallerRequest = null;
+            State.InstallerRecovery = InstallerRecoveryStatus.Unknown; State.InstallerRestartUnconfirmed = false;
             State.LastInstallerProcessId = null; State.LastInstallerStartUtcTicks = null;
             if (startup) State.LastStartupResultKey = error is OperationCanceledException ? "Updates.StartupDeferred" : "Updates.StartupFailed";
             await SaveAsync(CancellationToken.None); Publish("Updates.InstallFailed"); throw;
