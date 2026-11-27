@@ -14,6 +14,7 @@ public sealed partial class ApplicationUpdateService
     private string? pendingStartupResultKey;
     private DateTimeOffset lastStartupCheckAttempt;
     internal StartupTransfer? StartupProgress { get; private set; }
+    internal string? StartupTargetVersion => IsDeferred ? null : State.Available?.Version;
 
     private bool CheckIsDue(TimeSpan interval) =>
         !State.LastCheck.HasValue || DateTimeOffset.UtcNow - State.LastCheck >= interval;
@@ -25,11 +26,12 @@ public sealed partial class ApplicationUpdateService
             return StartupUpdateOutcome.NotRequested;
         await InitializeAsync(token).ConfigureAwait(false);
         if (StateUnavailable) return StartupUpdateOutcome.Failed;
-        if (InstallationPending) return StartupUpdateOutcome.Deferred;
+        if (InstallationPending || State.InstallationFailed) return StartupUpdateOutcome.Deferred;
         if (!CheckIsDue(TimeSpan.FromDays(1)))
             return State.Available is null || IsDeferred ? StartupUpdateOutcome.Current : StartupUpdateOutcome.Available;
         lastStartupCheckAttempt = DateTimeOffset.UtcNow;
-        return await CheckForUpdateAsync(token, operationId).ConfigureAwait(false);
+        var outcome = await CheckForUpdateAsync(token, operationId).ConfigureAwait(false);
+        return outcome == StartupUpdateOutcome.Available && IsDeferred ? StartupUpdateOutcome.Deferred : outcome;
     }
 
     internal bool CanInstallAtStartup => settings.Current.Updates.AutomaticChecks && settings.Current.Updates.InstallAtStartup &&

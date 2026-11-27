@@ -19,7 +19,7 @@ internal sealed class StartupCoordinator(ApplicationUpdateService updates, IAppL
     }
     internal StartupPhase Phase { get; private set; } = StartupPhase.Initialize;
     internal StartupUpdateOutcome Outcome { get; private set; }
-    internal string? TargetVersion => updates.State.Available?.Version;
+    internal string? TargetVersion => updates.StartupTargetVersion;
     internal StartupTransfer? Transfer => updates.StartupProgress;
     internal event EventHandler? Changed;
 
@@ -86,7 +86,7 @@ internal sealed class StartupCoordinator(ApplicationUpdateService updates, IAppL
         switch (updates.StatusKey)
         {
             case "Updates.Checking": Report(StartupPhase.Check); break;
-            case "Updates.Available": Report(StartupPhase.Available); break;
+            case "Updates.Available" when TargetVersion is not null: Report(StartupPhase.Available); break;
             case "Updates.Downloading": Report(StartupPhase.Download); break;
             case "Startup.Verify": Report(StartupPhase.Verify); break;
         }

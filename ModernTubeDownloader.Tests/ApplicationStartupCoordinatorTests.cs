@@ -53,6 +53,28 @@ public sealed partial class ApplicationUpdateTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StartupLookupDoesNotPresentSkippedOrDeferredRelease(bool skip)
+    {
+        using var fixture = new Fixture();
+        using var http = new HttpClient();
+        var paths = AppPaths.Create(Path.Combine(fixture.Root, "data"));
+        var logger = new NullAppLogger();
+        var settings = new SettingsService(paths, logger);
+        await settings.LoadAsync();
+        settings.Current.Updates.AutomaticChecks = true;
+        using var service = new ApplicationUpdateService(paths, settings, http, logger, new StartupFeed(Release()), "1.1.0");
+        await service.InitializeAsync();
+        if (skip) service.State.SkippedVersion = Release().Version;
+        else service.State.RemindAfter = DateTimeOffset.UtcNow.AddHours(1);
+
+        Assert.Equal(StartupUpdateOutcome.Deferred, await service.CheckForStartupAsync(default, Guid.NewGuid()));
+        Assert.Null(service.StartupTargetVersion);
+        Assert.False(service.Ready);
+    }
+
+    [Theory]
     [InlineData(null, "Offline")]
     [InlineData(HttpStatusCode.TooManyRequests, "Failed")]
     public async Task StartupLookupClassifiesNetworkOutageAndRateLimitWithoutChangingPolicy(HttpStatusCode? status, string outcome)
