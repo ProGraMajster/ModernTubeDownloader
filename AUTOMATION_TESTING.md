@@ -1,6 +1,6 @@
 # UI automation testing
 
-ModernTubeDownloader uses the existing ModernFormsNext `AccessibleObject` tree through `ModernFormsNext.Automation` and its Windows named-pipe bridge. It does not maintain a second UI tree. The bridge is **off by default** and is compiled only into Debug builds. A normal `ModernTubeDownloader.exe` launch has no Automation endpoint; a Release build does not contain the Automation project references and rejects `--automation`.
+ModernTubeDownloader uses the ModernFormsNext `AccessibleObject` tree through `ModernFormsNext.Automation` and its Windows named-pipe bridge. The bridge is **off by default** and is compiled only into Debug builds. A normal `ModernTubeDownloader.exe` launch has no Automation endpoint. Release builds exclude the automation packages and reject `--automation`.
 
 ## Start and discover
 
@@ -8,18 +8,18 @@ Candidate.3 added `NotificationsSection`, `NotificationEnabled`, all individual 
 
 The UI harness captures only its owned HWND. Native banner/center/cold-click evidence is separate; see [candidate report](CANDIDATE3_NOTIFICATIONS_PIPELINE_REPORT.md). Running with an isolated environment-variable data root does not propagate that root to an Explorer/COM cold launch: do not claim an isolated cold-start test unless profile/identity ownership is established.
 
-Build the Debug application and the CLI from the same pinned ModernFormsNext source checkout (`8d8a7679779608b4edbee7dc687c13e3b1a611d9`, notification hotfix based on master; retained for 1.2.1):
+Build the Debug solution and the development-only CLI. Both restore the exact same ModernFormsNext automation version from NuGet.org. The CLI uses the upstream command-line client and is built separately from the application:
 
 ```powershell
-dotnet build .\ModernTubeDownloader\ModernTubeDownloader.csproj -c Debug -m:1 /p:UseSharedCompilation=false
-dotnet build .\.mfn-master-worktree\ModernFormsNext.Automation.Cli\ModernFormsNext.Automation.Cli.csproj -c Debug -m:1 /p:UseSharedCompilation=false
-.\ModernTubeDownloader\bin\Debug\net10.0-windows10.0.26100.0\ModernTubeDownloader.exe --automation
+dotnet build .\ModernTubeDownloader.slnx -c Debug -m:1 /p:UseSharedCompilation=false
+dotnet build .\qa\AutomationCli\AutomationCli.csproj -c Debug -m:1 /p:UseSharedCompilation=false
+.\ModernTubeDownloader\bin\Debug\net11.0-windows10.0.26100.0\ModernTubeDownloader.exe --automation
 ```
 
 In a second terminal:
 
 ```powershell
-$cli = '.\.mfn-master-worktree\ModernFormsNext.Automation.Cli\bin\Debug\net10.0-windows\ModernFormsNext.Automation.Cli.dll'
+$cli = '.\qa\AutomationCli\bin\Debug\net11.0-windows\AutomationCli.dll'
 dotnet $cli list --json
 dotnet $cli roots --pid <PID> --json
 dotnet $cli tree --pid <PID> --depth 8

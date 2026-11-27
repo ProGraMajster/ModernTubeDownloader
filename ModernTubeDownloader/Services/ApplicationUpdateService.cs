@@ -260,7 +260,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
         var options = settings.Current.Updates;
         if (!options.AutomaticChecks || InstallationPending) return;
         var interval = options.Frequency == UpdateCheckFrequency.Weekly ? TimeSpan.FromDays(7) : TimeSpan.FromDays(1);
-        if (!State.LastCheck.HasValue || DateTimeOffset.UtcNow - State.LastCheck >= interval) await CheckAsync(token);
+        if (CheckIsDue(interval) && DateTimeOffset.UtcNow - lastStartupCheckAttempt >= TimeSpan.FromMinutes(15)) await CheckAsync(token);
         // Settings may change while the network operation is in progress.
         options = settings.Current.Updates;
         if (!options.AutomaticChecks || options.Mode == UpdateInstallMode.NotifyOnly || IsDeferred || State.InstallationFailed) return;
@@ -309,12 +309,14 @@ public sealed partial class ApplicationUpdateService : IDisposable
         finally { gate.Release(); }
     }
 
-    public async Task CheckAsync(CancellationToken token = default)
+    public async Task CheckAsync(CancellationToken token = default) => await CheckForUpdateAsync(token);
+
+    private async Task<StartupUpdateOutcome> CheckForUpdateAsync(CancellationToken token, Guid? parentOperation = null)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
         var callerToken = token;
         await InitializeAsync(linked.Token);
-        if (StateUnavailable) return;
+        if (StateUnavailable) return StartupUpdateOutcome.Failed;
         await gate.WaitAsync(linked.Token);
         // Start after admission to the serialized check, exactly as CancelAfter did.
         // Production uses the system clock; tests can advance this same deadline
@@ -326,7 +328,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
         var checkTimer = Stopwatch.StartNew();
         void RecordCheck(DiagnosticOutcome outcome, Exception? error = null) =>
             logger.Event(new(DiagnosticModule.Updater, DiagnosticStage.Check, outcome,
-                outcome == DiagnosticOutcome.Failed ? DiagnosticLevel.Warn : DiagnosticLevel.Info, checkId,
+                outcome == DiagnosticOutcome.Failed ? DiagnosticLevel.Warn : DiagnosticLevel.Info, checkId, parentOperation,
                 DurationMs: checkTimer.ElapsedMilliseconds, Exception: error));
         RecordCheck(DiagnosticOutcome.Started);
         try
@@ -345,11 +347,17 @@ public sealed partial class ApplicationUpdateService : IDisposable
             State = next;
             Publish(InstallerNotice ?? (InstallationPending ? "Updates.InstallPending" : Ready ? "Updates.Ready" : State.Available is null ? "Updates.Current" : "Updates.Available"));
             RecordCheck(DiagnosticOutcome.Completed);
+            return available is null ? StartupUpdateOutcome.Current : StartupUpdateOutcome.Available;
         }
         catch (OperationCanceledException error) when (!callerToken.IsCancellationRequested && !lifetime.IsCancellationRequested)
-        { RecordCheck(DiagnosticOutcome.Failed, error); Fail("Checking application updates exceeded its deadline; checking can be retried.", error); }
-        catch (OperationCanceledException error) { RecordCheck(DiagnosticOutcome.Cancelled, error); throw; }
-        catch (Exception error) { RecordCheck(DiagnosticOutcome.Failed, error); Fail("Checking application updates failed.", error); }
+        { RecordCheck(DiagnosticOutcome.Failed, error); Fail("Checking application updates exceeded its deadline; checking can be retried.", error); return StartupUpdateOutcome.TimedOut; }
+        catch (OperationCanceledException error)
+        {
+            RecordCheck(DiagnosticOutcome.Cancelled, error);
+            if (parentOperation is not null) Publish(InstallerNotice ?? "Updates.Idle");
+            throw;
+        }
+        catch (Exception error) { RecordCheck(DiagnosticOutcome.Failed, error); Fail("Checking application updates failed.", error); return error is HttpRequestException { StatusCode: null } ? StartupUpdateOutcome.Offline : StartupUpdateOutcome.Failed; }
         finally { gate.Release(); }
     }
 
@@ -360,7 +368,9 @@ public sealed partial class ApplicationUpdateService : IDisposable
             (candidate > installed || candidate == installed && currentParts.Length == 2);
     }
 
-    public async Task DownloadAsync(CancellationToken token = default)
+    public Task DownloadAsync(CancellationToken token = default) => DownloadCoreAsync(token);
+
+    private async Task DownloadCoreAsync(CancellationToken token, Guid? parentOperation = null)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
         token = linked.Token;
@@ -373,7 +383,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
         var transferId = Guid.NewGuid();
         var transferOutcome = DiagnosticOutcome.Failed;
         var downloaded = 0L;
-        logger.Event(new(DiagnosticModule.Updater, DiagnosticStage.Download, DiagnosticOutcome.Started, OperationId: transferId));
+        logger.Event(new(DiagnosticModule.Updater, DiagnosticStage.Download, DiagnosticOutcome.Started, OperationId: transferId, ParentOperationId: parentOperation));
         try
         {
             var release = State.Available ?? throw new InvalidOperationException("No update is available.");
@@ -386,7 +396,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
                 transferOutcome = DiagnosticOutcome.Completed;
                 return;
             }
-            Publish("Updates.Downloading"); Progress = 0;
+            StartupProgress = null; Progress = 0; Publish("Updates.Downloading");
             using var checksumResponse = await http.GetAsync(release.Checksum, HttpCompletionOption.ResponseHeadersRead, token);
             logger.Event(new(DiagnosticModule.Network, DiagnosticStage.Checksum, DiagnosticOutcome.Completed, DiagnosticLevel.Debug,
                 ParentOperationId: transferId, Counts: new(Code: (int)checksumResponse.StatusCode)));
@@ -420,9 +430,16 @@ public sealed partial class ApplicationUpdateService : IDisposable
                             Counts: new(Bytes: downloaded, Total: response.Content.Headers.ContentLength)));
                     }
                     if (lastProgress.ElapsedMilliseconds >= 250)
-                    { Progress = response.Content.Headers.ContentLength is > 0 ? output.Length * 100d / response.Content.Headers.ContentLength.Value : 0; Changed?.Invoke(this, EventArgs.Empty); lastProgress.Restart(); }
+                    {
+                        var total = response.Content.Headers.ContentLength is > 0 ? response.Content.Headers.ContentLength : null;
+                        StartupProgress = new(downloaded, total, (long)(downloaded / Math.Max(transfer.Elapsed.TotalSeconds, 0.1)));
+                        Progress = StartupProgress.Percent ?? 0;
+                        Changed?.Invoke(this, EventArgs.Empty);
+                        lastProgress.Restart();
+                    }
                 }
             }
+            if (parentOperation is not null) Publish("Startup.Verify");
             await UpdatePackageSecurity.VerifyAsync(partial, fields[0], token);
             logger.Event(new(DiagnosticModule.Updater, DiagnosticStage.Checksum, DiagnosticOutcome.Completed, OperationId: transferId));
             // Validate all paths before accepting staging; extraction happens again in the external updater.
@@ -440,7 +457,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
         finally
         {
             logger.Event(new(DiagnosticModule.Updater, DiagnosticStage.Download, transferOutcome,
-                transferOutcome == DiagnosticOutcome.Failed ? DiagnosticLevel.Warn : DiagnosticLevel.Info, transferId,
+                transferOutcome == DiagnosticOutcome.Failed ? DiagnosticLevel.Warn : DiagnosticLevel.Info, transferId, parentOperation,
                 DurationMs: transfer.ElapsedMilliseconds, Counts: new(Bytes: downloaded)));
             try
             {
@@ -614,14 +631,14 @@ public sealed partial class ApplicationUpdateService : IDisposable
         }
     }
 
-    public Task LaunchInstallerAsync(bool restart, CancellationToken token = default, bool startup = false)
-        => LaunchInstallerCoreAsync(restart, token, startup, null, null);
+    public Task LaunchInstallerAsync(bool restart, CancellationToken token = default, bool startup = false, bool showProgress = false)
+        => LaunchInstallerCoreAsync(restart, token, startup, null, null, showProgress: showProgress);
 
-    internal Task LaunchStartupInstallerAsync(Func<bool> workStillAllowsInstallation, Action commitShutdown, CancellationToken token = default)
-        => LaunchInstallerCoreAsync(true, token, true, workStillAllowsInstallation, commitShutdown);
+    internal Task LaunchStartupInstallerAsync(Func<bool> workStillAllowsInstallation, Action commitShutdown, CancellationToken token = default, Guid? operationId = null, bool showProgress = false)
+        => LaunchInstallerCoreAsync(true, token, true, workStillAllowsInstallation, commitShutdown, operationId, showProgress);
 
     private async Task LaunchInstallerCoreAsync(bool restart, CancellationToken token, bool startup,
-        Func<bool>? workStillAllowsInstallation, Action? commitShutdown)
+        Func<bool>? workStillAllowsInstallation, Action? commitShutdown, Guid? operationId = null, bool showProgress = false)
     {
         await InitializeAsync(token); EnsureStateWritable();
         await gate.WaitAsync(token);
@@ -638,7 +655,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
         ValidateStagedPath();
         if (!IsNewer(State.Available.Version, CurrentVersion)) throw new InvalidDataException("The staged release cannot replace this version.");
         await UpdatePackageSecurity.VerifyAsync(State.StagedArchive!, State.StagedHash!, token);
-        var updateId = Guid.NewGuid();
+        var updateId = operationId ?? Guid.NewGuid();
         var runner = Path.Combine(root, "runner-" + updateId.ToString("N"));
         Directory.CreateDirectory(runner);
         var source = InstallerSourceDirectory;
@@ -647,7 +664,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
         foreach (var file in Directory.EnumerateFiles(source)) File.Copy(file, Path.Combine(runner, Path.GetFileName(file)));
         using var parent = Process.GetCurrentProcess();
         var request = new UpdaterRequest(AppContext.BaseDirectory, State.StagedArchive!, State.StagedHash!, parent.Id, parent.StartTime.ToUniversalTime().Ticks, restart,
-            startup ? Guid.NewGuid().ToString("N") : null, updateId);
+            startup ? Guid.NewGuid().ToString("N") : null, updateId, showProgress ? settings.Current.Language : null);
         var requestFile = Path.Combine(runner, "request.json");
         if (startup) startupCommitMarker = StartupUpdateAdmission.MarkerPath(requestFile);
         await File.WriteAllTextAsync(requestFile, JsonSerializer.Serialize(request), token);

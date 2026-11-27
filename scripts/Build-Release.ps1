@@ -1,8 +1,7 @@
 ﻿[CmdletBinding()]
 param(
-    [string] $ModernFormsNextRoot = "",
     [string] $ArtifactsDirectory = "",
-    [switch] $AllowUncommittedFrameworkForCandidate
+    [switch] $DevelopmentPackage
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,20 +10,6 @@ $solutionPath = Join-Path $repositoryRoot 'ModernTubeDownloader.slnx'
 $applicationProject = Join-Path $repositoryRoot 'ModernTubeDownloader\ModernTubeDownloader.csproj'
 $testProject = Join-Path $repositoryRoot 'ModernTubeDownloader.Tests\ModernTubeDownloader.Tests.csproj'
 $propertiesPath = Join-Path $repositoryRoot 'Directory.Build.props'
-$defaultModernFormsNextRoot = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot '.mfn-master-worktree'))
-
-if ([string]::IsNullOrWhiteSpace($ModernFormsNextRoot)) {
-    $ModernFormsNextRoot = $defaultModernFormsNextRoot
-}
-
-$ModernFormsNextRoot = [System.IO.Path]::GetFullPath($ModernFormsNextRoot)
-$buildTarget = if ([string]::Equals($ModernFormsNextRoot, $defaultModernFormsNextRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
-    (Test-Path -LiteralPath $solutionPath -PathType Leaf)) { $solutionPath } else { $testProject }
-$modernFormsProject = Join-Path $ModernFormsNextRoot 'ModernFormsNext\ModernFormsNext.csproj'
-if (-not (Test-Path -LiteralPath $modernFormsProject -PathType Leaf)) {
-    throw "ModernFormsNext was not found at '$ModernFormsNextRoot'. Pass -ModernFormsNextRoot with a checkout containing ModernFormsNext/ModernFormsNext.csproj."
-}
-
 [xml] $properties = Get-Content -LiteralPath $propertiesPath -Raw
 $versionNode = $properties.SelectSingleNode('/Project/PropertyGroup/Version')
 if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText)) {
@@ -32,30 +17,12 @@ if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerTe
 }
 
 $version = $versionNode.InnerText.Trim()
-$frameworkCommit = $properties.SelectSingleNode('/Project/PropertyGroup/ModernFormsNextCommit').InnerText.Trim()
-$actualFrameworkCommit = & git -C $ModernFormsNextRoot rev-parse HEAD
-if ($LASTEXITCODE -ne 0 -or $actualFrameworkCommit -ne $frameworkCommit) {
-    throw 'ModernFormsNext checkout must match the central release pin.'
+if ($DevelopmentPackage -and ($version -notmatch '^\d+\.\d+\.\d+-dev\.\d+$' -or [string]::IsNullOrWhiteSpace($ArtifactsDirectory))) {
+    throw 'Development packaging requires a dev version and a new explicit artifacts directory.'
 }
-$frameworkChanges = & git -C $ModernFormsNextRoot status --porcelain
-if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect ModernFormsNext source checkout.' }
-$frameworkProof = [ordered]@{ BaseCommit = $frameworkCommit; Uncommitted = [bool]$frameworkChanges; PatchSha256 = $null; Files = @() }
-if ($AllowUncommittedFrameworkForCandidate -and $version -notmatch '^\d+\.\d+\.\d+-candidate\.\d+$') {
-    throw 'Uncommitted framework qualification is allowed only for an explicit local candidate, never a stable release.'
-}
-if ($frameworkChanges) {
-    if (-not $AllowUncommittedFrameworkForCandidate) { throw 'ModernFormsNext source checkout must be clean.' }
-    $changedFiles = @(@(& git -c core.safecrlf=false -C $ModernFormsNextRoot diff --name-only HEAD) + @(& git -C $ModernFormsNextRoot ls-files --others --exclude-standard) | Sort-Object -Unique)
-    $frameworkProof.Files = @(foreach ($relative in $changedFiles) {
-        if ($relative -notmatch '^(ModernFormsNext\.WindowKit\.Backend\.Windows/Notifications/|ModernFormsNext\.WindowKit\.Backend\.Windows\.Tests/|ModernFormsNext\.SystemNotifications\.WinRT/|docs/)') {
-            throw "Candidate framework changes outside the reviewed notification scope: $relative"
-        }
-        $source = Join-Path $ModernFormsNextRoot $relative
-        [ordered]@{ Path = $relative; Sha256 = if (Test-Path -LiteralPath $source -PathType Leaf) { (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'deleted' } }
-    })
-    $canonical = ($frameworkProof.Files | ForEach-Object { $_.Path + ':' + $_.Sha256 }) -join "`n"
-    $frameworkProof.PatchSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($canonical))).ToLowerInvariant()
-    Write-Output "LOCAL CANDIDATE ONLY: framework $frameworkCommit plus uncommitted notification patch $($frameworkProof.PatchSha256). No publication or Git action is performed."
+$frameworkVersion = $properties.SelectSingleNode('/Project/PropertyGroup/ModernFormsNextVersion').InnerText.Trim()
+if ($frameworkVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw 'ModernFormsNextVersion must pin an exact stable NuGet version.'
 }
 $licensePath = Join-Path $repositoryRoot 'LICENSE'
 if (-not (Test-Path -LiteralPath $licensePath -PathType Leaf)) { throw 'The application LICENSE is required.' }
@@ -121,28 +88,28 @@ function Invoke-DotNet {
     }
 }
 
-$modernFormsProperty = "-p:ModernFormsNextRoot=$ModernFormsNextRoot"
-$serialBuildProperties = @('-m:1', '/p:UseSharedCompilation=false', '-p:GeneratePackageOnBuild=false', $modernFormsProperty)
-if ($frameworkProof.PatchSha256) { $serialBuildProperties += "-p:ModernFormsNextLocalPatchSha256=$($frameworkProof.PatchSha256)" }
-
-Invoke-DotNet -Arguments @('restore', $buildTarget, $modernFormsProperty)
-$validationRun = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
-foreach ($configuration in @('Debug', 'Release')) {
-    Invoke-DotNet -Arguments (@('build', $buildTarget, '-c', $configuration, '--no-restore', '-warnaserror') + $serialBuildProperties)
-    $resultsRoot = Join-Path $artifactsRoot "validation\$validationRun\$configuration"
-    Invoke-DotNet -Arguments (@('test', $testProject, '-c', $configuration, '--no-build', '--no-restore', '--logger', 'console;verbosity=minimal', '--logger', 'trx;LogFileName=release-validation.trx', '--results-directory', $resultsRoot, '--blame-hang-timeout', '3m', '--blame-hang-dump-type', 'none') + $serialBuildProperties)
-    & (Join-Path $PSScriptRoot 'Assert-TestResults.ps1') -ResultsDirectory $resultsRoot
+$serialBuildProperties = @('-m:1', '/p:UseSharedCompilation=false')
+if (-not $DevelopmentPackage) {
+    $validationRun = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    foreach ($configuration in @('Debug', 'Release')) {
+        # Debug alone restores the opt-in Automation packages.
+        Invoke-DotNet -Arguments (@('restore', $solutionPath, "-p:Configuration=$configuration") + $serialBuildProperties)
+        Invoke-DotNet -Arguments (@('build', $solutionPath, '-c', $configuration, '--no-restore', '-warnaserror') + $serialBuildProperties)
+        $resultsRoot = Join-Path $artifactsRoot "validation\$validationRun\$configuration"
+        Invoke-DotNet -Arguments (@('test', $testProject, '-c', $configuration, '--no-build', '--no-restore', '--logger', 'console;verbosity=minimal', '--logger', 'trx;LogFileName=release-validation.trx', '--results-directory', $resultsRoot, '--blame-hang-timeout', '3m', '--blame-hang-dump-type', 'none') + $serialBuildProperties)
+        & (Join-Path $PSScriptRoot 'Assert-TestResults.ps1') -ResultsDirectory $resultsRoot
+    }
+    Push-Location $repositoryRoot
+    try {
+        & node --test browser-extension/tests/*.test.cjs ModernTubeDownloader.Tests/WebRemote*.test.cjs
+        if ($LASTEXITCODE -ne 0) { throw 'Browser extension / Web Remote JavaScript tests failed.' }
+    }
+    finally { Pop-Location }
 }
-Push-Location $repositoryRoot
-try {
-    & node --test browser-extension/tests/*.test.cjs ModernTubeDownloader.Tests/WebRemote*.test.cjs
-    if ($LASTEXITCODE -ne 0) { throw 'Browser extension / Web Remote JavaScript tests failed.' }
-}
-finally { Pop-Location }
 # RID/self-contained assets differ from the generic test graph. Restore that
 # graph explicitly once, then publish without another implicit restore.
-Invoke-DotNet -Arguments (@('restore', $applicationProject, '-r', 'win-x64', '-p:SelfContained=true', '-p:PublishProfile=win-x64-self-contained') + $serialBuildProperties)
-Invoke-DotNet -Arguments @(
+Invoke-DotNet -Arguments (@('restore', $applicationProject, '-r', 'win-x64', '-p:Configuration=Release', '-p:SelfContained=true', '-p:PublishProfile=win-x64-self-contained') + $serialBuildProperties)
+Invoke-DotNet -Arguments (@(
     'publish',
     $applicationProject,
     '-c', 'Release',
@@ -150,14 +117,9 @@ Invoke-DotNet -Arguments @(
     '--self-contained', 'true',
     '--no-restore',
     '-p:PublishProfile=win-x64-self-contained',
-    "-p:ModernFormsNextLocalPatchSha256=$($frameworkProof.PatchSha256)",
-    $modernFormsProperty,
-    '-m:1',
-    '/p:UseSharedCompilation=false',
-    '-p:GeneratePackageOnBuild=false',
     '-warnaserror',
     '-o', $publishRoot
-)
+) + $serialBuildProperties)
 
 # Native Messaging is a dedicated process with its own runtime; never bootstrap the GUI.
 $nativeProject = Join-Path $repositoryRoot 'ModernTubeDownloader.NativeHost\ModernTubeDownloader.NativeHost.csproj'
@@ -201,11 +163,23 @@ Copy-Item -LiteralPath $licensePath -Destination $releaseRoot
 # Keep redistribution notices from the exact restored packages, not a moving web page.
 $licensesRoot = Join-Path $releaseRoot 'licenses'
 [void] (New-Item -ItemType Directory -Path $licensesRoot -Force)
-Copy-Item -LiteralPath (Join-Path $ModernFormsNextRoot 'LICENSE.txt') -Destination (Join-Path $licensesRoot 'ModernFormsNext.txt')
 Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'licenses') -File | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $licensesRoot
 }
 $assets = Get-Content -LiteralPath (Join-Path $repositoryRoot 'ModernTubeDownloader\obj\project.assets.json') -Raw | ConvertFrom-Json -AsHashtable
+$frameworkPackages = @($assets.libraries.Keys | Where-Object { $_ -match '^ModernFormsNext[./]' } | Sort-Object)
+if ('ModernFormsNext/' + $frameworkVersion -notin $frameworkPackages) {
+    throw "ModernFormsNext/$frameworkVersion is missing from the release restore."
+}
+foreach ($frameworkPackage in $frameworkPackages) {
+    if ($frameworkPackage.Split('/')[1] -ne $frameworkVersion -or $assets.libraries[$frameworkPackage].type -ne 'package') {
+        throw "Unexpected ModernFormsNext dependency: $frameworkPackage"
+    }
+    if ($frameworkPackage -match '^ModernFormsNext\.(Automation|Testing)[./]') {
+        throw "Development-only ModernFormsNext package in the release restore: $frameworkPackage"
+    }
+    Write-Output "Restored $frameworkPackage"
+}
 function Copy-PackageNotices([string]$package, [string]$packageVersion, [bool]$requireLicense = $true) {
     $packageDirectory = $null
     foreach ($folder in $assets.packageFolders.Keys) {
@@ -277,18 +251,6 @@ foreach ($symbol in $publishedSymbols) {
     Copy-Item -LiteralPath $symbol.FullName -Destination $destination
 }
 
-$finalFrameworkFiles = @(@(& git -c core.safecrlf=false -C $ModernFormsNextRoot diff --name-only HEAD) + @(& git -C $ModernFormsNextRoot ls-files --others --exclude-standard) | Sort-Object -Unique)
-if (($finalFrameworkFiles -join "`n") -ne (($frameworkProof.Files | ForEach-Object Path) -join "`n")) {
-    throw 'Framework change set changed during qualification.'
-}
-foreach ($entry in $frameworkProof.Files) {
-    $source = Join-Path $ModernFormsNextRoot $entry.Path
-    $actual = if (Test-Path -LiteralPath $source -PathType Leaf) { (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'deleted' }
-    if ($actual -ne $entry.Sha256) { throw "Framework source changed during qualification: $($entry.Path)" }
-}
-if ($frameworkProof.Uncommitted) {
-    $frameworkProof | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $releaseRoot 'framework-provenance.json') -Encoding utf8NoBOM
-}
 Compress-Archive -Path (Join-Path $releaseRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
 & (Join-Path $PSScriptRoot 'Test-ReleasePackage.ps1') -ZipPath $zipPath
 if ($publishedSymbols.Count -gt 0) {

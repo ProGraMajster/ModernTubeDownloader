@@ -17,7 +17,8 @@ public enum ToolStatus
     UpdateAvailable,
     Updating,
     UpdatePending,
-    Failed
+    Failed,
+    Verifying
 }
 
 public sealed record ToolInfo

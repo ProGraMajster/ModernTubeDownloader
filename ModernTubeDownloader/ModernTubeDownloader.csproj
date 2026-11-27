@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>$(ModernTubeDownloaderTargetFramework)</TargetFramework>
@@ -30,15 +30,13 @@
     <Compile Include="..\ModernTubeDownloader.Updater\UpdaterRequest.cs" Link="Updates\UpdaterRequest.cs" />
     <ProjectReference Include="..\ModernTubeDownloader.Authentication\ModernTubeDownloader.Authentication.csproj" />
     <ProjectReference Include="..\ModernTubeDownloader.NativeHost\ModernTubeDownloader.NativeHost.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext\ModernFormsNext.csproj" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.SystemNotifications.AppSdk\ModernFormsNext.SystemNotifications.AppSdk.csproj" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.SystemNotifications.WinRT\ModernFormsNext.SystemNotifications.WinRT.csproj" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Automation\ModernFormsNext.Automation.csproj" Condition="'$(Configuration)' == 'Debug'" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Automation.Windows\ModernFormsNext.Automation.Windows.csproj" Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
   <ItemGroup>
-    <AssemblyMetadata Include="ModernFormsNextCommit" Value="$(ModernFormsNextCommit)" />
-    <AssemblyMetadata Include="ModernFormsNextLocalPatchSha256" Value="$(ModernFormsNextLocalPatchSha256)" Condition="'$(ModernFormsNextLocalPatchSha256)' != ''" />
+    <PackageReference Include="ModernFormsNext" Version="[$(ModernFormsNextVersion)]" />
+    <PackageReference Include="ModernFormsNext.SystemNotifications.AppSdk" Version="[$(ModernFormsNextVersion)]" />
+    <PackageReference Include="ModernFormsNext.SystemNotifications.WinRT" Version="[$(ModernFormsNextVersion)]" />
+    <PackageReference Include="ModernFormsNext.Automation" Version="[$(ModernFormsNextVersion)]" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="ModernFormsNext.Automation.Windows" Version="[$(ModernFormsNextVersion)]" Condition="'$(Configuration)' == 'Debug'" />
     <PackageReference Include="QRCoder" Version="1.8.0" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <EmbeddedResource Include="Assets\AppIcon.png" LogicalName="ModernTubeDownloader.Assets.AppIcon.png" />
@@ -50,8 +48,14 @@
     <EmbeddedResource Include="Resources\HelpTopics.json" />
     <EmbeddedResource Include="WebRemote\wwwroot\*" />
   </ItemGroup>
+  <Target Name="KeepPublishedHelpersInTheirOwnDirectories" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '^ModernTubeDownloader\.(Updater|NativeHost)\.'))" />
+    </ItemGroup>
+  </Target>
   <Target Name="CopyNativeHostForDevelopment" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == ''">
-    <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>
+    <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net11.0-windows\*" /></ItemGroup>
     <Copy SourceFiles="@(NativeHostFiles)" DestinationFolder="$(OutDir)native-host" SkipUnchangedFiles="true" />
   </Target>
   <Target Name="AddApplicationSourceMetadata" BeforeTargets="GetAssemblyAttributes" DependsOnTargets="InitializeSourceControlInformation">
@@ -60,7 +64,7 @@
     </ItemGroup>
   </Target>
   <Target Name="CopyUpdaterForDevelopment" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == ''">
-    <ItemGroup><UpdaterFiles Include="..\ModernTubeDownloader.Updater\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>
+    <ItemGroup><UpdaterFiles Include="..\ModernTubeDownloader.Updater\bin\$(Configuration)\net11.0-windows\*" /></ItemGroup>
     <Copy SourceFiles="@(UpdaterFiles)" DestinationFolder="$(OutDir)updater" SkipUnchangedFiles="true" />
   </Target>
 </Project>

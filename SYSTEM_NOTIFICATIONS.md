@@ -62,10 +62,10 @@ Body routes to Downloads/History/LIVE. Downloads tries to select/reveal its curr
 
 ## Windows deployment
 
-- Source MFN pin: `8d8a7679779608b4edbee7dc687c13e3b1a611d9` ([notification hotfix PR #271](https://github.com/ProGraMajster/ModernFormsNext/pull/271)), based on master `18f47b085a59e65eb611e3fd1d38e8dffa3fb19c`. No uncommitted patch is needed. The earlier local candidate ZIP retains its original pre-commit `framework-provenance.json`; no merged-master or published-framework claim.
-- Consumer TFM: `net10.0-windows10.0.26100.0`; minimum declared platform 17763. Supported operating systems must also satisfy actual .NET 10 requirements; old Windows versions are not certified by the TFM.
+- The official App SDK and WinRT NuGet packages use the application's shared `ModernFormsNextVersion` pin in `Directory.Build.props`.
+- Consumer TFM: `net11.0-windows10.0.26100.0`; minimum declared platform 17763. Supported operating systems must also satisfy actual .NET 11 requirements; old Windows versions are not certified by the TFM.
 - `WindowsSdkPackageVersion=10.0.28000.87` is explicit in central props **before first restore**, avoiding first-restore projection mismatch/NETSDK1112.
-- Both providers are solution projects, including Visual Studio restore graph. Code-first MFN disables App SDK's default Content item glob to avoid making embedded AppIcon.png an unintended output Content item.
+- Both providers restore with the application. Code-first MFN disables App SDK's default Content item glob to avoid making embedded AppIcon.png an unintended output Content item.
 - Distribution remains self-contained .NET win-x64, multi-file, untrimmed, no ReadyToRun/NativeAOT/single-file. It is **not** self-contained Windows App Runtime. App SDK runtime self-contained deployment and eager module initializers are disabled; no runtime installer is bundled/auto-run.
 - Automatic tries officially supported App SDK, then Classic WinRT, then Shell (when allowed), else Unavailable. Rich images/actions/progress/history/cold activation differ per provider. Elevation, OS policy, focus assist and installation state affect availability/display.
 - Windows App SDK packages use their Microsoft software terms, not MTD's MIT license. Exact package licenses/notices and Windows projection metadata/CsWinRT notice are packaged; see [Third-party notices](THIRD_PARTY_NOTICES.md).

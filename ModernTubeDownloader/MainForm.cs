@@ -38,12 +38,12 @@ public sealed partial class MainForm : Form
     private readonly Label preparationDetails;
     private readonly Label ytDlpPreparation;
     private readonly Label ffmpegPreparation;
+    private readonly Label ffprobePreparation;
     private readonly Label denoPreparation;
     private readonly Button preparationRetry;
-    private readonly ProgressBar preparationProgress;
+    private readonly DashboardProgress preparationProgress;
     private readonly Dictionary<Control, AppPageId> pages = [];
     private Control? currentView;
-    private bool readyPresentationShown;
     private bool uiLoopReady;
     private bool shutdownStarted;
     private bool shutdownCompleted;
@@ -59,12 +59,12 @@ public sealed partial class MainForm : Form
     private readonly DevelopmentAutomationHost? automation;
 #endif
 
-    public MainForm(AppServices services, bool enableAutomation = false, ExternalMediaRequest? initialExternalRequest = null, bool classicUi = false, bool backgroundActivation = false)
+    public MainForm(AppServices services, bool enableAutomation = false, ExternalMediaRequest? initialExternalRequest = null, bool classicUi = false, bool backgroundActivation = false, bool updaterRestart = false)
     {
         using var constructionTiming = PerformanceDiagnostics.Measure("main.constructor");
         this.services = services;
         suppressExperience = classicUi || backgroundActivation || initialExternalRequest is not null;
-        startupUpdateEligible = !classicUi && !backgroundActivation && initialExternalRequest is null && !enableAutomation;
+        startupUpdateEligible = !updaterRestart && !classicUi && !backgroundActivation && initialExternalRequest is null && !enableAutomation;
         if (classicUi) services.Appearance.ForceClassicForSession();
         this.initialExternalRequest = initialExternalRequest;
         text = services.Localization;
@@ -147,7 +147,7 @@ public sealed partial class MainForm : Form
 
         preparationOverlay = new Panel { Dock = DockStyle.Fill, Visible = true };
         AppUi.BindBackground(preparationOverlay, AppThemeTokens.Background);
-        preparationCard = new Panel { Width = 660, Height = 358, Padding = new Padding(32) };
+        preparationCard = new Panel { Width = 660, Height = 388, Padding = new Padding(32) };
         AppUi.Card(preparationCard);
         preparationTitle = AppUi.Heading(text["Provisioning.Title"], 23f);
         preparationTitle.Left = 32;
@@ -164,9 +164,10 @@ public sealed partial class MainForm : Form
         preparationDetails.TextAlign = ContentAlignment.TopCenter;
         ytDlpPreparation = CreatePreparationRow(148);
         ffmpegPreparation = CreatePreparationRow(190);
-        denoPreparation = CreatePreparationRow(232);
-        preparationProgress = new ProgressBar { Left = 54, Top = 286, Width = 552, Height = 8, Minimum = 0, Maximum = 100 };
-        preparationRetry = new Button { Left = 244, Top = 308, Width = 172, Height = 42, Visible = false };
+        ffprobePreparation = CreatePreparationRow(226);
+        denoPreparation = CreatePreparationRow(262);
+        preparationProgress = new DashboardProgress { Left = 54, Top = 305, Width = 552, Height = 8, IsIndeterminate = true };
+        preparationRetry = new Button { Left = 244, Top = 326, Width = 172, Height = 42, Visible = false };
         AppUi.Primary(preparationRetry);
         preparationRetry.Click += RetryPreparation;
         preparationCard.Controls.AddRange([
@@ -174,6 +175,7 @@ public sealed partial class MainForm : Form
             preparationDetails,
             ytDlpPreparation,
             ffmpegPreparation,
+            ffprobePreparation,
             denoPreparation,
             preparationProgress,
             preparationRetry]);
@@ -394,7 +396,7 @@ public sealed partial class MainForm : Form
         view.TranslationY = 8f;
         view.BringToFront();
         UiCrashDiagnostics.Record("view.show", "content", content.Controls.Count);
-        preparationOverlay.BringToFront();
+        UpdateToolPreparation();
         UpdateNavigationState();
         if (!AppearancePresentation.Current.Global.Animations)
         {
@@ -479,66 +481,29 @@ public sealed partial class MainForm : Form
         var generalStatus = DashboardStatus.Read(services);
         if (shellHost.Mode == AppInterfaceMode.ModernDashboard) shellHost.SetStatus(generalStatus.Text, generalStatus.Token);
         downloadsView.SetDashboardStatus(generalStatus.Text, generalStatus.Token);
-        var engine = services.Tools.EngineStatus;
-
-        if (services.Tools.CanAnalyze)
-        {
-            if (engine == DownloadEngineStatus.Ready && !readyPresentationShown && uiLoopReady)
-                _ = ShowReadyThenDismissAsync();
-            else if (engine == DownloadEngineStatus.Degraded)
-            {
-                preparationOverlay.Visible = false;
-                currentView?.BringToFront();
-                TryStartExperience();
-            }
-            return;
-        }
-
-        readyPresentationShown = false;
-        preparationOverlay.Visible = true;
-        preparationOverlay.Opacity = 1f;
-        preparationCard.Opacity = 1f;
-        preparationRetry.Visible = engine == DownloadEngineStatus.Failed;
-        preparationTitle.Text = engine == DownloadEngineStatus.Failed
-            ? text["Provisioning.AttentionTitle"]
-            : text["Provisioning.Title"];
-        preparationDetails.Text = engine == DownloadEngineStatus.Failed
-            ? text["Provisioning.AttentionBody"]
-            : text["Provisioning.Body"];
-        ytDlpPreparation.Text = $"yt-dlp     {FormatPreparationStatus(services.Tools.YtDlp)}";
-        ffmpegPreparation.Text = $"FFmpeg     {FormatPreparationStatus(services.Tools.Ffmpeg)}";
-        denoPreparation.Text = $"Deno     {FormatPreparationStatus(services.Tools.Deno)}";
-        var percentages = new[] { services.Tools.YtDlp.ProgressPercent, services.Tools.Ffmpeg.ProgressPercent, services.Tools.Deno.ProgressPercent }
-            .Where(value => value.HasValue)
-            .Select(value => value!.Value)
-            .ToArray();
-        preparationProgress.Value = percentages.Length == 0 ? 0 : (int)Math.Clamp(percentages.Average(), 0, 100);
-        preparationProgress.Visible = engine == DownloadEngineStatus.Preparing;
-        preparationOverlay.BringToFront();
+        UpdateToolPreparation();
     }
 
-    private async Task ShowReadyThenDismissAsync()
+    private void UpdateToolPreparation()
     {
-        readyPresentationShown = true;
-        preparationOverlay.Visible = true;
-        preparationOverlay.Opacity = 1f;
-        preparationCard.Opacity = 1f;
-        preparationRetry.Visible = false;
-        preparationProgress.Visible = false;
-        preparationTitle.Text = text["Provisioning.ReadyTitle"];
-        preparationDetails.Text = text["Provisioning.ReadyBody"];
-        ytDlpPreparation.Text = $"yt-dlp     {FormatPreparationStatus(services.Tools.YtDlp)}";
-        ffmpegPreparation.Text = $"FFmpeg     {FormatPreparationStatus(services.Tools.Ffmpeg)}";
-        denoPreparation.Text = $"Deno     {FormatPreparationStatus(services.Tools.Deno)}";
-        preparationOverlay.BringToFront();
-        await Task.Delay(650);
-        await preparationCard.FadeToAsync(0f, 200, Easings.CubicOut);
-        if (services.Tools.CanAnalyze)
+        var engine = services.Tools.EngineStatus;
+        preparationOverlay.Visible = currentView == downloadsView && !services.Tools.CanAnalyze;
+        if (!preparationOverlay.Visible)
         {
-            preparationOverlay.Visible = false;
-            currentView?.BringToFront();
             TryStartExperience();
+            return;
         }
+        preparationRetry.Visible = engine == DownloadEngineStatus.Failed;
+        preparationTitle.Text = text[engine == DownloadEngineStatus.Failed ? "Provisioning.AttentionTitle" : "Provisioning.Title"];
+        preparationDetails.Text = text[engine == DownloadEngineStatus.Failed ? "Provisioning.AttentionBody" : "Provisioning.Body"];
+        var ffmpeg = services.Tools.Ffmpeg;
+        ytDlpPreparation.Text = $"yt-dlp     {FormatPreparationStatus(services.Tools.YtDlp)}";
+        ffmpegPreparation.Text = $"FFmpeg     {FormatPreparationStatus(ffmpeg)}";
+        ffprobePreparation.Text = $"FFprobe     {FormatPreparationStatus(ffmpeg.Status == ToolStatus.Ready && ffmpeg.FfprobePath is null
+            ? ffmpeg with { Status = ToolStatus.Failed } : ffmpeg)}";
+        denoPreparation.Text = $"Deno     {FormatPreparationStatus(services.Tools.Deno)}";
+        preparationProgress.Visible = engine == DownloadEngineStatus.Preparing;
+        preparationOverlay.BringToFront();
     }
 
     private string FormatPreparationStatus(ToolInfo tool)
@@ -579,19 +544,26 @@ public sealed partial class MainForm : Form
         }
     }
 
-    public void StartRuntime(bool autostart, bool hiddenArgument)
+    public void StartRuntime(bool autostart, bool hiddenArgument) => _ = StartRuntimeAsync(autostart, hiddenArgument);
+
+    internal Task StartRuntimeAsync(bool autostart, bool hiddenArgument, StartupUpdateForm? window = null, Guid? operationId = null)
     {
         suppressExperience |= autostart || hiddenArgument;
         InitializeRuntime();
-        tray.Start(autostart, hiddenArgument);
         if (!runtimeAdmissionStarted)
         {
             runtimeAdmissionStarted = true;
-            _ = StartApplicationWorkAsync(autostart || hiddenArgument);
+            return StartApplicationWorkAsync(autostart, hiddenArgument, window, operationId);
         }
+        return Task.CompletedTask;
     }
 
-    public void RestoreWindow() { if (!shutdownStarted) tray.Restore(); }
+    public void RestoreWindow()
+    {
+        if (shutdownStarted) return;
+        if (startupUpdateCancellation is not null) InterruptStartupUpdate();
+        else tray.Restore();
+    }
 
     private bool measuredFirstPaint;
     protected override void OnPaint(PaintEventArgs e)
@@ -728,6 +700,7 @@ public sealed partial class MainForm : Form
         preparationDetails.Width = innerWidth;
         ytDlpPreparation.Width = innerWidth;
         ffmpegPreparation.Width = innerWidth;
+        ffprobePreparation.Width = innerWidth;
         denoPreparation.Width = innerWidth;
         preparationProgress.Width = innerWidth;
         preparationRetry.Left = (preparationCard.Width - preparationRetry.Width) / 2;
@@ -789,7 +762,7 @@ public sealed partial class MainForm : Form
             await services.ShutdownAsync();
             if (experienceSuspended && !startupInstallerLaunched && services.Updates.Ready && (updateInstallRequested || services.Updates.ShouldInstallOnExit))
             {
-                try { await services.Updates.LaunchInstallerAsync(restart: updateInstallRequested, startup: startupInstallRequested); }
+                try { await services.Updates.LaunchInstallerAsync(restart: updateInstallRequested, startup: startupInstallRequested, showProgress: true); }
                 catch (Exception error) { services.Logger.Error("The staged updater could not be started; the installation was left unchanged.", error); }
             }
         }

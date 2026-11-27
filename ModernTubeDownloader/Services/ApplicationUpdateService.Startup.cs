@@ -1,10 +1,44 @@
+using ModernTubeDownloader.Settings;
+
 namespace ModernTubeDownloader.Services;
 
-internal enum StartupUpdateOutcome { NotRequested, Deferred, Current, Ready, Failed, TimedOut }
+internal enum StartupUpdateOutcome { NotRequested, Deferred, Current, Ready, Failed, TimedOut, Available, Offline }
+
+internal sealed record StartupTransfer(long Bytes, long? Total, long BytesPerSecond)
+{
+    internal int? Percent => Total is > 0 ? (int)Math.Clamp(Bytes * 100d / Total.Value, 0, 100) : null;
+}
 
 public sealed partial class ApplicationUpdateService
 {
     private string? pendingStartupResultKey;
+    private DateTimeOffset lastStartupCheckAttempt;
+    private int everyStartupCheckAttempted;
+
+    internal void RecordUpdaterRestart() => lastStartupCheckAttempt = DateTimeOffset.UtcNow;
+    internal StartupTransfer? StartupProgress { get; private set; }
+    internal string? StartupTargetVersion => IsDeferred ? null : State.Available?.Version;
+
+    private bool CheckIsDue(TimeSpan interval) =>
+        !State.LastCheck.HasValue || DateTimeOffset.UtcNow - State.LastCheck >= interval;
+
+    internal async Task<StartupUpdateOutcome> CheckForStartupAsync(CancellationToken token, Guid operationId)
+    {
+        var policy = settings.Current.Updates;
+        if (!policy.AutomaticChecks || policy.Frequency is not (UpdateCheckFrequency.StartupDaily or UpdateCheckFrequency.EveryStartup))
+            return StartupUpdateOutcome.NotRequested;
+        await InitializeAsync(token).ConfigureAwait(false);
+        if (StateUnavailable) return StartupUpdateOutcome.Failed;
+        if (InstallationPending || State.InstallationFailed) return StartupUpdateOutcome.Deferred;
+        var due = policy.Frequency == UpdateCheckFrequency.EveryStartup
+            ? Interlocked.Exchange(ref everyStartupCheckAttempted, 1) == 0
+            : CheckIsDue(TimeSpan.FromDays(1));
+        if (!due)
+            return State.Available is null || IsDeferred ? StartupUpdateOutcome.Current : StartupUpdateOutcome.Available;
+        lastStartupCheckAttempt = DateTimeOffset.UtcNow;
+        var outcome = await CheckForUpdateAsync(token, operationId).ConfigureAwait(false);
+        return outcome == StartupUpdateOutcome.Available && IsDeferred ? StartupUpdateOutcome.Deferred : outcome;
+    }
 
     internal bool CanInstallAtStartup => settings.Current.Updates.AutomaticChecks && settings.Current.Updates.InstallAtStartup &&
         Ready && !IsDeferred && !InstallationPending && !State.InstallationFailed &&
@@ -17,7 +51,7 @@ public sealed partial class ApplicationUpdateService
     /// Each update operation still uses the same serialized state/staging implementation.
     /// </summary>
     internal async Task<StartupUpdateOutcome> PrepareStartupAsync(bool manualForeground, Func<bool> hasPendingWork,
-        CancellationToken token = default, TimeSpan? budget = null)
+        CancellationToken token = default, TimeSpan? budget = null, Guid? operationId = null)
     {
         if (!manualForeground || !settings.Current.Updates.InstallAtStartup || !settings.Current.Updates.AutomaticChecks)
             return StartupUpdateOutcome.NotRequested;
@@ -35,11 +69,15 @@ public sealed partial class ApplicationUpdateService
                 return await Finish(StartupUpdateOutcome.Deferred, "Updates.StartupDeferred");
             if (!Ready)
             {
-                await CheckAsync(linked.Token).ConfigureAwait(false);
-                if (StatusKey == "Updates.Failed") return await Finish(StartupUpdateOutcome.Failed, "Updates.StartupFailed");
+                if (operationId is not null) lastStartupCheckAttempt = DateTimeOffset.UtcNow;
+                var check = await CheckForUpdateAsync(linked.Token, operationId).ConfigureAwait(false);
+                if (check is StartupUpdateOutcome.Failed or StartupUpdateOutcome.Offline)
+                    return await Finish(operationId is null ? StartupUpdateOutcome.Failed : check, "Updates.StartupFailed");
+                if (check == StartupUpdateOutcome.TimedOut)
+                    return await Finish(operationId is null ? StartupUpdateOutcome.Failed : check, "Updates.StartupTimedOut");
                 if (State.Available is null) return await Finish(StartupUpdateOutcome.Current, "Updates.Current");
                 if (!StillAllowed()) return await Finish(StartupUpdateOutcome.Deferred, "Updates.StartupDeferred");
-                await DownloadAsync(linked.Token).ConfigureAwait(false);
+                await DownloadCoreAsync(linked.Token, operationId).ConfigureAwait(false);
             }
             if (!Ready) return await Finish(StartupUpdateOutcome.Failed, "Updates.StartupFailed");
             var ready = CanInstallAtStartup && StillAllowed();

@@ -8,7 +8,7 @@ namespace ModernTubeDownloader.Infrastructure;
 public sealed class FileAppLogger : IAppLogger, IDisposable
 {
     internal const int MaximumLine = 8192;
-    internal static readonly string ApplicationVersion = typeof(FileAppLogger).Assembly.GetName().Version!.ToString();
+    internal static readonly string ApplicationVersion = DiagnosticRecord.ExecutingVersion;
     private static readonly UTF8Encoding Utf8 = new(false);
     private readonly Channel<DiagnosticRecord> normal;
     private readonly Channel<DiagnosticRecord> priority;

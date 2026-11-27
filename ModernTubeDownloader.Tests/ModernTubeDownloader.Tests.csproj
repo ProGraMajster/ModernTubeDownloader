@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="ModernFormsNext.Testing" Version="[$(ModernFormsNextVersion)]" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
@@ -17,21 +18,21 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\docs\releases\v1.3.2.md" Link="OfficialReleaseNotes.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\docs\releases\v1.3.0.md" Link="OfficialReleaseNotes.md" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="..\ModernTubeDownloader\ModernTubeDownloader.csproj" />
+    <Compile Include="..\ModernTubeDownloader.Updater\InstallerProgressFrame.cs" Link="Updates\InstallerProgressFrame.cs" />
     <Compile Include="..\ModernTubeDownloader.Updater\UpdateTransaction.cs" Link="Updates\UpdateTransaction.cs" />
-    <ProjectReference Include="$(ModernFormsNextRoot)\ModernFormsNext.Testing\ModernFormsNext.Testing.csproj" />
     <ProjectReference Include="..\ModernTubeDownloader.FakeTool\ModernTubeDownloader.FakeTool.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\ModernTubeDownloader.NativeHost\ModernTubeDownloader.NativeHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <Target Name="CopyFakeTool" AfterTargets="Build">
     <ItemGroup>
-      <FakeToolFiles Include="..\ModernTubeDownloader.FakeTool\bin\$(Configuration)\net10.0\ModernTubeDownloader.FakeTool.*" />
+      <FakeToolFiles Include="..\ModernTubeDownloader.FakeTool\bin\$(Configuration)\net11.0\ModernTubeDownloader.FakeTool.*" />
     </ItemGroup>
     <Copy SourceFiles="@(FakeToolFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
-    <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net10.0-windows\ModernTubeDownloader.NativeHost.*" /></ItemGroup>
+    <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net11.0-windows\ModernTubeDownloader.NativeHost.*" /></ItemGroup>
     <Copy SourceFiles="@(NativeHostFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
-    <ItemGroup><UpdaterTestFiles Include="..\ModernTubeDownloader.Updater\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>
+    <ItemGroup><UpdaterTestFiles Include="..\ModernTubeDownloader.Updater\bin\$(Configuration)\net11.0-windows\*" /></ItemGroup>
     <Copy SourceFiles="@(UpdaterTestFiles)" DestinationFolder="$(OutDir)updater" SkipUnchangedFiles="true" />
   </Target>
 </Project>

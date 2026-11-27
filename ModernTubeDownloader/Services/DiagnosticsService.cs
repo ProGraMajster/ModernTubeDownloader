@@ -114,15 +114,15 @@ internal sealed class DiagnosticsService : IDisposable
     private DiagnosticEnvironment CaptureEnvironment()
     {
         var assembly = typeof(DiagnosticsService).Assembly;
-        var mfnAssembly = typeof(ModernFormsNext.Form).Assembly;
+        var framework = AppBranding.FrameworkVersion.Split('+', 2);
         string? Metadata(string name) => assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(value => value.Key == name)?.Value;
         return new(new
         {
-            version = AppBranding.Version, assemblyVersion = FileAppLogger.ApplicationVersion,
+            version = AppBranding.Version, assemblyVersion = assembly.GetName().Version?.ToString(),
             informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
             commit = Metadata("SourceCommit"), configuration = assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration,
-            modernFormsNext = mfnAssembly.GetName().Version?.ToString(), modernFormsNextCommit = Metadata("ModernFormsNextCommit"),
+            modernFormsNext = framework[0], modernFormsNextCommit = framework.Length == 2 ? framework[1] : null,
             dotnet = RuntimeInformation.FrameworkDescription, processArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
             ui = services.Appearance.InterfaceMode.ToString(), theme = services.Appearance.Profile.Global.Theme.ToString(),
             language = services.Localization.Language, startupMs,

@@ -6,7 +6,7 @@ ModernTubeDownloader is licensed under MIT (Copyright © 2026 ProGraMajster); se
 
 ## Runtime libraries shipped in the self-contained ZIP
 
-### .NET 10 runtime
+### .NET 11 runtime
 
 - Project: https://github.com/dotnet/runtime
 - License: MIT, with additional third-party notices in the .NET distribution.
@@ -23,7 +23,7 @@ The self-contained `win-x64` artifact contains the Microsoft .NET runtime requir
 - Release 1.1.0 revision: `69c5ea2b20b07d9df801340c8ae9e3e1ca5dfbc3` (origin/master fetched 2026-10-11). Framework license remains MIT; source code is not copied into this repository.
 - License: MIT.
 
-The application currently builds from a pinned source checkout to keep development, CI, and release on the same validated revision. Application output contains the resulting runtime assemblies, not the ModernFormsNext source tree.
+Development, CI and packaging use the official ModernFormsNext 1.12.0 NuGet packages. The upstream MIT notice from tag `v1.12.0` is distributed as `licenses/ModernFormsNext.txt`. The development-only CLI in `qa/AutomationCli` uses the upstream v1.12.0 command-line client with the published automation package.
 
 ### Markdig 1.3.2
 

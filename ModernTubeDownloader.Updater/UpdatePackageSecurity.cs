@@ -1,5 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace ModernTubeDownloader.Updates;
 
@@ -9,6 +11,42 @@ public static class UpdatePackageSecurity
     public const long MaximumArchiveBytes = 1_000_000_000;
     public const long MaximumExpandedBytes = 1_500_000_000;
     public const int MaximumEntries = 5000;
+    internal const string BackupDirectoryName = ".mtd-update-backup";
+
+    internal static string InstallationMutexName(string installation) => @"GlobalModernTubeDownloader.Update." +
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(installation.ToUpperInvariant())));
+
+    internal static void VerifyStartupInstallation(string installation)
+    {
+        installation = Path.TrimEndingDirectorySeparator(Path.GetFullPath(installation));
+        using var owner = new Mutex(false, InstallationMutexName(installation));
+        bool acquired;
+        try { acquired = owner.WaitOne(0); }
+        catch (AbandonedMutexException) { acquired = true; }
+        if (!acquired) throw new IOException("An update owns this installation.");
+        try
+        {
+            var backup = Path.Combine(installation, BackupDirectoryName);
+            try { _ = File.GetAttributes(backup); }
+            catch (FileNotFoundException) { return; }
+            catch (DirectoryNotFoundException) { return; }
+            var journal = Path.Combine(backup, "journal.json");
+            EnsureNoReparsePoints(journal);
+            using var stream = File.OpenRead(journal);
+            if (stream.Length > 4 * 1024 * 1024) throw new InvalidDataException("Update journal exceeds the limit.");
+            using var document = JsonDocument.Parse(stream, new JsonDocumentOptions { AllowDuplicateProperties = false });
+            var result = document.RootElement;
+            if (result.ValueKind != JsonValueKind.Object || !result.TryGetProperty("Completed", out var completed) ||
+                completed.ValueKind != JsonValueKind.True || !result.TryGetProperty("Installation", out var path) ||
+                path.ValueKind != JsonValueKind.String || !Path.IsPathFullyQualified(path.GetString()!) ||
+                !string.Equals(installation, Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.GetString()!)),
+                    StringComparison.OrdinalIgnoreCase) ||
+                !result.TryGetProperty("Files", out var files) || files.ValueKind != JsonValueKind.Array ||
+                files.GetArrayLength() > MaximumEntries)
+                throw new InvalidDataException("The installation has an unfinished or unverifiable update.");
+        }
+        finally { owner.ReleaseMutex(); }
+    }
     private static readonly HashSet<string> AllowedDirectories = new(StringComparer.OrdinalIgnoreCase) { "native-host", "updater", "licenses" };
     private static readonly HashSet<string> ForbiddenFiles = new(StringComparer.OrdinalIgnoreCase)
     { "settings.json", "queue.json", "history.json", "live-sessions.json", "cookies.txt", "state.json", "appsettings.json" };
@@ -54,7 +92,8 @@ public static class UpdatePackageSecurity
                 throw new InvalidDataException("Reparse points are not permitted in update paths.");
     }
 
-    public static async Task<IReadOnlyList<string>> ExtractAsync(string archive, string destination, CancellationToken token = default)
+    public static async Task<IReadOnlyList<string>> ExtractAsync(string archive, string destination, CancellationToken token = default,
+        Action<int, int>? progress = null)
     {
         EnsureNoReparsePoints(destination);
         if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any()) throw new IOException("Extraction requires an empty directory.");
@@ -76,6 +115,8 @@ public static class UpdatePackageSecurity
         if (!files.Any(file => file.Relative.Equals("ModernTubeDownloader.exe", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("Application executable missing from update.");
         Directory.CreateDirectory(destination);
+        var done = 0;
+        progress?.Invoke(done, files.Count);
         foreach (var (entry, relative) in files)
         {
             token.ThrowIfCancellationRequested();
@@ -86,6 +127,7 @@ public static class UpdatePackageSecurity
             await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             await input.CopyToAsync(output, token);
             if (output.Length != entry.Length) throw new InvalidDataException("Truncated package entry.");
+            progress?.Invoke(++done, files.Count);
         }
         return files.Select(file => file.Relative).ToArray();
     }

@@ -136,26 +136,35 @@ public sealed partial class ExperiencePresentationTests
     {
         using var fixture = new Fixture(); using var services = await fixture.Services(AppThemeMode.Dark);
         services.Localization.SetLanguage(language);
-        using var cancellation = new CancellationTokenSource();
         using var host = ModernFormsTestHost.Create();
         services.Appearance.Initialize(); AppTypography.SetScale(scale);
-        using var form = new StartupUpdateForm(services, cancellation, async token =>
-        {
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
-            return StartupUpdateOutcome.Ready;
-        });
-        // Shown starts asynchronous preparation. Raise it under the real dispatcher
-        // context, just as button actions in this fixture, rather than xUnit's pool.
+        using var startup = new StartupCoordinator(services.Updates, services.Logger, Guid.NewGuid(),
+            userContinue ? TimeSpan.FromSeconds(8) : TimeSpan.FromMilliseconds(500));
+        using var form = new StartupUpdateForm(services, startup);
         TestWindowHost? window = null;
-        Ui(host, () => window = host.Show(form, 780, 460));
-        var button = Find<Button>(Root(form), "StartupUpdateContinue");
+        Ui(host, () => window = host.Show(form, 510, 300));
+        var root = Root(form);
+        var button = Find<Button>(root, "StartupUpdateContinue");
         Assert.True(button.Enabled && button.Width > 0 && button.Height >= AppTypography.TextHeight(42));
         Assert.True(button.Left >= 0 && button.Right <= button.Parent!.Width);
-        if (userContinue) Ui(host, button.PerformClick); else cancellation.Cancel();
+        Task? preparation = null;
+        Ui(host, () => preparation = RunAsync());
+        if (userContinue) Ui(host, button.PerformClick);
         Pump(host, () => window!.IsClosed);
-        Assert.Equal(userContinue ? StartupUpdateOutcome.Deferred : StartupUpdateOutcome.TimedOut, form.Outcome);
+        await preparation!;
+        Assert.Equal(userContinue ? StartupUpdateOutcome.Deferred : StartupUpdateOutcome.TimedOut, startup.Outcome);
         Assert.False(services.Updates.InstallationPending);
         Assert.Null(services.Updates.State.LastStartupAttemptVersion);
+
+        async Task RunAsync()
+        {
+            await startup.PrepareAsync(true, async token =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return false;
+            }, () => false);
+            form.Finish();
+        }
     }
 
     [Fact]
@@ -518,7 +527,7 @@ public sealed partial class ExperiencePresentationTests
             settings.Current.CustomDenoPath = Path.Combine(tools, "deno.exe"); File.Copy(CoreTests.FakeToolPath(), settings.Current.CustomDenoPath);
             // Presentation fixtures must remain deterministic after the public tag exists.
             // Individual online cases supply their own controlled handler.
-            await settings.SaveAsync(); var services = AppServices.Create(paths, httpClient ?? new HttpClient(new UnavailableGitHub())); await services.Tools.Initialization; return services;
+            await settings.SaveAsync(); var services = AppServices.CreateCore(paths, httpClient ?? new HttpClient(new UnavailableGitHub()), null, null, null, false, NotesVersion); await services.Tools.Initialization; return services;
         }
         public void Dispose() { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(Root)) Directory.Delete(Root, true); }
     }

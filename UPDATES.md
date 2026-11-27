@@ -13,8 +13,9 @@ repository/tag and assets `ModernTubeDownloader-X.Y.Z-win-x64.zip` / `.zip.sha25
 The ZIP's SHA-256 must match before acceptance and is checked again by the updater.
 Transport is HTTPS. Checksums are integrity checks, not a separate publisher signature.
 
-Settings → Application updates: automatic checks (startup, at most daily by default;
-daily/weekly), Notify only / Auto-download / Install on exit. Current/latest version,
+In Settings, Application updates offers every normal launch, startup at most
+daily (the default), daily or weekly. Turn off automatic checks to check only
+manually. The same section offers Notify only, Auto-download and Install on exit. Current/latest version,
 original release notes, Check/Download/Later/Skip and Install now are localized.
 New profiles default to `AutomaticChecks=true`, `StartupDaily`, `InstallOnExit`.
 `PolicyVersion=0` identifies unconfirmed/legacy policy; the startup migration examines
@@ -54,13 +55,13 @@ installer or request application shutdown. A skipped/deferred release remains su
 even if it was already downloaded. Daily throttling is independent of preparing a known
 eligible release after the user changes policy.
 
-`ModernTubeDownloader.Updater` has no UI, framework, worker, authentication or registry
-dependencies. The GUI copies its files to staging, then launches a request with the
+`ModernTubeDownloader.Updater` uses the packaged .NET runtime and can run headless. The GUI copies its files to staging, then launches a request with the
 current PID and start-time identity. The updater waits for actual parent exit,
 verifies and extracts the archive again. It takes ownership of the normalized installation
 path and publishes a plan with the original SHA-256 values in a private
 `.mtd-update-backup`. A durable per-file marker precedes each write. The journal is
-replaced at transaction completion. Only Windows sharing and lock violations at that
+replaced at transaction completion after the installed files verify against the
+extracted package. Only Windows sharing and lock violations at that
 replacement boundary get up to three short retries.
 
 The next updater verifies and recovers an incomplete current-format journal before
@@ -78,7 +79,9 @@ and start time; its result is read on the next application start. Failure or a d
 updater without a result is shown as an unknown installation state and disarms automatic
 installation. The UI distinguishes verified, partial and unknown recovery, including when
 the staged ZIP has disappeared. A committed installation and its automatic restart have
-separate results. Manual retry remains available. No elevation is requested.
+separate results. The optional native status window keeps showing progress after
+the main application exits. Its Close button dismisses the status window.
+Manual retry remains available. The installer runs with the user's privileges.
 
 ZIP validation rejects traversal, absolute/ADS/device/invalid paths, symlinks,
 case-insensitive duplicates, unknown root directories and user-data files. File count,
