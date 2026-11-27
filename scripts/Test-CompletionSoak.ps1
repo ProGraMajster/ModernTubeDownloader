@@ -1,5 +1,6 @@
 param([Parameter(Mandatory)][string]$ApplicationPath, [Parameter(Mandatory)][string]$Fixture,
-    [Parameter(Mandatory)][string]$Evidence, [ValidateRange(60,14400)][int]$DurationSeconds = 7200)
+    [Parameter(Mandatory)][string]$Evidence, [ValidateRange(60,14400)][int]$DurationSeconds = 7200,
+    [ValidatePattern('^\d+\.\d+$')][string]$InterfaceChoiceFamily = '')
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -lt 7 -or -not $IsWindows) { throw 'The owner/sampler requires PowerShell7 on Windows.' }
 $ApplicationPath = [IO.Path]::GetFullPath($ApplicationPath); $Fixture = [IO.Path]::GetFullPath($Fixture); $Evidence = [IO.Path]::GetFullPath($Evidence)
@@ -40,7 +41,8 @@ if ([string]::IsNullOrWhiteSpace($assemblyVersion) -or $assemblyVersion -ne [Dia
 # The journey ledger uses the assembly informational version without build metadata.
 $experienceVersion = $assemblyVersion.Split('+')[0]
 if ($experienceVersion -notmatch '^(\d+)\.(\d+)\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw 'Application version is not a supported release/candidate identity.' }
-$experienceFamily = $Matches[1] + '.' + $Matches[2]
+# The choice policy can span product versions without expiring already recorded consent.
+$experienceFamily = if ($InterfaceChoiceFamily) { $InterfaceChoiceFamily } else { $Matches[1] + '.' + $Matches[2] }
 if ($experience.setup -notin @(2,'Completed') -or $experience.lastWhatsNewAcknowledgedVersion -cne $experienceVersion -or
     $experience.interfaceChoiceFamily -cne $experienceFamily) { throw 'Fixture onboarding, interface family and WhatsNew acknowledgement must match the actual application assembly.' }
 $liveFile = Join-Path $Fixture 'live-sessions.json'
@@ -99,7 +101,7 @@ function Start-Script([string]$exe, [string]$script, [hashtable]$arguments, [str
     $code = '& ' + "'" + $script.Replace("'", "''") + "'"
     foreach ($key in $arguments.Keys) { $code += ' -' + $key + " '" + ([string]$arguments[$key]).Replace("'", "''") + "'" }
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
-    return Start-Process -FilePath $exe -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru `
+    return Start-Process -FilePath $exe -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $Evidence ($name + '.log')) -RedirectStandardError (Join-Path $Evidence ($name + '-error.log'))
 }
 Add-Type @'

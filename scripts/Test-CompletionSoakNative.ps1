@@ -81,7 +81,10 @@ function Jump-Page([int]$page) { Action ('history.jump.' + $page) { (Find 'Histo
 function Capture([string]$name) {
     Action ('capture.' + $name) {
         $path = Join-Path $Evidence ($name + '.png'); [CompletionSoakWindow]::Capture($hwnd, $OwnedProcessId, $path)
-        Event 'screenshot' $name @{ hwnd = $hwnd.ToInt64(); dpi = [CompletionSoakWindow]::GetDpiForWindow($hwnd); sha256 = (Get-FileHash -LiteralPath $path).Hash }
+        $sha = [Security.Cryptography.SHA256]::Create(); $stream = [IO.File]::OpenRead($path)
+        try { $hash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '') }
+        finally { $stream.Dispose(); $sha.Dispose() }
+        Event 'screenshot' $name @{ hwnd = $hwnd.ToInt64(); dpi = [CompletionSoakWindow]::GetDpiForWindow($hwnd); sha256 = $hash }
     }
 }
 function Switch-Shell([string]$choice, [int]$mode) {
@@ -105,9 +108,18 @@ function Switch-Shell([string]$choice, [int]$mode) {
 try {
     $process = Get-Process -Id $OwnedProcessId; Assert-Owned
     Event 'begin' 'startup.hwnd'; $startup = [Diagnostics.Stopwatch]::StartNew()
-    while ($process.MainWindowHandle -eq [IntPtr]::Zero -and $startup.Elapsed.TotalSeconds -lt 30) { Start-Sleep -Milliseconds 100; Assert-Owned }
-    $hwnd = $process.MainWindowHandle; if ($hwnd -eq [IntPtr]::Zero) { throw 'Main HWND absent within30s' }
-    Assert-Owned; $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+    $element = [System.Windows.Automation.AutomationElement]
+    $ownedWindow = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new($element::ProcessIdProperty, $OwnedProcessId),
+        [System.Windows.Automation.PropertyCondition]::new($element::AutomationIdProperty, 'MainWindow'))
+    do {
+        Assert-Owned
+        $root = $element::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, $ownedWindow)
+        if ($root) { break }
+        Start-Sleep -Milliseconds 100
+    } while ($startup.Elapsed.TotalSeconds -lt 30)
+    if (!$root) { throw 'Main window absent within30s' }
+    $hwnd = [IntPtr]$root.Current.NativeWindowHandle
     Event 'end' 'startup.hwnd' @{ hwnd = $hwnd.ToInt64(); dpi = [CompletionSoakWindow]::GetDpiForWindow($hwnd) }
     $history = Get-Content -LiteralPath (Join-Path $DataRoot 'history.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     $recordCount = $history.Count; if ($recordCount -le 40) { throw 'Collection soak requires more than40 history records for paging' }
