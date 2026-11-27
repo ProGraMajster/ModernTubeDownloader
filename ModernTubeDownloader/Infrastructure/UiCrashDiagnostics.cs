@@ -54,6 +54,15 @@ internal static class UiCrashDiagnostics
         }
     }
 
+    internal static DiagnosticCounters CrashCounts()
+    {
+        var expected = Volatile.Read(ref uiThreadId);
+        // A fatal report can run while another thread owns the UI-state lock.
+        if (!Monitor.TryEnter(Gate)) return new(Context: expected);
+        try { return new(Items: treeVersion, Total: Recent.Count, Context: expected, Active: ContainerCounts.Count); }
+        finally { Monitor.Exit(Gate); }
+    }
+
     public static string Snapshot()
     {
         Func<bool, string>? provider;

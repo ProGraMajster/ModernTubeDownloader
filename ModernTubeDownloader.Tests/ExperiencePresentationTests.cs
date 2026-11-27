@@ -158,6 +158,47 @@ public sealed partial class ExperiencePresentationTests
         Assert.Null(services.Updates.State.LastStartupAttemptVersion);
     }
 
+    [Fact]
+    public async Task InstallOnExitCheckboxPersistsTheNewChoiceAcrossPanelRefresh()
+    {
+        using var fixture = new Fixture();
+        using var services = await fixture.Services(AppThemeMode.Dark);
+        await services.Updates.InitializeAsync();
+        const string version = "99.0.0";
+        var root = Path.Combine(services.Paths.RootDirectory, "Updates");
+        Directory.CreateDirectory(root);
+        var filename = $"ModernTubeDownloader-{version}-win-x64.zip";
+        var staged = Path.Combine(root, filename);
+        using (var zip = System.IO.Compression.ZipFile.Open(staged, System.IO.Compression.ZipArchiveMode.Create))
+        using (var writer = new StreamWriter(zip.CreateEntry("ModernTubeDownloader.exe").Open()))
+            writer.Write("inert update fixture");
+        var repository = GitHubApplicationReleaseSource.Repository;
+        services.Updates.State.Available = new(version, "", new(repository + "/releases/tag/v" + version),
+            new(repository + "/releases/download/v" + version + "/" + filename),
+            new(repository + "/releases/download/v" + version + "/" + filename + ".sha256"));
+        services.Updates.State.StagedArchive = staged;
+        services.Updates.State.StagedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(staged)));
+        using (var host = ModernFormsTestHost.Create())
+        {
+            services.Appearance.Initialize();
+            using var panel = new UpdateSettingsPanel(services);
+            host.Show(panel, 1100, 900);
+            var checkbox = Find<CheckBox>(panel, "ApplicationUpdateOnExit");
+            Assert.True(checkbox.Enabled);
+            Assert.False(checkbox.Checked);
+            foreach (var enabled in new[] { true, false })
+            {
+                Ui(host, () => checkbox.Checked = enabled);
+                Pump(host, () => checkbox.Enabled && services.Updates.State.InstallOnExit == enabled);
+                Assert.Equal(enabled, checkbox.Checked);
+                var state = AtomicJsonFile.ReadAsync<ApplicationUpdateState>(Path.Combine(root, "state.json"));
+                Pump(host, () => state.IsCompleted);
+                Assert.Equal(enabled, (await state)!.InstallOnExit);
+            }
+        }
+        await services.ShutdownAsync();
+    }
+
     [Theory]
     [InlineData(false, 100)] [InlineData(true, 100)]
     [InlineData(false, 200)] [InlineData(true, 200)]

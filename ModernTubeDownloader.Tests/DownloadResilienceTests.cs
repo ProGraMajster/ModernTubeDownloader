@@ -68,7 +68,7 @@ public sealed class DownloadResilienceTests
                 logger.Error("Download failed HTTP 403 at https://youtube.com/watch?v=private; token=secret123",
                     new InvalidOperationException("Cookie: user-private-data"));
             var log = string.Join('\n', Directory.EnumerateFiles(root, "*.log").Select(File.ReadAllText));
-            Assert.Contains("HTTP 403", log);
+            Assert.Contains("\"code\":403", log);
             Assert.DoesNotContain("private", log, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("secret123", log);
             Assert.DoesNotContain("user-private-data", log);

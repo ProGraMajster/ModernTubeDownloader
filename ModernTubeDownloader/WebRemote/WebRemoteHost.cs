@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using ModernTubeDownloader.Infrastructure;
 using Microsoft.Extensions.Hosting;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Localization;
@@ -143,7 +144,7 @@ public sealed class WebRemoteHost : IDisposable
             runningAuthentication = config.WebRemoteRequireAuthentication;
             if (runningAuthentication) Pairing.Start();
             LastError = null;
-            services.Logger.Info($"Web remote started on {runningAddress}:{runningPort}; LAN binding only.");
+            services.Logger.Event(new(DiagnosticModule.WebRemote, DiagnosticStage.Startup, DiagnosticOutcome.Completed));
         }
         catch (Exception ex)
         {
@@ -183,7 +184,7 @@ public sealed class WebRemoteHost : IDisposable
             serverCertificate?.Dispose();
             serverCertificate = null;
         }
-        services.Logger.Info("Web remote stopped.");
+        services.Logger.Event(new(DiagnosticModule.WebRemote, DiagnosticStage.Shutdown, DiagnosticOutcome.Completed));
     }
 
     private WebApplication Build(IPAddress bindIp, int port, X509Certificate2? certificate)
@@ -255,7 +256,7 @@ public sealed class WebRemoteHost : IDisposable
                 services.Settings.Current.WebRemoteRequireAuthentication &&
                 !hasBearer && !hasSession)
             {
-                services.Logger.Warning($"Web remote auth failure ClientIp={context.Connection.RemoteIpAddress}");
+                services.Logger.Event(new(DiagnosticModule.WebRemote, DiagnosticStage.Validate, DiagnosticOutcome.Denied, DiagnosticLevel.Warn));
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 return;
             }
@@ -449,7 +450,8 @@ public sealed class WebRemoteHost : IDisposable
                 result = services.Queue.AddRangeSkippingDuplicates(
                     [DownloadQueueItem.FromMetadata(metadata, preset, formats, container, range, subtitles, sponsorBlock)]);
             }
-            services.Logger.Info($"Web remote action=add ClientIp={context.Connection.RemoteIpAddress} Added={result.Added} Duplicates={result.DuplicatesSkipped}");
+            services.Logger.Event(new(DiagnosticModule.WebRemote, DiagnosticStage.Import, DiagnosticOutcome.Completed,
+                Counts: new(Items: result.Added, Duplicates: result.DuplicatesSkipped)));
             return Results.Json(new { result.Added, result.DuplicatesSkipped,
                 warning = DownloadOptionCompatibilityValidator.WarningKey(sponsorBlock) is not null
                     ? "sponsorblock-remove-experimental" : null });

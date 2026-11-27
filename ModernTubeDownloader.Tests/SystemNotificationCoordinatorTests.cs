@@ -345,9 +345,9 @@ public sealed class SystemNotificationCoordinatorTests
     private sealed class RecordingLogger : IAppLogger
     {
         public List<string> Messages { get; } = [];
-        public void Info(string message) => Messages.Add(message);
-        public void Warning(string message) => Messages.Add(message);
-        public void Error(string message, Exception? exception = null) => Messages.Add(message);
+        public void Info(string message, string file = "", string member = "") => Messages.Add(message);
+        public void Warning(string message, string file = "", string member = "") => Messages.Add(message);
+        public void Error(string message, Exception? exception = null, string file = "", string member = "") => Messages.Add(message);
     }
     private sealed class FakeNotifications : ISystemNotificationService
     {

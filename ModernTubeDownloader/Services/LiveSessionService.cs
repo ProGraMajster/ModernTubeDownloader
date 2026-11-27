@@ -12,6 +12,7 @@ public sealed class LiveSessionService(LiveSessionPersistenceService persistence
     private ILiveSessionCommands? commands;
     public event EventHandler? Changed;
     public bool LoadFailed => persistence.LoadFailed;
+    internal int Count { get { lock (sync) return sessions.Count; } }
     public bool IsReadOnly => LoadFailed || dependencyAvailability?.Invoke() == false;
 
     // The service is the UI/API boundary; only the scheduler owns worker tasks/processes.

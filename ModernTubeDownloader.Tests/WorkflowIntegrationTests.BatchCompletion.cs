@@ -66,7 +66,7 @@ public sealed partial class WorkflowIntegrationTests
                 {
                     var store = new BatchSessionStore(Path.Combine(paths.RootDirectory, "Batch"));
                     foreach (var id in sessionIds)
-                        while ((await store.LoadAsync(id, timeout.Token)).WorkflowPhase != BatchWorkflowPhase.Completed)
+                        while ((await store.RecentAsync(timeout.Token)).Single(session => session.Id == id).WorkflowPhase != BatchWorkflowPhase.Completed)
                             await Task.Delay(25, timeout.Token);
                 }
                 var completedPlan = await services.Organizer.BuildPlanAsync(lists, settings.Current.FinalOutputDirectory, true);

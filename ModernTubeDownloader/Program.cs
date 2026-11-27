@@ -129,6 +129,7 @@ internal static class Program
                 }
             }
             using var form = new MainForm(services, enableAutomation, initialRequest, classicUi, autostart || notificationLaunch);
+            services.Diagnostics.Snapshot();
             if (services.Notifications is { } notifications)
                 notifications.Navigate += (_, request) => Application.RunOnUIThread(() => form.HandleNotification(request));
             instance.Start(request =>
@@ -187,7 +188,8 @@ internal static class Program
         {
             // Last-resort optional feature boundary, including an inaccessible icon
             // location. Automatic provider fallback handles known SDK load failures.
-            FatalErrorReporter.Log(paths, null, "Optional notification registration failed; application startup will continue.", error);
+            using var notificationLog = new FileAppLogger(paths.LogDirectory);
+            notificationLog.Event(new(DiagnosticModule.Notifications, DiagnosticStage.Initialize, DiagnosticOutcome.Unavailable, DiagnosticLevel.Warn, Exception: error));
             return null;
         }
     }

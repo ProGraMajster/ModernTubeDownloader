@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using ModernFormsNext;
 using ModernFormsNext.Animations;
@@ -1062,22 +1063,42 @@ internal sealed partial class DownloadsView : UserControl
 
     private void BuildQueueCards(Guid? scrollToItemId = null, bool rebuildPresentation = false)
     {
-        if (dashboard) { BuildGroupedQueueCards(scrollToItemId, rebuildPresentation); return; }
+        var logger = services.Logger;
+        var measured = logger.IsEnabled(DiagnosticLevel.Debug);
+        var started = measured ? Stopwatch.GetTimestamp() : 0;
+        try
+        {
+            if (dashboard) BuildGroupedQueueCards(scrollToItemId, rebuildPresentation);
+            else BuildClassicQueueCards(scrollToItemId, rebuildPresentation);
+        }
+        catch (Exception error)
+        {
+            logger.Event(new(DiagnosticModule.Queue, DiagnosticStage.Controls, DiagnosticOutcome.Failed,
+                DiagnosticLevel.Error, Exception: error));
+            throw;
+        }
+        if (measured) logger.Event(new(DiagnosticModule.Queue, DiagnosticStage.Controls, DiagnosticOutcome.Completed,
+            DiagnosticLevel.Debug, DurationMs: (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+            Counts: new(Items: cards.Count, Total: services.Queue.Count, Context: dashboard ? 1 : 0)));
+    }
+
+    private void BuildClassicQueueCards(Guid? scrollToItemId, bool rebuildPresentation)
+    {
         foreach (var group in groupCards.Values) { queueHost.Controls.Remove(group); group.Dispose(); }
         groupCards.Clear();
         UiCrashDiagnostics.VerifyUiThread("downloads.queue-rebuild");
         UiCrashDiagnostics.Record("queue.rebuild.begin", "queueHost", queueHost.Controls.Count);
         var previousIds = cards.Keys.ToHashSet();
         var items = services.Queue.Snapshot();
-        var pageSize = dashboard ? DashboardPageSize : QueueCardPage.Size;
-        var currentPage = dashboard ? dashboardPage : queuePage;
+        var pageSize = QueueCardPage.Size;
+        var currentPage = queuePage;
         if (scrollToItemId is { } reveal)
         {
             var index = Array.FindIndex(items.ToArray(), item => item.Id == reveal);
             if (index >= 0) currentPage = index / pageSize;
         }
         currentPage = Math.Clamp(currentPage, 0, Math.Max(0, (items.Count - 1) / pageSize));
-        if (dashboard) dashboardPage = currentPage; else queuePage = currentPage;
+        queuePage = currentPage;
         var visibleItems = items.Skip(currentPage * pageSize).Take(pageSize).ToArray();
         var visibleIds = visibleItems.Select(item => item.Id).ToHashSet();
         if (selectedItemId is { } selected && items.All(item => item.Id != selected))
@@ -1094,7 +1115,7 @@ internal sealed partial class DownloadsView : UserControl
                 if (!cards.TryGetValue(item.Id, out var card))
                 {
                     card = new QueueItemCard(services.Thumbnails, text);
-                    card.SetDashboard(dashboard);
+                    card.SetDashboard(false);
                     card.KeyDown += DashboardKeys;
                     card.ActionRequested += CardActionRequested;
                     cards[item.Id] = card;
@@ -1102,7 +1123,7 @@ internal sealed partial class DownloadsView : UserControl
                 }
                 card.BringToFront();
                 card.UpdateItem(item, selectedItemId == item.Id);
-                if (!dashboard && queueBuilt && items.Count <= 40 && !previousIds.Contains(item.Id))
+                if (queueBuilt && items.Count <= 40 && !previousIds.Contains(item.Id))
                 {
                     card.Opacity = 0f;
                     card.TranslationY = 8f;
@@ -1127,7 +1148,6 @@ internal sealed partial class DownloadsView : UserControl
             ScrollQueueCardIntoView(id);
         BuildQueueMenu();
         UpdateQueueSummary();
-        if (dashboard) { RefreshDashboardSelection(); UpdateLayout(); }
         UiCrashDiagnostics.Record("queue.rebuild.end", "queueHost", queueHost.Controls.Count);
     }
 

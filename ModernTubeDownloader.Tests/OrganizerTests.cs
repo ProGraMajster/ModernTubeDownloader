@@ -170,10 +170,17 @@ public sealed class OrganizerTests(ITestOutputHelper output)
         var outside = Path.Combine(f.Root, "outside-reviewed-target"); Directory.CreateDirectory(outside); Directory.CreateDirectory(Path.GetDirectoryName(f.Destination)!);
         var start = new ProcessStartInfo("cmd.exe") { Arguments = $"/c mklink /J \"{f.Destination}\" \"{outside}\"", CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         using var process = Process.Start(start)!; await process.WaitForExitAsync(); Assert.True(process.ExitCode == 0, await process.StandardError.ReadToEndAsync());
-        Assert.True((File.GetAttributes(f.Destination) & FileAttributes.ReparsePoint) != 0);
-        await Assert.ThrowsAsync<IOException>(() => service.MoveSelectedAsync(plan, [plan.Matches.Single().Id]));
-        Assert.Empty(Directory.GetFiles(outside)); Assert.True(File.Exists(entry.FinalPath));
-        Directory.Delete(f.Destination); // Remove only this fixture's junction; retain its target until fixture cleanup.
+        try
+        {
+            Assert.True((File.GetAttributes(f.Destination) & FileAttributes.ReparsePoint) != 0);
+            var error = await Assert.ThrowsAsync<OrganizerPathException>(() => service.MoveSelectedAsync(plan, [plan.Matches.Single().Id]));
+            Assert.Equal("Organizer.Destination", error.ContextKey);
+            Assert.Equal("Organizer.Error.Reparse", error.Message);
+            Assert.Empty(await service.JournalsAsync());
+            Assert.Empty(Directory.GetFiles(outside));
+            Assert.True(File.Exists(entry.FinalPath));
+        }
+        finally { Directory.Delete(f.Destination); } // Remove the fixture's junction only.
     }
 
     [Theory]

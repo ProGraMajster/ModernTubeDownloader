@@ -29,7 +29,7 @@ public sealed class ReleaseNotesCatalogTests
         Assert.Null(ReleaseNotesCatalog.ForInstalled(otherVersion, "en"));
         Assert.Equal("https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v" + otherVersion,
             ReleaseNotesCatalog.OfficialReleaseUrl(otherVersion)!.AbsoluteUri);
-        Assert.Equal(new[] { "1.3.0", "1.3.0-candidate.1" }, ReleaseNotesCatalog.AvailableVersions.OrderBy(version => version, StringComparer.Ordinal));
+        Assert.Equal(new[] { "1.3.0", "1.3.0-candidate.1", "1.3.1", "1.3.2" }, ReleaseNotesCatalog.AvailableVersions.OrderBy(version => version, StringComparer.Ordinal));
     }
 
     [Theory]

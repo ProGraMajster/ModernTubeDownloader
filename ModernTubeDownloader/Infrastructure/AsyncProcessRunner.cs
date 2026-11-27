@@ -27,8 +27,13 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
         foreach (var argument in request.Arguments)
             startInfo.ArgumentList.Add(argument);
 
-        var correlation = ProcessLogContext.Describe(request);
-        logger.Info($"Starting process: {Path.GetFileName(request.FileName)} {RedactArguments(request.Arguments)}; {correlation}");
+        var operation = Guid.NewGuid();
+        var parent = ProcessLogContext.ParentOperationId;
+        var tool = Path.GetFileNameWithoutExtension(request.FileName).ToLowerInvariant() switch
+        { "yt-dlp" => 1, "ffmpeg" => 2, "ffprobe" => 3, "deno" => 4, _ => 0 };
+        logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Run, DiagnosticOutcome.Requested, OperationId: operation,
+            ParentOperationId: parent, Counts: new(Context: tool, CookieFile: request.Arguments.Contains("--cookies"),
+                SponsorMark: request.Arguments.Contains("--sponsorblock-mark"))));
         var standardOutput = new ConcurrentQueue<string>();
         var standardError = new ConcurrentQueue<string>();
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
@@ -41,9 +46,13 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
                 throw new ExternalProcessException($"Could not start {Path.GetFileName(request.FileName)}.");
             processJob = WindowsProcessJob.TryAssign(process, logger);
             process.StandardInput.Close();
+            logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Run, DiagnosticOutcome.Started,
+                OperationId: operation, ParentOperationId: parent, Counts: new(Context: tool)));
         }
         catch (Exception ex) when (ex is not ExternalProcessException)
         {
+            logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Run, DiagnosticOutcome.Failed, DiagnosticLevel.Error,
+                operation, parent, stopwatch.ElapsedMilliseconds, ex, new(Context: tool)));
             throw new ExternalProcessException($"Could not start {request.FileName}: {ex.Message}", null, ex);
         }
 
@@ -62,15 +71,27 @@ public sealed class AsyncProcessRunner(IAppLogger logger)
             processJob = null;
             await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
         }
+        catch (Exception error)
+        {
+            logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Run, DiagnosticOutcome.Failed, DiagnosticLevel.Error,
+                operation, parent, stopwatch.ElapsedMilliseconds, error, new(Context: tool)));
+            throw;
+        }
         finally
         {
             processJob?.Dispose();
             stopwatch.Stop();
         }
 
+        if (cancellationToken.IsCancellationRequested)
+            logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Run, DiagnosticOutcome.Cancelled,
+                OperationId: operation, ParentOperationId: parent, DurationMs: stopwatch.ElapsedMilliseconds, Counts: new(Context: tool)));
         cancellationToken.ThrowIfCancellationRequested();
         var result = new ProcessRunResult(process.ExitCode, standardOutput.ToArray(), standardError.ToArray(), stopwatch.Elapsed);
-        logger.Info($"Process ended: {Path.GetFileName(request.FileName)}, exit={result.ExitCode}, duration={result.Duration.TotalSeconds:F2}s; {correlation}");
+        logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Run,
+            result.ExitCode == 0 ? DiagnosticOutcome.Completed : DiagnosticOutcome.Failed,
+            result.ExitCode == 0 ? DiagnosticLevel.Info : DiagnosticLevel.Warn, operation, parent,
+            stopwatch.ElapsedMilliseconds, Counts: new(Code: result.ExitCode, Context: tool, Items: standardOutput.Count, Errors: standardError.Count)));
         return result;
     }
 

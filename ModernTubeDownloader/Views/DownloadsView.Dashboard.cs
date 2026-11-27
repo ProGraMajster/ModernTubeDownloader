@@ -12,7 +12,6 @@ internal sealed partial class DownloadsView
     private bool arrangingDashboard;
     private int dashboardPage;
     private System.Drawing.Rectangle classicAnalysisProgressBounds;
-    private const int DashboardPageSize = 40;
     private Panel? dashboardQueue;
     private FlowLayoutPanel? dashboardChips;
     private DashboardInspector? dashboardInspector;

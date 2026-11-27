@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -151,20 +152,27 @@ public sealed class StableReleaseMigrationTests
         AssertPreserved(hashes);
     }
 
-    private sealed class StableFeedHandler : HttpMessageHandler
+    private sealed class StableFeedHandler(string version = StableVersion, byte[]? payload = null) : HttpMessageHandler
     {
         public List<Uri> Requests { get; } = [];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Requests.Add(request.RequestUri!);
-            Assert.Equal("https://api.github.com/repos/ProGraMajster/ModernTubeDownloader/releases/latest", request.RequestUri!.AbsoluteUri);
-            const string archive = "ModernTubeDownloader-1.3.0-win-x64.zip";
             var repository = GitHubApplicationReleaseSource.Repository;
-            var body = JsonSerializer.Serialize(new { draft = false, prerelease = false, tag_name = "v1.3.0",
-                html_url = repository + "/releases/tag/v1.3.0", body = "Stable 1.3.0 synthetic release metadata",
-                assets = new[] { archive + ".sha256", "ModernTubeDownloader-1.3.0-win-x64-symbols.zip", archive }
-                    .Select(name => new { name, browser_download_url = repository + "/releases/download/v1.3.0/" + name }) });
+            var archive = $"ModernTubeDownloader-{version}-win-x64.zip";
+            var asset = $"{repository}/releases/download/v{version}/{archive}";
+            if (payload is not null && request.RequestUri!.AbsoluteUri == asset + ".sha256")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                    { Content = new StringContent(Convert.ToHexString(SHA256.HashData(payload)) + "  " + archive) });
+            if (payload is not null && request.RequestUri!.AbsoluteUri == asset)
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+
+            Assert.Equal("https://api.github.com/repos/ProGraMajster/ModernTubeDownloader/releases/latest", request.RequestUri!.AbsoluteUri);
+            var body = JsonSerializer.Serialize(new { draft = false, prerelease = false, tag_name = $"v{version}",
+                html_url = $"{repository}/releases/tag/v{version}", body = $"Stable {version} synthetic release metadata",
+                assets = new[] { archive + ".sha256", $"ModernTubeDownloader-{version}-win-x64-symbols.zip", archive }
+                    .Select(name => new { name, browser_download_url = $"{repository}/releases/download/v{version}/{name}" }) });
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
         }
     }
@@ -223,5 +231,45 @@ public sealed class StableReleaseMigrationTests
         Assert.Null(service.State.StagedArchive);
         Assert.False(service.State.InstallOnExit);
         Assert.False(service.ShouldInstallOnExit);
+    }
+
+    [Fact]
+    public async Task AutomaticStableHotfixStagesOnlyForEligibleInstallationsAndKeepsCollections()
+    {
+        using var fixture = new Fixture();
+        var hashes = await fixture.SeedLegacyProfile();
+        var settings = new SettingsService(fixture.Paths, new NullAppLogger());
+        await settings.LoadAsync();
+        var initialSettingsHash = hashes[fixture.Paths.SettingsFile];
+
+        using var archive = new MemoryStream();
+        using (var zip = new ZipArchive(archive, ZipArchiveMode.Create, leaveOpen: true))
+        using (var entry = new StreamWriter(zip.CreateEntry("ModernTubeDownloader.exe").Open()))
+            await entry.WriteAsync("inert update fixture");
+        var bytes = archive.ToArray();
+        using var handler = new StableFeedHandler("1.3.1", bytes);
+        using var http = new HttpClient(handler);
+        using (var service = new ApplicationUpdateService(fixture.Paths, settings, http, new NullAppLogger(), currentVersion: StableVersion))
+        {
+            await service.RunAutomaticCycleAsync();
+            Assert.Empty(handler.Requests);
+
+            await service.ApplyPolicyAsync(true, UpdateCheckFrequency.Daily, UpdateInstallMode.InstallOnExit);
+            Assert.NotEqual(initialSettingsHash, SHA256.HashData(File.ReadAllBytes(fixture.Paths.SettingsFile)));
+            hashes.Remove(fixture.Paths.SettingsFile); // The only requested settings change was the explicit update opt-in.
+            await service.RunAutomaticCycleAsync();
+
+            Assert.Equal("1.3.1", service.State.Available?.Version);
+            Assert.True(service.Ready);
+            Assert.True(service.ShouldInstallOnExit);
+            Assert.False(service.CanInstallAtStartup);
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(service.State.StagedArchive!));
+            Assert.Equal(3, handler.Requests.Count);
+        }
+        using var upgraded = new ApplicationUpdateService(fixture.Paths, settings, http, new NullAppLogger(), currentVersion: "1.3.1");
+        await upgraded.InitializeAsync();
+        Assert.False(upgraded.Ready);
+        Assert.False(upgraded.ShouldInstallOnExit);
+        AssertPreserved(hashes);
     }
 }

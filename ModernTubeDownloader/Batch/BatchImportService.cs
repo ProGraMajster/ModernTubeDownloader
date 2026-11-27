@@ -88,7 +88,12 @@ public sealed partial class BatchImportService : IDisposable
     {
         if (!QualityPreset.All.Any(value => value.Id == quality) || !Enum.IsDefined(container) || workers is < 1 or > 8)
             throw new ArgumentException("Batch.Error.Options");
+        var operation = Guid.NewGuid();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        logger.Event(new(DiagnosticModule.Batch, DiagnosticStage.Import, DiagnosticOutcome.Requested, OperationId: operation));
         await importGate.WaitAsync(token).ConfigureAwait(false);
+        logger.Event(new(DiagnosticModule.Batch, DiagnosticStage.Import, DiagnosticOutcome.Started, OperationId: operation,
+            Counts: new(WaitMs: clock.ElapsedMilliseconds)));
         try
         {
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{name}\n{quality}\n{container}\n{sourceHash}")));
@@ -97,7 +102,12 @@ public sealed partial class BatchImportService : IDisposable
         var outputDirectory = DownloadOutputPolicy.ForList(outputRoot, listName);
         var existing = await store.FindImportsAsync(fingerprint, outputDirectory, token).ConfigureAwait(false);
         if (existing.FirstOrDefault(value => value.SourceFingerprint == fingerprint) is { } previous)
-            return await OpenAsync(previous.Id, token).ConfigureAwait(false);
+        {
+            var restored = await OpenAsync(previous.Id, token).ConfigureAwait(false);
+            logger.Event(new(DiagnosticModule.Batch, DiagnosticStage.Import, DiagnosticOutcome.Completed, OperationId: operation,
+                DurationMs: clock.ElapsedMilliseconds, Counts: new(Items: restored.ImportedCount, Context: 1)));
+            return restored;
+        }
         var session = new BatchImportSession { FileName = name, DefaultQuality = quality, DefaultContainer = container, AnalysisWorkers = workers,
             SourceFingerprint = fingerprint, OutputRoot = outputRoot, OutputDirectory = outputDirectory, ListName = listName, CreateListSubfolder = true,
             DestinationConfirmed = !existing.Any(value => string.Equals(value.OutputDirectory, outputDirectory, StringComparison.OrdinalIgnoreCase)) };
@@ -105,6 +115,8 @@ public sealed partial class BatchImportService : IDisposable
         lock (sync) loaded.Add(session.Id, session);
         TrackSession(session);
         progress?.Report(new("Import", session.ImportedCount, session.ImportedCount));
+        logger.Event(new(DiagnosticModule.Batch, DiagnosticStage.Import, DiagnosticOutcome.Completed, OperationId: operation,
+            DurationMs: clock.ElapsedMilliseconds, Counts: new(Items: session.ImportedCount, Code: session.SchemaVersion)));
         return session;
         async IAsyncEnumerable<BatchImportEntry> Rows([EnumeratorCancellation] CancellationToken cancellation)
         {
@@ -117,6 +129,14 @@ public sealed partial class BatchImportService : IDisposable
                 if (ordinal % 1000 == 0) progress?.Report(new("Import", ordinal));
             }
         }
+        }
+        catch (Exception error)
+        {
+            logger.Event(new(DiagnosticModule.Batch, DiagnosticStage.Import,
+                error is OperationCanceledException ? DiagnosticOutcome.Cancelled : DiagnosticOutcome.Failed,
+                error is OperationCanceledException ? DiagnosticLevel.Info : DiagnosticLevel.Warn, operation,
+                DurationMs: clock.ElapsedMilliseconds, Exception: error));
+            throw;
         }
         finally { importGate.Release(); }
     }
@@ -155,8 +175,29 @@ public sealed partial class BatchImportService : IDisposable
     private async Task AnalyzeAsync(BatchImportSession session, Guid[] ids, CancellationToken token)
     {
         var cursor = -1; var workersCompleted = false;
+        var operation = Guid.NewGuid();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        logger.Event(new(DiagnosticModule.Batch, DiagnosticStage.Match, DiagnosticOutcome.Started, OperationId: operation,
+            Counts: new(Items: ids.Length, Total: session.ImportedCount)));
         try { await Task.WhenAll(Enumerable.Range(0, Math.Clamp(session.AnalysisWorkers, 1, 8)).Select(_ => Worker())); workersCompleted = true; }
-        finally { session.Paused = true; session.WorkflowPhase = token.IsCancellationRequested ? BatchWorkflowPhase.Cancelled : BatchWorkflowPhase.Prepared; await store.SaveSessionAsync(session); if (workersCompleted && !token.IsCancellationRequested) AnalysisCompleted?.Invoke(this, (ids.Length, session.ImportedCount)); }
+        finally
+        {
+            try
+            {
+                session.Paused = true;
+                session.WorkflowPhase = token.IsCancellationRequested ? BatchWorkflowPhase.Cancelled : BatchWorkflowPhase.Prepared;
+                await store.SaveSessionAsync(session);
+                if (workersCompleted && !token.IsCancellationRequested) AnalysisCompleted?.Invoke(this, (ids.Length, session.ImportedCount));
+            }
+            catch { workersCompleted = false; throw; }
+            finally
+            {
+                logger.Event(new(DiagnosticModule.Batch, DiagnosticStage.Match,
+                    token.IsCancellationRequested ? DiagnosticOutcome.Cancelled : workersCompleted ? DiagnosticOutcome.Completed : DiagnosticOutcome.Failed,
+                    workersCompleted ? DiagnosticLevel.Info : DiagnosticLevel.Warn, operation, DurationMs: clock.ElapsedMilliseconds,
+                    Counts: new(Items: Math.Min(cursor + 1, ids.Length), Total: ids.Length)));
+            }
+        }
         async Task Worker()
         {
             while (!token.IsCancellationRequested)

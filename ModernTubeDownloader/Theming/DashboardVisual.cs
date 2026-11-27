@@ -191,15 +191,30 @@ internal sealed class DashboardButtonRenderer : ModernFormsNext.Renderers.Button
 /// <summary>App progress presentation with the existing native range semantics and value model.</summary>
 internal sealed class DashboardProgress : ProgressBar
 {
+    private bool indeterminate;
     public string FillToken { get; set; } = AppThemeTokens.Accent;
+    public bool IsIndeterminate
+    {
+        get => indeterminate;
+        set { if (indeterminate != value) { indeterminate = value; Invalidate(); } }
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
-        if (!AppTypography.IsDashboard(this)) { base.OnPaint(e); return; }
+        if (!IsIndeterminate && !AppTypography.IsDashboard(this)) { base.OnPaint(e); return; }
         var w = LogicalToDeviceUnits(Width); var h = LogicalToDeviceUnits(Height);
         using var paint = new SKPaint { IsAntialias = true, Color = AppUi.GetColor(AppThemeTokens.SurfaceSecondary) };
         e.Canvas.DrawRoundRect(new SKRect(0, 0, w, h), h / 2f, h / 2f, paint);
-        var fraction = Math.Clamp((Value - Minimum) / (double)Math.Max(1, Maximum - Minimum), 0, 1);
         paint.Color = AppUi.GetColor(FillToken);
+        if (IsIndeterminate)
+        {
+            var span = w / 4f;
+            var position = AppearancePresentation.Current.Global.Animations ? (Environment.TickCount64 % 1600) / 1600f : 0.5f;
+            var left = (w + span) * position - span;
+            e.Canvas.DrawRoundRect(new SKRect(Math.Max(0, left), 0, Math.Min(w, left + span), h), h / 2f, h / 2f, paint);
+            return;
+        }
+        var fraction = Math.Clamp((Value - Minimum) / (double)Math.Max(1, Maximum - Minimum), 0, 1);
         e.Canvas.DrawRoundRect(new SKRect(0, 0, (float)(w * fraction), h), h / 2f, h / 2f, paint);
     }
 }

@@ -83,7 +83,7 @@ public sealed class YtDlpDownloadService(YtDlpProcessRunner runner, SettingsServ
                 reportedFile = line[FilePrefix.Length..].Trim();
         }
 
-        await runner.RunAsync(arguments, HandleLine, line => logger.Info($"yt-dlp: {line}"), cancellationToken,
+        await runner.RunAsync(arguments, HandleLine, null, cancellationToken,
             requireFfmpeg: liveStartPolicy is not null || requestedRange.Mode == MediaRangeMode.Custom ||
                 sponsorBlock?.Mode != SponsorBlockMode.Off && sponsorBlock is not null).ConfigureAwait(false);
 
