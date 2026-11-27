@@ -28,16 +28,24 @@ public sealed partial class ApplicationUpdateTests
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task StartupInstallerResultReplacesInstallingStatusDurably(bool success)
+    [InlineData("{\"success\":true}", "Updates.Current", false, InstallerRecoveryStatus.Unknown)]
+    [InlineData("{\"success\":true,\"restartPending\":true}", "Updates.RestartUnconfirmed", false, InstallerRecoveryStatus.Unknown)]
+    [InlineData("{\"success\":false}", "Updates.InstallFailed", true, InstallerRecoveryStatus.Unknown)]
+    [InlineData("{\"success\":false,\"recovery\":\"restored\"}", "Updates.RollbackRestored", true, InstallerRecoveryStatus.Restored)]
+    [InlineData("{\"success\":false,\"recovery\":\"partial\"}", "Updates.RollbackPartial", true, InstallerRecoveryStatus.Partial)]
+    [InlineData("{\"success\":false,\"recovery\":\"unknown\"}", "Updates.InstallFailed", true, InstallerRecoveryStatus.Unknown)]
+    [InlineData("{\"success\":false,\"recovery\":\"unrecognized\"}", "Updates.InstallFailed", true, InstallerRecoveryStatus.Unknown)]
+    [InlineData("{\"recovery\":\"restored\"}", "Updates.InstallFailed", true, InstallerRecoveryStatus.Unknown)]
+    [InlineData("{ invalid", "Updates.InstallFailed", true, InstallerRecoveryStatus.Unknown)]
+    [InlineData(null, "Updates.InstallFailed", true, InstallerRecoveryStatus.Unknown)]
+    public async Task StartupInstallerResultReplacesInstallingStatusDurably(string? result, string expectedKey, bool failed, InstallerRecoveryStatus recovery)
     {
         using var fixture = new Fixture(); using var http = new HttpClient();
         var paths = AppPaths.Create(Path.Combine(fixture.Root, "data"));
         var settings = new SettingsService(paths, new NullAppLogger()); await settings.LoadAsync();
         var runner = Path.Combine(paths.RootDirectory, "Updates", "runner-result"); Directory.CreateDirectory(runner);
         var request = Path.Combine(runner, "request.json"); await File.WriteAllTextAsync(request, "{}");
-        await File.WriteAllTextAsync(request + ".result.json", JsonSerializer.Serialize(new { success }));
+        if (result is not null) await File.WriteAllTextAsync(request + ".result.json", result);
         await AtomicJsonFile.WriteAsync(Path.Combine(paths.RootDirectory, "Updates", "state.json"), new ApplicationUpdateState
         {
             LastInstallerRequest = request, LastStartupAttemptVersion = "1.2.0",
@@ -45,12 +53,16 @@ public sealed partial class ApplicationUpdateTests
         });
         using var service = new ApplicationUpdateService(paths, settings, http, new NullAppLogger(), new Source(null), "1.2.0");
         await service.InitializeAsync();
-        Assert.Equal(success ? "Updates.Current" : "Updates.InstallFailed", service.State.LastStartupResultKey);
-        Assert.Equal(!success, service.State.InstallationFailed);
+        Assert.Equal(expectedKey, service.State.LastStartupResultKey);
+        Assert.Equal(failed, service.State.InstallationFailed);
+        Assert.Equal(recovery, service.State.InstallerRecovery);
         Assert.False(service.InstallationPending);
         using var restored = new ApplicationUpdateService(paths, settings, http, new NullAppLogger(), new Source(null), "1.2.0");
         await restored.InitializeAsync();
-        Assert.Equal(service.State.LastStartupResultKey, restored.State.LastStartupResultKey);
+        Assert.Equal(expectedKey, restored.State.LastStartupResultKey);
+        Assert.Equal(failed, restored.State.InstallationFailed);
+        Assert.Equal(recovery, restored.State.InstallerRecovery);
+        if (failed) Assert.Equal(expectedKey, restored.StatusKey);
         Assert.Equal("1.2.0", restored.State.LastStartupAttemptVersion);
     }
 
