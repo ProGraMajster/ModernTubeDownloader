@@ -30,7 +30,7 @@ internal sealed partial class HistoryView : UserControl
     private readonly Label pageSummary = new() { AccessibleAutomationId = "HistoryPageSummary" };
     private readonly ModernFormsNext.Timer debounce = new() { Interval = 200 };
     private CancellationTokenSource? filtering;
-    private DownloadHistoryEntry[] filtered = [];
+    private IReadOnlyList<DownloadHistoryEntry> filtered = [];
     private int page;
     private int total;
     private long generation;
@@ -176,8 +176,10 @@ internal sealed partial class HistoryView : UserControl
         var version = ++generation;
         var query = search.Text.Trim();
         var culture = text.Culture;
-        var all = services.History.Snapshot();
-        var useDashboard = dashboard; var filter = dashboardFilter; var dateDays = days; var ascending = oldestFirst;
+        var recordCount = services.History.Count;
+        var filter = dashboard ? dashboardFilter : null;
+        var dateDays = days;
+        var ascending = oldestFirst;
         var dateCutoff = dateDays == 0 ? DateTimeOffset.MinValue : DateTimeOffset.UtcNow.AddDays(-dateDays);
         var logger = services.Logger;
         var measured = logger.IsEnabled(DiagnosticLevel.Debug);
@@ -189,7 +191,7 @@ internal sealed partial class HistoryView : UserControl
                 logger.Event(new(DiagnosticModule.History, DiagnosticStage.Match, outcome,
                     error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Error, operation,
                     DurationMs: measured ? (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds : null,
-                    Exception: error, Counts: new(Total: all.Count, Matches: matches)));
+                    Exception: error, Counts: new(Total: recordCount, Matches: matches)));
         }
         Record(DiagnosticOutcome.Started);
         try
@@ -198,15 +200,11 @@ internal sealed partial class HistoryView : UserControl
             var result = await Task.Run(() =>
             {
                 using var timing = PerformanceDiagnostics.Measure("history.filter");
-                var matches = HistoryPage.Filter(all, query, culture, token);
-                if (useDashboard) matches = matches.Where(e => e.CompletedAt >= dateCutoff && MatchesFilter(e, filter)).ToArray();
-                if (useDashboard && ascending) Array.Reverse(matches);
-                var counts = new Dictionary<string,int>();
-                foreach (var id in new[] { "All", "Completed", "Errors", "Audio", "Video", "Playlists", "Live" })
-                { token.ThrowIfCancellationRequested(); counts[id] = all.Count(e => e.CompletedAt >= dateCutoff && MatchesFilter(e,id)); }
-                return (matches, counts);
+                var all = services.History.OrderedForRead(token);
+                recordCount = all.Count;
+                return HistoryPage.Project(all, query, culture, filter, dateCutoff, ascending, token);
             }, token).ConfigureAwait(false);
-            Record(DiagnosticOutcome.Completed, result.matches.Length);
+            Record(DiagnosticOutcome.Completed, result.Matches.Count);
             Application.RunOnUIThread(() =>
             {
                 if (disposed || token.IsCancellationRequested || version != generation || !Visible)
@@ -215,8 +213,8 @@ internal sealed partial class HistoryView : UserControl
                         DiagnosticLevel.Debug, operation));
                     return;
                 }
-                filtered = result.matches; filterCounts = result.counts; historySnapshot = all; total = all.Count; dirty = false;
-                page = HistoryPage.Clamp(page, filtered.Length);
+                filtered = result.Matches; filterCounts = result.Counts; total = recordCount; dirty = false;
+                page = HistoryPage.Clamp(page, filtered.Count);
                 RenderPage(operation);
             });
         }
@@ -229,7 +227,7 @@ internal sealed partial class HistoryView : UserControl
 
     private void GoToPage(int requested)
     {
-        var target = HistoryPage.Clamp(requested, filtered.Length);
+        var target = HistoryPage.Clamp(requested, filtered.Count);
         if (target == page) return;
         page = target;
         RenderPage();
@@ -246,6 +244,7 @@ internal sealed partial class HistoryView : UserControl
         if (dashboard)
         {
             var selected = entries.FirstOrDefault(entry => entry.QueueItemId == selectedId && entry.FinalPath == selectedPath) ?? entries.FirstOrDefault();
+            selectedEntry = selected;
             selectedId = selected?.QueueItemId; selectedPath = selected?.FinalPath;
         }
         list.SuspendLayout();
@@ -278,23 +277,23 @@ internal sealed partial class HistoryView : UserControl
             }
         }
         finally { list.ResumeLayout(true); }
-        empty.Visible = filtered.Length == 0;
-        list.Visible = filtered.Length != 0;
+        empty.Visible = filtered.Count == 0;
+        list.Visible = filtered.Count != 0;
         emptyTitle.Text = services.History.LoadFailed ? text["History.UnavailableTitle"] : total == 0 ? text["History.EmptyTitle"] : text["History.NoResultsTitle"];
         emptyBody.Text = services.History.LoadFailed ? text["History.UnavailableBody"] : total == 0 ? text["History.EmptyBody"] : text["History.NoResultsBody"];
         classicPrevious.Enabled = page > 0;
-        classicNext.Enabled = page + 1 < HistoryPage.Count(filtered.Length);
-        pageSummary.Text = text.Get("History.PageSummary", page + 1, HistoryPage.Count(filtered.Length), filtered.Length, total);
+        classicNext.Enabled = page + 1 < HistoryPage.Count(filtered.Count);
+        pageSummary.Text = text.Get("History.PageSummary", page + 1, HistoryPage.Count(filtered.Count), filtered.Count, total);
         ResizeCards(); list.PerformLayout();
         if (dashboard) UpdateLayout();
         PerformanceDiagnostics.Set("history.horizontalRange", list.HorizontalScrollProperties.Maximum - list.HorizontalScrollProperties.LargeChange + 1);
         PerformanceDiagnostics.Set("history.cards", cards.Count);
         PerformanceDiagnostics.Set("history.visible", entries.Length);
-        PerformanceDiagnostics.Set("history.matches", filtered.Length);
+        PerformanceDiagnostics.Set("history.matches", filtered.Count);
         PerformanceDiagnostics.Emit("history.page.ready");
         if (measured) services.Logger.Event(new(DiagnosticModule.History, DiagnosticStage.Controls, DiagnosticOutcome.Completed,
             DiagnosticLevel.Debug, operation, DurationMs: (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
-            Counts: new(Items: entries.Length, Total: total, Matches: filtered.Length)));
+            Counts: new(Items: entries.Length, Total: total, Matches: filtered.Count)));
     }
 
     private void ResizeCards()

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using ModernFormsNext;
 using ModernFormsNext.Accessibility;
 using ModernTubeDownloader.Models;
@@ -12,11 +11,12 @@ internal sealed partial class HistoryView
 {
     public event EventHandler<string>? RetryRequested;
     private bool dashboard;
-    private IReadOnlyList<DownloadHistoryEntry> historySnapshot = Array.Empty<DownloadHistoryEntry>();
+    private DownloadHistoryEntry? selectedEntry;
     private Dictionary<string,int> filterCounts = new();
     private DownloadHistoryEntry? inspectedEntry;
     private void SelectHistory(object? sender, DownloadHistoryEntry selected)
     {
+        selectedEntry = selected;
         selectedId = selected.QueueItemId; selectedPath = selected.FinalPath;
         inspector?.ShowHistory(selected); inspectedEntry = selected;
         foreach (var row in cards) row.SetDashboard(dashboard, row.ItemId == selectedId && row.ItemPath == selectedPath);
@@ -25,8 +25,6 @@ internal sealed partial class HistoryView
     {
         dirty = true; generation++; filtering?.Cancel(); RefreshItems();
     }
-    private bool Matches(DownloadHistoryEntry entry, string query)
-        => HistoryPage.Filter(new[] { entry }, query, text.Culture, default).Length != 0;
     private string dashboardFilter = "All";
     private Guid? selectedId;
     private string? selectedPath;
@@ -43,7 +41,6 @@ internal sealed partial class HistoryView
     private Button? dateSort;
     private bool oldestFirst;
     private int days;
-    private bool InDateRange(DownloadHistoryEntry entry) => days == 0 || entry.CompletedAt >= DateTimeOffset.UtcNow.AddDays(-days);
     private readonly List<Label> tableHeadings = [];
     private readonly Dictionary<Button, string> filterButtons = [];
     private readonly ToolTip dashboardTips = new();
@@ -73,7 +70,7 @@ internal sealed partial class HistoryView
             AppUi.Secondary(previous); AppUi.Secondary(next); previous.Click += (_, _) => ChangePage(-1); next.Click += (_, _) => ChangePage(1);
             firstPage = new DashboardButton { Text = "«", AccessibleAutomationId = "HistoryFirst" };
             lastPage = new DashboardButton { Text = "»", AccessibleAutomationId = "HistoryLast" };
-            firstPage.Click += (_, _) => GoToPage(0); lastPage.Click += (_, _) => GoToPage(HistoryPage.Count(filtered.Length) - 1);
+            firstPage.Click += (_, _) => GoToPage(0); lastPage.Click += (_, _) => GoToPage(HistoryPage.Count(filtered.Count) - 1);
             jumpPage = new NumericUpDown { Minimum = 1, Maximum = 1, Value = 1, AccessibleAutomationId = "HistoryJumpPage" };
             AppUi.Input(jumpPage);
             jumpPage.ValueChanged += (_, _) => { if (!updatingPageNumber) GoToPage((int)jumpPage.Value - 1); };
@@ -101,15 +98,6 @@ internal sealed partial class HistoryView
         if (paging is not null) paging.AccessibleAutomationId = value ? "HistoryPageSummary" : "HistoryDashboardPageSummary";
         InvalidateProjection(); UpdateLayout();
     }
-    private static bool Completed(DownloadHistoryEntry entry) => !entry.WasPartial && entry.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase);
-    private bool FilterHistory(DownloadHistoryEntry entry) => InDateRange(entry) && MatchesFilter(entry, dashboardFilter);
-    private static bool MatchesFilter(DownloadHistoryEntry entry, string filter) => filter switch
-    {
-        "Completed" => Completed(entry), "Errors" => !Completed(entry), "Live" => entry.WasLiveRecording,
-        "Audio" => new[] { ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".wav", ".opus" }.Contains(System.IO.Path.GetExtension(entry.FinalPath).ToLowerInvariant()),
-        "Video" => new[] { ".mp4", ".mkv", ".webm", ".mov", ".avi" }.Contains(System.IO.Path.GetExtension(entry.FinalPath).ToLowerInvariant()),
-        "Playlists" => !string.IsNullOrEmpty(entry.PlaylistId) || !string.IsNullOrEmpty(entry.PlaylistTitle), _ => true
-    };
     private async Task ExportAsync()
     {
         if (FindForm() is not { } form) return;
@@ -118,17 +106,17 @@ internal sealed partial class HistoryView
             var dialog = new SaveFileDialog { FileName = "history.json", DefaultExtension = "json" }; dialog.AddFilter("JSON", "*.json");
             if (await dialog.ShowDialog(form) == DialogResult.OK && dialog.FileName is { } path)
             {
-                var snapshot = services.History.Snapshot(); var query = search.Text.Trim(); var culture = text.Culture;
-                var filter = dashboardFilter; var cutoff = days == 0 ? DateTimeOffset.MinValue : DateTimeOffset.UtcNow.AddDays(-days);
+                var query = search.Text.Trim();
+                var culture = text.Culture;
+                var filter = dashboardFilter;
+                var cutoff = days == 0 ? DateTimeOffset.MinValue : DateTimeOffset.UtcNow.AddDays(-days);
                 var ascending = oldestFirst;
-                var json = await Task.Run(() =>
+                await Task.Run(async () =>
                 {
-                    var matches = HistoryPage.Filter(snapshot, query, culture, default)
-                        .Where(e => e.CompletedAt >= cutoff && MatchesFilter(e, filter)).ToArray();
-                    if (ascending) Array.Reverse(matches);
-                    return JsonSerializer.Serialize(matches, Infrastructure.JsonDefaults.Options);
+                    var snapshot = services.History.OrderedForRead();
+                    var (matches, _) = HistoryPage.Project(snapshot, query, culture, filter, cutoff, ascending, default);
+                    await Infrastructure.AtomicJsonFile.WriteAsync(path, matches).ConfigureAwait(false);
                 });
-                await File.WriteAllTextAsync(path, json);
             }
         }
         catch (Exception error) { services.Logger.Error("History export failed.", error); }
@@ -161,7 +149,6 @@ internal sealed partial class HistoryView
         export.SetBounds(18 + origin.X + width - Math.Min(exportWidth, width / 2 - 6), toolsTop, Math.Min(exportWidth, width / 2 - 6), line);
         dateRange!.SetBounds(inlineTools ? searchPanel.Right + 12 : searchPanel.Left, toolsTop, inlineTools ? dateWidth : Math.Min(dateWidth, export.Left - searchPanel.Left - 12), line);
         DashboardVisual.Icon(export, AppIconKind.Download);
-        var entries = historySnapshot;
         var filterRows = 1; var filterX = 0; var filterHeight = AppTypography.TextHeight(36);
         foreach (var (button, filter) in filterButtons)
         {
@@ -192,7 +179,7 @@ internal sealed partial class HistoryView
         lastPage!.SetBounds(next.Right + 8, previous.Top, pagerButtonWidth, line);
         paging!.SetBounds(list.Left + 12, previous.Top + 4, Math.Max(1, firstPage.Left - list.Left - 24), line);
         tableSurface!.SetBounds(tableHeader.Left, tableHeader.Top, center, lastPage.Bottom - tableHeader.Top + 12);
-        var countFiltered = filtered.Length; var pages = HistoryPage.Count(countFiltered);
+        var countFiltered = filtered.Count; var pages = HistoryPage.Count(countFiltered);
         var first = countFiltered == 0 ? 0 : page * 40 + 1; var last = Math.Min(countFiltered, (page + 1) * 40);
         paging.Text = $"{first}–{last} / {countFiltered}     ·     {page + 1} / {pages}"; previous.Enabled = page > 0; next.Enabled = page < pages - 1;
         paging.AccessibleName = text.Get("History.PageSummary", page + 1, pages, countFiltered, total);
@@ -208,7 +195,7 @@ internal sealed partial class HistoryView
         DownloadsVisual.Button(previous); DownloadsVisual.Button(next!);
         DownloadsVisual.Button(firstPage); DownloadsVisual.Button(lastPage);
         ResizeCards();
-        var entry = entries.FirstOrDefault(e => e.QueueItemId == selectedId && e.FinalPath == selectedPath);
+        var entry = selectedEntry;
         if (entry != inspectedEntry)
         {
             inspectedEntry = entry;
