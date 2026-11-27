@@ -52,8 +52,7 @@ public static class UpdateTransaction
                 throw new InvalidDataException("An existing application installation is required.");
 
             operation = UpdateOperation.LockInstallation;
-            var identity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(installation.ToUpperInvariant())));
-            using var owner = new Mutex(false, @"Global\ModernTubeDownloader.Update." + identity);
+            using var owner = new Mutex(false, UpdatePackageSecurity.InstallationMutexName(installation));
             bool acquired;
             try { acquired = owner.WaitOne(0); }
             catch (AbandonedMutexException) { acquired = true; }
@@ -75,7 +74,7 @@ public static class UpdateTransaction
         Action<DiagnosticStage, DiagnosticOutcome, DiagnosticCounters?, Exception?>? observe, Action<string>? beforeCommit)
     {
         var executable = Path.Combine(installation, "ModernTubeDownloader.exe");
-        var backup = Path.Combine(installation, ".mtd-update-backup");
+        var backup = Path.Combine(installation, UpdatePackageSecurity.BackupDirectoryName);
         UpdatePackageSecurity.EnsureNoReparsePoints(executable);
         UpdatePackageSecurity.EnsureNoReparsePoints(backup);
         if (ReadAttributes(backup) is not null)

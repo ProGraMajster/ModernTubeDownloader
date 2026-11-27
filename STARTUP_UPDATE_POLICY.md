@@ -1,7 +1,14 @@
 # Optional installation at startup
 
-Implementation notes for 1.3.0. Qualification results are recorded in
-`IMPLEMENTATION_REPORT.md`; this document alone is not a test result.
+The development startup window runs above the existing worker-admission path.
+On eligible foreground launches, the saved **At startup, at most once a day**
+frequency permits a check before the main window opens. Daily and weekly checks
+stay with the monitor. Download and installation consent stays in Settings.
+
+The application checks for a pending or unreadable transaction before loading the
+shared services. It preserves the journal and shows the full-package repair path.
+The installer remains responsible for verifying and recovering the transaction.
+Progress across process exit is the next stage tracked in #22.
 
 `UpdateSettings.InstallAtStartup` is an independent, opt-in Boolean. Its default is
 false, including deserialization of older profiles. New profiles retain automatic

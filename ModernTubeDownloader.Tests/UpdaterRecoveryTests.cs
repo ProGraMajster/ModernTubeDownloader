@@ -205,6 +205,64 @@ public sealed partial class ApplicationUpdateTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task RealUpdaterLeavesUnverifiedInstallationClosedEvenWhenRestartWasRequested(bool validJournal)
+    {
+        using var fixture = new Fixture();
+        var installation = Directory.CreateDirectory(Path.Combine(fixture.Root, "installation")).FullName;
+        var backup = Path.Combine(installation, ".mtd-update-backup");
+        Directory.CreateDirectory(Path.Combine(backup, "files"));
+        Directory.CreateDirectory(Path.Combine(backup, "started"));
+        var executable = Path.Combine(installation, "ModernTubeDownloader.exe");
+        var blocked = Path.Combine(installation, "blocked.dll");
+        var added = Path.Combine(installation, "added.dll");
+        await File.WriteAllTextAsync(added, "verified addition");
+        await File.WriteAllTextAsync(executable, "unchanged executable");
+        await File.WriteAllTextAsync(blocked, "unverified");
+        await File.WriteAllTextAsync(Path.Combine(backup, "files", "blocked.dll"), "original");
+        await File.WriteAllTextAsync(Path.Combine(backup, "started", "0"), "1");
+        await File.WriteAllTextAsync(Path.Combine(backup, "started", "1"), "1");
+        var journal = validJournal
+            ? JsonSerializer.Serialize(new UpdateJournal(installation, [new("blocked.dll", true, Sha("original")),
+                new("added.dll", false, AddedSha256: Sha("verified addition"))], false, true))
+            : "{invalid";
+        await File.WriteAllTextAsync(JournalPath(installation), journal);
+        using var held = new FileStream(blocked, FileMode.Open, FileAccess.Read, FileShare.None);
+        var archive = fixture.Zip(("ModernTubeDownloader.exe", "new executable"));
+        var hash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(archive)));
+        using var parent = Process.Start(new ProcessStartInfo(CoreTests.FakeToolPath(), "--sleep-short")
+            { UseShellExecute = false, CreateNoWindow = true })!;
+        var requestFile = Path.Combine(fixture.Root, "request.json");
+        await File.WriteAllTextAsync(requestFile, JsonSerializer.Serialize(new UpdaterRequest(installation, archive, hash,
+            parent.Id, parent.StartTime.ToUniversalTime().Ticks, true)));
+        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "updater", "ModernTubeDownloader.Updater.exe"))
+            { UseShellExecute = false, CreateNoWindow = true };
+        start.ArgumentList.Add("--request");
+        start.ArgumentList.Add(requestFile);
+        using var process = Process.Start(start)!;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await process.WaitForExitAsync(timeout.Token);
+            Assert.Equal(1, process.ExitCode);
+            using var result = JsonDocument.Parse(await File.ReadAllTextAsync(requestFile + ".result.json"));
+            Assert.False(result.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal(validJournal ? "partial" : "unknown", result.RootElement.GetProperty("recovery").GetString());
+            Assert.Equal(!validJournal, File.Exists(added));
+            Assert.False(result.RootElement.TryGetProperty("restartPending", out _));
+            Assert.False(result.RootElement.TryGetProperty("restartError", out _));
+            Assert.Equal(journal, await File.ReadAllTextAsync(JournalPath(installation)));
+            Assert.Equal("unchanged executable", await File.ReadAllTextAsync(executable));
+        }
+        finally
+        {
+            if (!process.HasExited) { process.Kill(); await process.WaitForExitAsync(); }
+            if (!parent.HasExited) { parent.Kill(); await parent.WaitForExitAsync(); }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task RealUpdaterCommitsEvenWhenRestartFails(bool exitsImmediately)
     {
         using var fixture = new Fixture();

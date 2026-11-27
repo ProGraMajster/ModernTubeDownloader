@@ -1,9 +1,11 @@
 using ModernFormsNext;
 using ModernTubeDownloader.Infrastructure;
+using ModernTubeDownloader.Localization;
 using ModernTubeDownloader.Services;
 using ModernFormsNext.Notifications;
 using ModernFormsNext.WindowKit.Backend.Windows.Notifications;
 using ModernTubeDownloader.Theming;
+using ModernTubeDownloader.Updates;
 
 namespace ModernTubeDownloader;
 
@@ -75,6 +77,17 @@ internal static class Program
                 }
                 if (initialRequest is null) return autostart ? 0 : instance.ForwardOpenWindowAsync().GetAwaiter().GetResult() ? 0 : 1;
                 return instance.ForwardAsync(args[0]).GetAwaiter().GetResult() ? 0 : 1;
+            }
+            try { UpdatePackageSecurity.VerifyStartupInstallation(AppContext.BaseDirectory); }
+            catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
+            {
+                paths.EnsureCreated();
+                using var recoveryLog = new FileAppLogger(paths.LogDirectory);
+                recoveryLog.Event(new(DiagnosticModule.Application, DiagnosticStage.Recover, DiagnosticOutcome.Denied,
+                    DiagnosticLevel.Error, Exception: error));
+                var language = System.Globalization.CultureInfo.CurrentUICulture.Name;
+                FatalErrorReporter.ShowMessage("ModernTubeDownloader", new LocalizationService(language)["Startup.Recovery"]);
+                return 1;
             }
             if (initialRequest is not null)
             {

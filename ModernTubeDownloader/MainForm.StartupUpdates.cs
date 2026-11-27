@@ -1,3 +1,4 @@
+using ModernTubeDownloader.Infrastructure;
 using ModernTubeDownloader.Models;
 using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Views;
@@ -16,68 +17,83 @@ public sealed partial class MainForm
         services.Queue.Snapshot().Any(item => item.Status is not (DownloadStatus.Completed or DownloadStatus.Failed or DownloadStatus.Cancelled)) ||
         services.Live.Snapshot().Any(item => item.State is not (LiveSessionState.Completed or LiveSessionState.Failed or LiveSessionState.Cancelled));
 
-    private async Task StartApplicationWorkAsync(bool background)
+    private async Task StartApplicationWorkAsync(bool autostart, bool hiddenArgument)
     {
+        if (services.WorkStarted || !startupUpdateEligible || autostart || hiddenArgument)
+        {
+            tray.Start(autostart, hiddenArgument);
+            await StartRuntimeWorkAsync();
+            TryStartExperience();
+            return;
+        }
+
+        var operationId = Guid.NewGuid();
+        using var startup = new StartupCoordinator(services.Updates, services.Logger, operationId);
+        using var window = new StartupUpdateForm(services, startup);
+        startupUpdateCancellation = startup.Cancellation;
         try
         {
-            if (!services.WorkStarted && startupUpdateEligible && !background &&
-                services.Settings.Current.Updates is { AutomaticChecks: true, InstallAtStartup: true })
+            try
             {
-                using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-                startupUpdateCancellation = cancellation;
-                using var window = new StartupUpdateForm(services, cancellation, async token =>
+                window.Show();
+                var policy = services.Settings.Current.Updates;
+                var outcome = await startup.PrepareAsync(policy.AutomaticChecks && policy.InstallAtStartup,
+                    async token => await services.Batch.HasUnfinishedSessionsAsync(token) ||
+                        await services.Organizer.HasPendingRecoveryAsync(token),
+                    StartupHasPendingWork);
+                if (outcome == StartupUpdateOutcome.Ready && !StartupHasPendingWork() && services.Updates.CanInstallAtStartup)
                 {
-                    var unfinishedBatch = await services.Batch.HasUnfinishedSessionsAsync(token);
-                    var pendingRecovery = await services.Organizer.HasPendingRecoveryAsync(token);
-                    return await services.Updates.PrepareStartupAsync(true, () => unfinishedBatch || pendingRecovery || StartupHasPendingWork(), token);
-                }, () => startupInterrupted || shutdownStarted);
-                await window.ShowDialog(this);
-                if (window.Outcome == StartupUpdateOutcome.Ready && !StartupHasPendingWork() && services.Updates.CanInstallAtStartup)
-                {
-                    try
+                    using var handoff = CancellationTokenSource.CreateLinkedTokenSource(startup.Cancellation.Token);
+                    handoff.CancelAfter(startup.Remaining);
+                    await services.Updates.LaunchStartupInstallerAsync(() => !StartupHasPendingWork(), () =>
                     {
-                        await services.Updates.LaunchStartupInstallerAsync(() => !StartupHasPendingWork(), () =>
-                        {
-                            startupInstallerLaunched = startupInstallRequested = updateInstallRequested = true;
-                            BeginShutdown();
-                        }, cancellation.Token);
-                        return;
-                    }
-                    catch (Exception error)
-                    {
-                        // No workers have been stopped. The service cancels its
-                        // own waiting updater before returning a launch failure.
-                        services.Logger.Error("Startup installer handoff failed.", error);
-                        if (services.Updates.StartupAbortBlocked)
-                        {
-                            shellHost.SetStatus(text["Updates.StartupAbortBlocked"]);
-                            using var blocked = new ModernFormsNext.MessageBoxForm(text["Updates.StartupTitle"], text["Updates.StartupAbortBlocked"]);
-                            await blocked.ShowDialog(this);
-                            return;
-                        }
-                    }
+                        startupInstallerLaunched = startupInstallRequested = updateInstallRequested = true;
+                        BeginShutdown();
+                    }, handoff.Token, operationId);
+                    return;
                 }
-                startupUpdateCancellation = null;
             }
-            if (shutdownStarted) return;
-            await services.StartWorkAsync();
-            if (shutdownStarted) return;
-            services.Updates.Start();
-            experienceRuntimeStarted = true;
-            TryStartExperience();
-        }
-        catch (Exception error)
-        {
-            services.Logger.Error("Startup admission failed; no automatic installation was started.", error);
-            if (!shutdownStarted)
+            catch (Exception error)
             {
-                await services.StartWorkAsync();
-                if (shutdownStarted) return;
-                services.Updates.Start();
-                experienceRuntimeStarted = true;
-                TryStartExperience();
+                services.Logger.Event(new(DiagnosticModule.Updater, DiagnosticStage.Startup, DiagnosticOutcome.Failed,
+                    DiagnosticLevel.Warn, operationId, Exception: error));
+                if (services.Updates.StartupAbortBlocked)
+                {
+                    window.Finish();
+                    shellHost.SetStatus(text["Updates.StartupAbortBlocked"]);
+                    tray.Start(autostart, hiddenArgument);
+                    using var blocked = new ModernFormsNext.MessageBoxForm(text["Updates.StartupTitle"], text["Updates.StartupAbortBlocked"]);
+                    await blocked.ShowDialog(this);
+                    return;
+                }
             }
+            if (shutdownStarted) return;
+            startup.Report(StartupPhase.StartServices);
+            await StartRuntimeWorkAsync();
+            if (!shutdownStarted) startup.Complete();
         }
-        finally { startupUpdateCancellation = null; }
+        finally
+        {
+            startupUpdateCancellation = null;
+            window.Finish();
+        }
+        if (shutdownStarted) return;
+        tray.Start(autostart, hiddenArgument);
+        if (startup.Outcome is StartupUpdateOutcome.Offline or StartupUpdateOutcome.TimedOut)
+            shellHost.SetStatus(text["Startup.Offline"]);
+        else if (startup.Outcome == StartupUpdateOutcome.Failed)
+            shellHost.SetStatus(text["Startup.UpdateFailed"]);
+        else if (startup.Outcome == StartupUpdateOutcome.Available)
+            shellHost.SetStatus(text["Updates.Available"]);
+        TryStartExperience();
+    }
+
+    private async Task StartRuntimeWorkAsync()
+    {
+        if (shutdownStarted) return;
+        await services.StartWorkAsync();
+        if (shutdownStarted) return;
+        services.Updates.Start();
+        experienceRuntimeStarted = true;
     }
 }
