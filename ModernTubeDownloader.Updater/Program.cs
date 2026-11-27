@@ -90,6 +90,12 @@ internal static class Program
             var files = await UpdatePackageSecurity.ExtractAsync(request.Archive, extracted,
                 progress: progress is null ? null : (done, total) => progress.Report(InstallerPhase.Extract, done, total));
             Record(stage, DiagnosticOutcome.Completed, new(Files: files.Count));
+            if (request.ExpectedProductVersion is { } expectedVersion)
+            {
+                Record(stage = DiagnosticStage.Validate, DiagnosticOutcome.Started);
+                UpdatePackageSecurity.VerifyProductVersion(extracted, expectedVersion);
+                Record(stage, DiagnosticOutcome.Completed);
+            }
             stage = DiagnosticStage.Commit;
             UpdateTransaction.Install(request.Installation, extracted, files, beforeCopy: null, observe: ObserveTransaction);
         }
@@ -108,6 +114,7 @@ internal static class Program
             var detail = (stage, error.Message) switch
             {
                 (DiagnosticStage.Checksum, "Update checksum mismatch.") => "Update checksum mismatch.",
+                (DiagnosticStage.Validate, UpdatePackageSecurity.ProductVersionMismatch) => UpdatePackageSecurity.ProductVersionMismatch,
                 (DiagnosticStage.Validate, "The parent did not commit this startup installation; existing application files remain unchanged.")
                     => "The parent did not commit this startup installation.",
                 _ => "Update failed. Refer to the structured installer journal."

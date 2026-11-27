@@ -664,7 +664,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
         foreach (var file in Directory.EnumerateFiles(source)) File.Copy(file, Path.Combine(runner, Path.GetFileName(file)));
         using var parent = Process.GetCurrentProcess();
         var request = new UpdaterRequest(AppContext.BaseDirectory, State.StagedArchive!, State.StagedHash!, parent.Id, parent.StartTime.ToUniversalTime().Ticks, restart,
-            startup ? Guid.NewGuid().ToString("N") : null, updateId, showProgress ? settings.Current.Language : null);
+            startup ? Guid.NewGuid().ToString("N") : null, updateId, showProgress ? settings.Current.Language : null, State.Available.Version);
         var requestFile = Path.Combine(runner, "request.json");
         if (startup) startupCommitMarker = StartupUpdateAdmission.MarkerPath(requestFile);
         await File.WriteAllTextAsync(requestFile, JsonSerializer.Serialize(request), token);
