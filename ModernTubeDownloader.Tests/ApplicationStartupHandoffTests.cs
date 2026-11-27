@@ -29,7 +29,7 @@ public sealed partial class ApplicationUpdateTests
 
     [Theory]
     [InlineData("{\"success\":true}", "Updates.Current", false, InstallerRecoveryStatus.Unknown)]
-    [InlineData("{\"success\":true,\"restartPending\":true}", "Updates.RestartUnconfirmed", false, InstallerRecoveryStatus.Unknown)]
+    [InlineData("{\"success\":true,\"restartPending\":true}", "Updates.InstalledRestartUnconfirmed", false, InstallerRecoveryStatus.Unknown)]
     [InlineData("{\"success\":false}", "Updates.InstallFailed", true, InstallerRecoveryStatus.Unknown)]
     [InlineData("{\"success\":false,\"recovery\":\"restored\"}", "Updates.RollbackRestored", true, InstallerRecoveryStatus.Restored)]
     [InlineData("{\"success\":false,\"recovery\":\"partial\"}", "Updates.RollbackPartial", true, InstallerRecoveryStatus.Partial)]
