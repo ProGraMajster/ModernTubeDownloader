@@ -1458,5 +1458,16 @@
   "Experience.RefreshNotes": "Obnoviť informácie",
   "Experience.GitHubNotes": "Zdroj: oficiálne vydanie na GitHube pre nainštalovanú verziu.",
   "Experience.CachedNotes": "Zdroj: uložené oficiálne vydanie na GitHube pre nainštalovanú verziu. Dostupné offline.",
-  "Experience.OnlineEnglishNotes": "Oficiálne informácie o vydaní sú v angličtine. Miestny offline súhrn je dostupný v poľštine a angličtine."
+  "Experience.OnlineEnglishNotes": "Oficiálne informácie o vydaní sú v angličtine. Miestny offline súhrn je dostupný v poľštine a angličtine.",
+  "Startup.Load": "Spúšťanie aplikácie…",
+  "Startup.Services": "Spúšťanie služieb na pozadí…",
+  "Startup.Ready": "Pripravené",
+  "Startup.Continue": "Pokračovať do aplikácie",
+  "Startup.Detail": "Môžete pokračovať bez aktualizácie pri spustení.",
+  "Startup.Download": "Sťahovanie aktualizácie…",
+  "Startup.Verify": "Overovanie aktualizácie…",
+  "Startup.Offline": "Služba aktualizácií je nedostupná. Aplikácia bude pokračovať offline.",
+  "Startup.UpdateFailed": "Aktualizáciu sa nepodarilo pripraviť. Aplikácia bude pokračovať.",
+  "Startup.Transfer": "{0} z {1} · {2}/s",
+  "Startup.Recovery": "Táto inštalácia obsahuje nedokončenú aktualizáciu alebo nečitateľný denník. Zachovajte súbory obnovy a pred otvorením aplikácie rozbaľte úplný balík do nového priečinka."
 }

@@ -1458,5 +1458,16 @@
   "Experience.RefreshNotes": "Actualiser les nouveautés",
   "Experience.GitHubNotes": "Source : version officielle GitHub correspondant à la version installée.",
   "Experience.CachedNotes": "Source : copie enregistrée de la version officielle GitHub correspondant à la version installée. Disponible hors ligne.",
-  "Experience.OnlineEnglishNotes": "Les notes officielles sont en anglais. Le résumé local hors ligne est disponible en polonais et en anglais."
+  "Experience.OnlineEnglishNotes": "Les notes officielles sont en anglais. Le résumé local hors ligne est disponible en polonais et en anglais.",
+  "Startup.Load": "Démarrage de l’application…",
+  "Startup.Services": "Démarrage des services en arrière-plan…",
+  "Startup.Ready": "Prêt",
+  "Startup.Continue": "Accéder à l’application",
+  "Startup.Detail": "Vous pouvez continuer sans mise à jour au démarrage.",
+  "Startup.Download": "Téléchargement de la mise à jour…",
+  "Startup.Verify": "Vérification de la mise à jour…",
+  "Startup.Offline": "Le service de mise à jour est inaccessible. L’application démarre hors ligne.",
+  "Startup.UpdateFailed": "La mise à jour n’a pas pu être préparée. L’application va démarrer.",
+  "Startup.Transfer": "{0} sur {1} · {2}/s",
+  "Startup.Recovery": "Cette installation contient une mise à jour inachevée ou un journal illisible. Conservez les fichiers de récupération et extrayez le paquet complet dans un nouveau dossier avant d’ouvrir l’application."
 }

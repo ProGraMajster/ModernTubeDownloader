@@ -1458,5 +1458,16 @@
   "Experience.RefreshNotes": "Actualizar novedades",
   "Experience.GitHubNotes": "Fuente: versión oficial de GitHub para esta versión instalada.",
   "Experience.CachedNotes": "Fuente: copia guardada de la versión oficial de GitHub para esta versión instalada. Disponible sin conexión.",
-  "Experience.OnlineEnglishNotes": "El contenido oficial de la versión está en inglés. El resumen local sin conexión está disponible en polaco e inglés."
+  "Experience.OnlineEnglishNotes": "El contenido oficial de la versión está en inglés. El resumen local sin conexión está disponible en polaco e inglés.",
+  "Startup.Load": "Iniciando la aplicación…",
+  "Startup.Services": "Iniciando los servicios en segundo plano…",
+  "Startup.Ready": "Listo",
+  "Startup.Continue": "Continuar a la aplicación",
+  "Startup.Detail": "Puedes continuar sin actualizar al inicio.",
+  "Startup.Download": "Descargando la actualización…",
+  "Startup.Verify": "Verificando la actualización…",
+  "Startup.Offline": "El servicio de actualizaciones no está disponible. La aplicación continuará sin conexión.",
+  "Startup.UpdateFailed": "No se pudo preparar la actualización. La aplicación continuará.",
+  "Startup.Transfer": "{0} de {1} · {2}/s",
+  "Startup.Recovery": "Esta instalación tiene una actualización incompleta o un registro ilegible. Conserva los archivos de recuperación y extrae el paquete completo en una carpeta nueva antes de abrir la aplicación."
 }

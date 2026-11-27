@@ -583,15 +583,19 @@ public sealed partial class MainForm : Form
     {
         suppressExperience |= autostart || hiddenArgument;
         InitializeRuntime();
-        tray.Start(autostart, hiddenArgument);
         if (!runtimeAdmissionStarted)
         {
             runtimeAdmissionStarted = true;
-            _ = StartApplicationWorkAsync(autostart || hiddenArgument);
+            _ = StartApplicationWorkAsync(autostart, hiddenArgument);
         }
     }
 
-    public void RestoreWindow() { if (!shutdownStarted) tray.Restore(); }
+    public void RestoreWindow()
+    {
+        if (shutdownStarted) return;
+        if (startupUpdateCancellation is not null) InterruptStartupUpdate();
+        else tray.Restore();
+    }
 
     private bool measuredFirstPaint;
     protected override void OnPaint(PaintEventArgs e)

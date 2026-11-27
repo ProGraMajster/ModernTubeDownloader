@@ -1458,5 +1458,16 @@
   "Experience.RefreshNotes": "更新情報を再取得",
   "Experience.GitHubNotes": "出典：インストール済みバージョンの公式 GitHub リリース。",
   "Experience.CachedNotes": "出典：保存されたインストール済みバージョンの公式 GitHub リリース。オフラインで利用できます。",
-  "Experience.OnlineEnglishNotes": "公式リリース情報は英語です。ローカルのオフライン概要はポーランド語と英語で利用できます。"
+  "Experience.OnlineEnglishNotes": "公式リリース情報は英語です。ローカルのオフライン概要はポーランド語と英語で利用できます。",
+  "Startup.Load": "アプリを起動しています…",
+  "Startup.Services": "バックグラウンドサービスを起動しています…",
+  "Startup.Ready": "準備完了",
+  "Startup.Continue": "アプリを開く",
+  "Startup.Detail": "起動時の更新を行わずに続行できます。",
+  "Startup.Download": "更新をダウンロードしています…",
+  "Startup.Verify": "更新を検証しています…",
+  "Startup.Offline": "更新サービスに接続できませんでした。オフラインで起動します。",
+  "Startup.UpdateFailed": "更新を準備できませんでした。アプリの起動を続けます。",
+  "Startup.Transfer": "{0} / {1} · {2}/秒",
+  "Startup.Recovery": "このインストールには未完了の更新または読み取れないログがあります。復旧用ファイルを保存し、アプリを開く前に完全なパッケージを新しいフォルダーに展開してください。"
 }
