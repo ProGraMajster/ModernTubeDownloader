@@ -66,6 +66,8 @@ function Show-Frames([int[]]$indices, [switch]$Stale) {
             } while ($clock.Elapsed.TotalSeconds -lt 6)
             if (!$window.FindFirst($tree,$condition)) { throw "No native label for $($phases[$visible])." }
             $file = if ($Stale) { 'stale-rejected.png' } else { '{0:D2}-{1}.png' -f $phase,$phases[$phase] }
+            # Let the native progress control finish painting the reported position before capture.
+            Start-Sleep -Milliseconds 900
             $dimensions = [PerfWindow]::Capture($hwnd,$observer.Id,(Join-Path $evidence $file))
             $results.Add(@{
                 file=$file; pendingOrTerminal=$phases[$visible]; label=$messages[$visible]; fixture='synthetic one-way frame'

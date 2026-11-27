@@ -156,7 +156,25 @@ try {
     $guiHandle = [IntPtr]$main.Current.NativeWindowHandle
     if ($main.Current.ProcessId -ne $gui.Id) { throw 'The owned main window disappeared before shutdown.' }
     $inventory.guiClosePosted = [PerfWindow]::PostMessage($guiHandle,0x10,[IntPtr]::Zero,[IntPtr]::Zero)
-    if (!$inventory.guiClosePosted -or !$gui.WaitForExit(12000)) { throw 'The owned main window did not close within 12 seconds.' }
+    if (!$inventory.guiClosePosted) { throw 'Could not post the close request to the owned main window.' }
+    $ownerCondition = [Windows.Automation.PropertyCondition]::new($ui::ProcessIdProperty, $gui.Id)
+    $exitCondition = [Windows.Automation.PropertyCondition]::new($ui::AutomationIdProperty, 'ShutdownExit')
+    $confirmClock = [Diagnostics.Stopwatch]::StartNew()
+    $exit = $null
+    do {
+        $ownedWindows = $ui::RootElement.FindAll([Windows.Automation.TreeScope]::Children, $ownerCondition)
+        foreach ($window in $ownedWindows) {
+            $exit = $window.FindFirst($tree, $exitCondition)
+            if ($exit -and $exit.Current.IsEnabled -and $exit.Current.ProcessId -eq $gui.Id) { break }
+            $exit = $null
+        }
+        if ($exit) { break }
+        Start-Sleep -Milliseconds 25
+    } while ($confirmClock.Elapsed.TotalSeconds -lt 8)
+    if (!$exit) { throw 'The running loopback Web Remote did not expose the owned Exit confirmation.' }
+    $exit.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $inventory.guiShutdownConfirmed = $true
+    if (!$gui.WaitForExit(12000)) { throw 'The owned main window did not close after confirmation.' }
     $inventory.guiExitCode = $gui.ExitCode
     if ($gui.ExitCode -ne 0) { throw 'The isolated GUI returned an error.' }
     $native = Start-Owned $nativeExe -InputPipe
