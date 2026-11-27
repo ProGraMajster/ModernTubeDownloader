@@ -6,7 +6,7 @@ ModernTubeDownloader is licensed under MIT (Copyright © 2026 ProGraMajster); se
 
 ## Runtime libraries shipped in the self-contained ZIP
 
-### .NET 10 runtime
+### .NET 11 runtime
 
 - Project: https://github.com/dotnet/runtime
 - License: MIT, with additional third-party notices in the .NET distribution.

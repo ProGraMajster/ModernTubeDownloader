@@ -33,7 +33,7 @@ notifications as optional and deduplicates diagnostic warning categories with a 
 
 The canonical `ModernTubeDownloader.slnx` contains six application/test projects plus the pinned framework source graph:
 
-- `ModernTubeDownloader` — the production .NET 10 Windows application and ModernFormsNext UI.
+- `ModernTubeDownloader` — the production .NET 11 Windows application and ModernFormsNext UI.
 - `ModernTubeDownloader.Tests` — xUnit unit/integration tests.
 - `ModernTubeDownloader.FakeTool` — a deterministic process-level test double built only for tests.
 - `ModernTubeDownloader.Authentication` — bounded cookie contracts, DPAPI store, jar ownership and native authority/protocol; no GUI services.

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>$(ModernTubeDownloaderTargetFramework)</TargetFramework>
@@ -49,7 +49,7 @@
     <EmbeddedResource Include="WebRemote\wwwroot\*" />
   </ItemGroup>
   <Target Name="CopyNativeHostForDevelopment" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == ''">
-    <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>
+    <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net11.0-windows\*" /></ItemGroup>
     <Copy SourceFiles="@(NativeHostFiles)" DestinationFolder="$(OutDir)native-host" SkipUnchangedFiles="true" />
   </Target>
   <Target Name="AddApplicationSourceMetadata" BeforeTargets="GetAssemblyAttributes" DependsOnTargets="InitializeSourceControlInformation">
@@ -58,7 +58,7 @@
     </ItemGroup>
   </Target>
   <Target Name="CopyUpdaterForDevelopment" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == ''">
-    <ItemGroup><UpdaterFiles Include="..\ModernTubeDownloader.Updater\bin\$(Configuration)\net10.0-windows\*" /></ItemGroup>
+    <ItemGroup><UpdaterFiles Include="..\ModernTubeDownloader.Updater\bin\$(Configuration)\net11.0-windows\*" /></ItemGroup>
     <Copy SourceFiles="@(UpdaterFiles)" DestinationFolder="$(OutDir)updater" SkipUnchangedFiles="true" />
   </Target>
 </Project>

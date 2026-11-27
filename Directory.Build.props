@@ -16,10 +16,11 @@
     <Deterministic>true</Deterministic>
     <DebugType>portable</DebugType>
     <WarningLevel>8</WarningLevel>
+    <LangVersion>15.0</LangVersion>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
 
     <ModernFormsNextVersion>1.12.1</ModernFormsNextVersion>
-    <ModernTubeDownloaderTargetFramework>net10.0-windows10.0.26100.0</ModernTubeDownloaderTargetFramework>
+    <ModernTubeDownloaderTargetFramework>net11.0-windows10.0.26100.0</ModernTubeDownloaderTargetFramework>
     <!-- Must be explicit before the first restore of the optional notification projections. -->
     <WindowsSdkPackageVersion>10.0.28000.87</WindowsSdkPackageVersion>
     <WindowsPackageType>None</WindowsPackageType>

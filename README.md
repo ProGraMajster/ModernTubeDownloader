@@ -52,7 +52,7 @@ not qualify a later binary or an untested physical environment.
 
 ## Installation
 
-Windows 10/11 **x64**, and internet access to install the tools on first start. The self-contained ZIP includes .NET 10: no separate .NET or manual yt-dlp/FFmpeg/Deno installation is required.
+Windows 10/11 **x64**, and internet access to install the tools on first start. The self-contained ZIP includes .NET 11: no separate .NET or manual yt-dlp/FFmpeg/Deno installation is required.
 
 1. Download `ModernTubeDownloader-1.3.0-win-x64.zip` and its `.sha256` from [the official release](https://github.com/ProGraMajster/ModernTubeDownloader/releases/tag/v1.3.0), and compare SHA-256.
 2. Extract it to a writable folder. Do not run it from inside the ZIP.
@@ -164,7 +164,7 @@ Logs are local and redact common credential/URL data. Known auth values are scru
 
 ## Build from source
 
-Requires the .NET 10 SDK and Node.js for JavaScript tests. Development, CI and
+Requires the .NET 11 SDK and Node.js for JavaScript tests. Development, CI and
 packaging restore [ModernFormsNext 1.12.1 from NuGet.org](https://www.nuget.org/packages/ModernFormsNext/1.12.1).
 The framework version is shared through `Directory.Build.props`.
 
@@ -179,7 +179,7 @@ includes the independent Updater. End users run the self-contained ZIP.
 
 `scripts/Build-Release.ps1` validates and creates the self-contained Windows x64 ZIP, separate symbols ZIP and SHA-256 under ignored `artifacts/release`. Publishing is multi-file, untrimmed, without NativeAOT or ReadyToRun. Debug-only opt-in UI automation is documented in [AUTOMATION_TESTING.md](AUTOMATION_TESTING.md); it is absent from Release.
 
-The application uses `net10.0-windows10.0.26100.0` with explicit `WindowsSdkPackageVersion=10.0.28000.87` before the first restore. The ZIP contains .NET, not a bundled Windows App Runtime installation. Notifications use the official MFN Automatic provider: App SDK when available, Classic WinRT/Shell fallback or Unavailable otherwise. Missing optional notification runtime must not prevent application startup. See [deployment and limits](SYSTEM_NOTIFICATIONS.md#windows-deployment).
+The application uses `net11.0-windows10.0.26100.0` with explicit `WindowsSdkPackageVersion=10.0.28000.87` before the first restore. The ZIP contains .NET, not a bundled Windows App Runtime installation. Notifications use the official MFN Automatic provider: App SDK when available, Classic WinRT/Shell fallback or Unavailable otherwise. Missing optional notification runtime must not prevent application startup. See [deployment and limits](SYSTEM_NOTIFICATIONS.md#windows-deployment).
 
 ## License and responsible use
 
