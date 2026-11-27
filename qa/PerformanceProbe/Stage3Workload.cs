@@ -67,7 +67,7 @@ internal static class Stage3Workload
         Console.WriteLine(JsonSerializer.Serialize(new { active, waiting, evidence }));
     }
 
-    internal static async Task MeasureLogsAsync(string root)
+    internal static async Task MeasureLogsAsync(string root, string fake)
     {
         root = Path.GetFullPath(root);
         if (!root.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase)
@@ -84,6 +84,20 @@ internal static class Stage3Workload
         {
             var paths = AppPaths.Create(Path.Combine(root, mode));
             paths.EnsureCreated();
+            var tools = Directory.CreateDirectory(Path.Combine(paths.RootDirectory, "fake-tools")).FullName;
+            foreach (var name in Directory.GetFiles(fake, "ModernTubeDownloader.FakeTool.*"))
+                File.Copy(name, Path.Combine(tools, Path.GetFileName(name)));
+            foreach (var name in new[] { "yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe", "deno.exe" })
+                File.Copy(Path.Combine(fake, "ModernTubeDownloader.FakeTool.exe"), Path.Combine(tools, name));
+            var settings = new SettingsService(paths, new NullAppLogger());
+            settings.Current.UseCustomYtDlp = settings.Current.UseCustomFfmpeg = settings.Current.UseCustomDeno = true;
+            settings.Current.CustomYtDlpPath = Path.Combine(tools, "yt-dlp.exe");
+            settings.Current.CustomFfmpegPath = Path.Combine(tools, "ffmpeg.exe");
+            settings.Current.CustomFfprobePath = Path.Combine(tools, "ffprobe.exe");
+            settings.Current.CustomDenoPath = Path.Combine(tools, "deno.exe");
+            settings.Current.Updates.AutomaticChecks = false;
+            settings.Current.Updates.PolicyVersion = 1;
+            await settings.SaveAsync();
             using var process = Process.GetCurrentProcess();
             using var logger = new FileAppLogger(paths.LogDirectory);
             var setDetail = typeof(FileAppLogger).GetMethod("SetDetail", Internal)!.CreateDelegate<Action<bool, bool>>(logger);
@@ -125,7 +139,9 @@ internal static class Stage3Workload
             }
             if (events + drops != batches * eventsPerLevel * (Array.IndexOf(modes, mode) + 1))
                 throw new InvalidOperationException("Written events and logger drop records did not account for the workload.");
-            using var services = AppServices.Create(paths, deferWorkStart: true);
+            using var offline = new HttpClient(new LocalOnlyHandler());
+            using var services = AppServices.Create(paths, httpClient: offline, deferWorkStart: true);
+            await services.Tools.Initialization;
             var diagnostics = typeof(AppServices).GetProperty("Diagnostics", Internal)!.GetValue(services)!;
             var export = diagnostics.GetType().GetMethod("ExportAsync", Internal)!
                 .CreateDelegate<Func<string, bool, CancellationToken, Task<(int, int)>>>(diagnostics);
@@ -136,6 +152,12 @@ internal static class Stage3Workload
                 cpu, wall, bytesAllocated, workingSet, privateBytes, included, excluded,
                 exportMs = clock.Elapsed.TotalMilliseconds, exportBytes = new FileInfo(zip).Length }));
         }
+    }
+
+    private sealed class LocalOnlyHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Network access is unavailable in this benchmark.");
     }
 
     private sealed class MemoryQueue(DownloadQueueItem[] jobs) : IQueuePersistence

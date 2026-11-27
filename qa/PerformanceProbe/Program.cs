@@ -11,7 +11,7 @@ using ModernTubeDownloader.Theming;
 using ModernTubeDownloader.Batch;
 
 if (args is ["--stage3-queue"]) { await Stage3Workload.MeasureQueueAsync(); return; }
-if (args is ["--stage3-logs", var loggingRoot]) { await Stage3Workload.MeasureLogsAsync(loggingRoot); return; }
+if (args is ["--stage3-logs", var loggingRoot, var fakeTools]) { await Stage3Workload.MeasureLogsAsync(loggingRoot, fakeTools); return; }
 
 if (args[0] == "--variant")
 {
