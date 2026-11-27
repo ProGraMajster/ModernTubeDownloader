@@ -15,6 +15,7 @@ public sealed class ThumbnailCacheService : IDisposable
     private readonly Dictionary<DisplayKey, Request> pending = new();
     private readonly Dictionary<DisplayKey, Entry> memory = new();
     private readonly LinkedList<DisplayKey> lru = new();
+    private readonly AtomicJsonFile.PathGateRegistry downloads = new();
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly object lifetimeSync = new();
     private readonly SemaphoreSlim workers;
@@ -215,6 +216,10 @@ public sealed class ThumbnailCacheService : IDisposable
         var cacheFile = CachePath(url);
         byte[] bytes;
         var cachedOnDisk = File.Exists(cacheFile);
+        // Size variants share the encoded disk entry. The first successful load
+        // publishes it before a second size can start another HTTP request.
+        using var download = cachedOnDisk ? null : await downloads.AcquireAsync(cacheFile, cancellationToken).ConfigureAwait(false);
+        if (download is not null) cachedOnDisk = File.Exists(cacheFile);
         if (cachedOnDisk)
         {
             await using var stream = new FileStream(cacheFile, FileMode.Open, FileAccess.Read, FileShare.Read, 16384, true);
@@ -228,7 +233,6 @@ public sealed class ThumbnailCacheService : IDisposable
             if (response.Content.Headers.ContentLength > EncodedLimit) throw new InvalidDataException("Thumbnail size limit.");
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             bytes = await ReadBoundedAsync(stream, cancellationToken).ConfigureAwait(false);
-
         }
         cancellationToken.ThrowIfCancellationRequested();
         using var data = SKData.CreateCopy(bytes);

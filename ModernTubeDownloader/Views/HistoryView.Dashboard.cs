@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ModernFormsNext;
 using ModernFormsNext.Accessibility;
 using ModernTubeDownloader.Models;
@@ -115,7 +116,26 @@ internal sealed partial class HistoryView
                 {
                     var snapshot = services.History.OrderedForRead();
                     var (matches, _) = HistoryPage.Project(snapshot, query, culture, filter, cutoff, ascending, default);
-                    await Infrastructure.AtomicJsonFile.WriteAsync(path, matches).ConfigureAwait(false);
+                    var destination = Path.GetFullPath(path);
+                    var temporary = Path.Combine(Path.GetDirectoryName(destination)!, $".mtd-history-export-{Guid.NewGuid():N}.tmp");
+                    var created = false;
+                    try
+                    {
+                        await using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+                        {
+                            created = true;
+                            await JsonSerializer.SerializeAsync(file, matches, Infrastructure.JsonDefaults.Options).ConfigureAwait(false);
+                        }
+                        File.Move(temporary, destination, overwrite: true);
+                        created = false;
+                    }
+                    finally
+                    {
+                        if (created)
+                        {
+                            try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                        }
+                    }
                 });
             }
         }
