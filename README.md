@@ -165,7 +165,7 @@ Logs are local and redact common credential/URL data. Known auth values are scru
 ## Build from source
 
 Requires the .NET 10 SDK and Node.js for JavaScript tests. Development, CI and
-packaging restore [ModernFormsNext 1.12.0 from NuGet.org](https://www.nuget.org/packages/ModernFormsNext/1.12.0).
+packaging restore [ModernFormsNext 1.12.1 from NuGet.org](https://www.nuget.org/packages/ModernFormsNext/1.12.1).
 The framework version is shared through `Directory.Build.props`.
 
 ```powershell
