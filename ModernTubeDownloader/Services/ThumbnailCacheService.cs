@@ -12,9 +12,9 @@ public sealed class ThumbnailCacheService : IDisposable
     private readonly HttpClient client;
     private readonly bool ownsClient;
     private readonly Func<bool>? isEnabled;
-    private readonly Dictionary<string, Request> pending = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Entry> memory = new(StringComparer.Ordinal);
-    private readonly LinkedList<string> lru = new();
+    private readonly Dictionary<DisplayKey, Request> pending = new();
+    private readonly Dictionary<DisplayKey, Entry> memory = new();
+    private readonly LinkedList<DisplayKey> lru = new();
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly object lifetimeSync = new();
     private readonly SemaphoreSlim workers;
@@ -34,12 +34,14 @@ public sealed class ThumbnailCacheService : IDisposable
     public int PendingCount { get { lock (lifetimeSync) return pending.Count; } }
     public int ActiveLoads => Volatile.Read(ref activeLoads);
 
+    private readonly record struct DisplayKey(string Url, int MaximumDimension);
+
     private sealed class Entry(SKBitmap bitmap)
     {
         internal readonly SKBitmap Bitmap = bitmap;
         internal readonly long Bytes = (long)bitmap.RowBytes * bitmap.Height;
         internal int References = 1; // The in-flight request retains it until every waiter leaves.
-        internal LinkedListNode<string>? Node;
+        internal LinkedListNode<DisplayKey>? Node;
     }
     private sealed class Request(CancellationToken lifetime)
     {
@@ -64,26 +66,29 @@ public sealed class ThumbnailCacheService : IDisposable
 
     /// <summary>Returns a bounded, caller-owned bitmap. Dispose it after detaching it from any UI.
     /// Copies keep displayed images valid when the shared cache evicts an entry or is disposed.</summary>
-    public async Task<SKBitmap?> GetAsync(string? url, CancellationToken cancellationToken = default)
+    public Task<SKBitmap?> GetAsync(string? url, CancellationToken cancellationToken = default) => GetDisplayAsync(url, 512, cancellationToken);
+
+    internal async Task<SKBitmap?> GetDisplayAsync(string? url, int pixelExtent, CancellationToken cancellationToken)
     {
         if (isEnabled?.Invoke() == false || string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
             || uri.Scheme is not ("http" or "https")) return null;
+        var key = new DisplayKey(url, pixelExtent <= 128 ? 128 : pixelExtent <= 256 ? 256 : 512);
         Request request;
         lock (lifetimeSync)
         {
             if (disposed) return null;
             cancellationToken.ThrowIfCancellationRequested();
-            if (memory.TryGetValue(url, out var cached))
+            if (memory.TryGetValue(key, out var cached))
             {
                 lru.Remove(cached.Node!); lru.AddFirst(cached.Node!);
                 return cached.Bitmap.Copy();
             }
-            if (!pending.TryGetValue(url, out request!))
+            if (!pending.TryGetValue(key, out request!))
             {
                 request = new Request(lifetimeCancellation.Token);
-                pending.Add(url, request);
+                pending.Add(key, request);
                 // Disk reads and decoding never execute synchronously on the caller's UI thread.
-                _ = Task.Run(() => LoadAndPublishAsync(url, request));
+                _ = Task.Run(() => LoadAndPublishAsync(key, request));
             }
             request.Waiters++;
         }
@@ -102,7 +107,7 @@ public sealed class ThumbnailCacheService : IDisposable
             {
                 if (--request.Waiters == 0)
                 {
-                    if (pending.TryGetValue(url, out var current) && ReferenceEquals(current, request)) pending.Remove(url);
+                    if (pending.TryGetValue(key, out var current) && ReferenceEquals(current, request)) pending.Remove(key);
                     // Cancellation stops requests that are still waiting for a decoding slot.
                     request.Cancellation.Cancel();
                     if (request.Entry is { } entry) { Release(entry); request.Entry = null; }
@@ -149,7 +154,7 @@ public sealed class ThumbnailCacheService : IDisposable
             Math.Max(1, (int)(original.Height * ratio))), new SKSamplingOptions(SKFilterMode.Linear));
     }
 
-    private async Task LoadAndPublishAsync(string url, Request request)
+    private async Task LoadAndPublishAsync(DisplayKey key, Request request)
     {
         SKBitmap? bitmap = null;
         try
@@ -159,7 +164,7 @@ public sealed class ThumbnailCacheService : IDisposable
             Interlocked.Increment(ref activeLoads);
             PerformanceDiagnostics.Increment("thumbnail.requests");
             using var timing = PerformanceDiagnostics.Measure("thumbnail.load");
-            try { bitmap = await LoadBitmapAsync(url, token).ConfigureAwait(false); }
+            try { bitmap = await LoadBitmapAsync(key.Url, token, key.MaximumDimension).ConfigureAwait(false); }
             finally { Interlocked.Decrement(ref activeLoads); workers.Release(); }
             lock (lifetimeSync)
             {
@@ -169,7 +174,7 @@ public sealed class ThumbnailCacheService : IDisposable
                     var entry = new Entry(bitmap); bitmap = null;
                     residentBytes += entry.Bytes;
                     request.Entry = entry;
-                    entry.References++; entry.Node = lru.AddFirst(url); memory.Add(url, entry); cachedBytes += entry.Bytes;
+                    entry.References++; entry.Node = lru.AddFirst(key); memory.Add(key, entry); cachedBytes += entry.Bytes;
                     while (cachedBytes > memoryBudget && lru.Last is { } oldest)
                     {
                         var evicted = memory[oldest.Value]; memory.Remove(oldest.Value); lru.RemoveLast();
@@ -204,7 +209,7 @@ public sealed class ThumbnailCacheService : IDisposable
         residentBytes -= entry.Bytes; entry.Bitmap.Dispose();
     }
 
-    private async Task<SKBitmap?> LoadBitmapAsync(string url, CancellationToken cancellationToken, int maximumDimension = 512)
+    private async Task<SKBitmap?> LoadBitmapAsync(string url, CancellationToken cancellationToken, int maximumDimension)
     {
         Directory.CreateDirectory(paths.ThumbnailCacheDirectory);
         var cacheFile = CachePath(url);
@@ -231,14 +236,19 @@ public sealed class ThumbnailCacheService : IDisposable
         if (codec is null || codec.Info.Width <= 0 || codec.Info.Height <= 0 || codec.Info.Width > MaximumImageDimension || codec.Info.Height > MaximumImageDimension || (long)codec.Info.Width * codec.Info.Height > PixelLimit)
             throw new InvalidDataException("Invalid thumbnail dimensions.");
         var dimensions = codec.GetScaledDimensions(Math.Min(1f, maximumDimension / (float)Math.Max(codec.Info.Width, codec.Info.Height)));
-        using var decoded = SKBitmap.Decode(codec, new SKImageInfo(dimensions.Width, dimensions.Height));
-        if (decoded is null) return null;
-        cancellationToken.ThrowIfCancellationRequested();
-        var scale = Math.Min(1d, maximumDimension / (double)Math.Max(decoded.Width, decoded.Height));
-        var result = scale < 1 ? decoded.Resize(new SKImageInfo(Math.Max(1, (int)(decoded.Width * scale)), Math.Max(1, (int)(decoded.Height * scale))),
-            new SKSamplingOptions(SKFilterMode.Linear)) : decoded.Copy();
+        var result = SKBitmap.Decode(codec, new SKImageInfo(dimensions.Width, dimensions.Height));
+        if (result is null) return null;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            var scale = Math.Min(1d, maximumDimension / (double)Math.Max(result.Width, result.Height));
+            if (scale < 1)
+            {
+                var resized = result.Resize(new SKImageInfo(Math.Max(1, (int)(result.Width * scale)),
+                    Math.Max(1, (int)(result.Height * scale))), new SKSamplingOptions(SKFilterMode.Linear));
+                result.Dispose();
+                result = resized;
+            }
             // Validate and decode before publishing to disk. Invalid images must not
             // poison the persistent cache; an existing cache file is never deleted.
             if (result is not null && !cachedOnDisk)
@@ -287,7 +297,7 @@ public sealed class ThumbnailCacheService : IDisposable
             // Serializes creation with disposal and concurrent notification lookups. No network I/O.
             lock (lifetimeSync)
             {
-                if (disposed || pending.ContainsKey(url)) return null;
+                if (disposed || pending.Keys.Any(key => key.Url == url)) return null;
                 var exists = File.Exists(file);
                 var size = exists ? new FileInfo(file).Length : 0;
                 logger.Info($"Notification thumbnail cache: key={Path.GetFileNameWithoutExtension(file)}, path={file}, exists={exists}, extension={Path.GetExtension(file)}, bytes={size}.");

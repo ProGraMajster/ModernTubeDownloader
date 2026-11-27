@@ -29,6 +29,8 @@ internal sealed class ThumbnailImageBinding : IDisposable
     internal async Task LoadAsync(ThumbnailCacheService cache, string? url, CancellationToken lifetime,
         Action? loaded = null, Func<bool>? accept = null, Action? unavailable = null)
     {
+        var logicalExtent = Math.Max(target.Width, target.Height);
+        var pixelExtent = logicalExtent > 0 ? (int)Math.Ceiling(logicalExtent * (target.DeviceDpi / 96d)) : 512;
         Clear();
         int expected;
         CancellationToken token;
@@ -40,7 +42,7 @@ internal sealed class ThumbnailImageBinding : IDisposable
             token = cancellation.Token;
         }
         SKBitmap? bitmap;
-        try { bitmap = await cache.GetAsync(url, token).ConfigureAwait(false); }
+        try { bitmap = await cache.GetDisplayAsync(url, pixelExtent, token).ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }
         if (bitmap is null)
         {
