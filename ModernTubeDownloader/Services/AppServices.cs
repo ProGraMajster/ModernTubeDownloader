@@ -74,12 +74,19 @@ public sealed class AppServices : IDisposable
         ModernFormsNext.Notifications.ISystemNotificationService? notifications = null,
         bool deferWorkStart = false)
     {
+        return CreateCore(paths, httpClient, releaseSource, toolValidator, notifications, deferWorkStart, AppBranding.Version);
+    }
+
+    internal static AppServices CreateCore(AppPaths paths, HttpClient? httpClient,
+        IToolReleaseSource? releaseSource, IToolBinaryValidator? toolValidator,
+        ModernFormsNext.Notifications.ISystemNotificationService? notifications, bool deferWorkStart, string experienceVersion)
+    {
         using var createTiming = PerformanceDiagnostics.Measure("services.create");
         var startup = System.Diagnostics.Stopwatch.StartNew();
         paths.EnsureCreated();
         var logger = new FileAppLogger(paths.LogDirectory);
         logger.Event(new(DiagnosticModule.Application, DiagnosticStage.Startup, DiagnosticOutcome.Started));
-        var experience = UserExperienceService.OpenAsync(paths, logger, AppBranding.Version).GetAwaiter().GetResult();
+        var experience = UserExperienceService.OpenAsync(paths, logger, experienceVersion).GetAwaiter().GetResult();
         var settings = new SettingsService(paths, logger);
         using (PerformanceDiagnostics.Measure("settings.load")) settings.LoadAsync().GetAwaiter().GetResult();
         logger.SetDetail(settings.Current.Diagnostics.Advanced, settings.Current.Diagnostics.IncludeTrace);

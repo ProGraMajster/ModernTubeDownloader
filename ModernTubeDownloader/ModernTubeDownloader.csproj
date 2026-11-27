@@ -48,6 +48,12 @@
     <EmbeddedResource Include="Resources\HelpTopics.json" />
     <EmbeddedResource Include="WebRemote\wwwroot\*" />
   </ItemGroup>
+  <Target Name="KeepPublishedHelpersInTheirOwnDirectories" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '^ModernTubeDownloader\.(Updater|NativeHost)\.'))" />
+    </ItemGroup>
+  </Target>
   <Target Name="CopyNativeHostForDevelopment" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == ''">
     <ItemGroup><NativeHostFiles Include="..\ModernTubeDownloader.NativeHost\bin\$(Configuration)\net11.0-windows\*" /></ItemGroup>
     <Copy SourceFiles="@(NativeHostFiles)" DestinationFolder="$(OutDir)native-host" SkipUnchangedFiles="true" />

@@ -527,7 +527,7 @@ public sealed partial class ExperiencePresentationTests
             settings.Current.CustomDenoPath = Path.Combine(tools, "deno.exe"); File.Copy(CoreTests.FakeToolPath(), settings.Current.CustomDenoPath);
             // Presentation fixtures must remain deterministic after the public tag exists.
             // Individual online cases supply their own controlled handler.
-            await settings.SaveAsync(); var services = AppServices.Create(paths, httpClient ?? new HttpClient(new UnavailableGitHub())); await services.Tools.Initialization; return services;
+            await settings.SaveAsync(); var services = AppServices.CreateCore(paths, httpClient ?? new HttpClient(new UnavailableGitHub()), null, null, null, false, NotesVersion); await services.Tools.Initialization; return services;
         }
         public void Dispose() { AppTypography.SetScale(100); AppearancePresentation.Current = new(); if (Directory.Exists(Root)) Directory.Delete(Root, true); }
     }

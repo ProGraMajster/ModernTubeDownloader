@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
-    [string] $ArtifactsDirectory = ""
+    [string] $ArtifactsDirectory = "",
+    [switch] $DevelopmentPackage
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +17,9 @@ if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerTe
 }
 
 $version = $versionNode.InnerText.Trim()
+if ($DevelopmentPackage -and ($version -notmatch '^\d+\.\d+\.\d+-dev\.\d+$' -or [string]::IsNullOrWhiteSpace($ArtifactsDirectory))) {
+    throw 'Development packaging requires a dev version and a new explicit artifacts directory.'
+}
 $frameworkVersion = $properties.SelectSingleNode('/Project/PropertyGroup/ModernFormsNextVersion').InnerText.Trim()
 if ($frameworkVersion -notmatch '^\d+\.\d+\.\d+$') {
     throw 'ModernFormsNextVersion must pin an exact stable NuGet version.'
@@ -85,21 +89,23 @@ function Invoke-DotNet {
 }
 
 $serialBuildProperties = @('-m:1', '/p:UseSharedCompilation=false')
-$validationRun = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
-foreach ($configuration in @('Debug', 'Release')) {
-    # Debug alone restores the opt-in Automation packages.
-    Invoke-DotNet -Arguments (@('restore', $solutionPath, "-p:Configuration=$configuration") + $serialBuildProperties)
-    Invoke-DotNet -Arguments (@('build', $solutionPath, '-c', $configuration, '--no-restore', '-warnaserror') + $serialBuildProperties)
-    $resultsRoot = Join-Path $artifactsRoot "validation\$validationRun\$configuration"
-    Invoke-DotNet -Arguments (@('test', $testProject, '-c', $configuration, '--no-build', '--no-restore', '--logger', 'console;verbosity=minimal', '--logger', 'trx;LogFileName=release-validation.trx', '--results-directory', $resultsRoot, '--blame-hang-timeout', '3m', '--blame-hang-dump-type', 'none') + $serialBuildProperties)
-    & (Join-Path $PSScriptRoot 'Assert-TestResults.ps1') -ResultsDirectory $resultsRoot
+if (-not $DevelopmentPackage) {
+    $validationRun = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    foreach ($configuration in @('Debug', 'Release')) {
+        # Debug alone restores the opt-in Automation packages.
+        Invoke-DotNet -Arguments (@('restore', $solutionPath, "-p:Configuration=$configuration") + $serialBuildProperties)
+        Invoke-DotNet -Arguments (@('build', $solutionPath, '-c', $configuration, '--no-restore', '-warnaserror') + $serialBuildProperties)
+        $resultsRoot = Join-Path $artifactsRoot "validation\$validationRun\$configuration"
+        Invoke-DotNet -Arguments (@('test', $testProject, '-c', $configuration, '--no-build', '--no-restore', '--logger', 'console;verbosity=minimal', '--logger', 'trx;LogFileName=release-validation.trx', '--results-directory', $resultsRoot, '--blame-hang-timeout', '3m', '--blame-hang-dump-type', 'none') + $serialBuildProperties)
+        & (Join-Path $PSScriptRoot 'Assert-TestResults.ps1') -ResultsDirectory $resultsRoot
+    }
+    Push-Location $repositoryRoot
+    try {
+        & node --test browser-extension/tests/*.test.cjs ModernTubeDownloader.Tests/WebRemote*.test.cjs
+        if ($LASTEXITCODE -ne 0) { throw 'Browser extension / Web Remote JavaScript tests failed.' }
+    }
+    finally { Pop-Location }
 }
-Push-Location $repositoryRoot
-try {
-    & node --test browser-extension/tests/*.test.cjs ModernTubeDownloader.Tests/WebRemote*.test.cjs
-    if ($LASTEXITCODE -ne 0) { throw 'Browser extension / Web Remote JavaScript tests failed.' }
-}
-finally { Pop-Location }
 # RID/self-contained assets differ from the generic test graph. Restore that
 # graph explicitly once, then publish without another implicit restore.
 Invoke-DotNet -Arguments (@('restore', $applicationProject, '-r', 'win-x64', '-p:Configuration=Release', '-p:SelfContained=true', '-p:PublishProfile=win-x64-self-contained') + $serialBuildProperties)
