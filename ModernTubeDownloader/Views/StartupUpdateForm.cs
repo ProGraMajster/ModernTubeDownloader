@@ -1,3 +1,4 @@
+using ModernTubeDownloader.Localization;
 using ModernFormsNext;
 using ModernTubeDownloader.Services;
 using ModernTubeDownloader.Theming;
@@ -6,8 +7,11 @@ namespace ModernTubeDownloader.Views;
 
 internal sealed class StartupUpdateForm : Form
 {
-    private readonly StartupCoordinator startup;
-    private readonly AppServices services;
+    private StartupCoordinator? startup;
+    private LocalizationService text;
+    private StartupPhase bootstrapPhase;
+    private readonly TaskCompletionSource firstPaint = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal Task FirstPaint => firstPaint.Task;
     private readonly Panel surface = new() { Dock = DockStyle.Fill, AutoScroll = true };
     private readonly PictureBox logo = new() { Image = AppBranding.Icon, SizeMode = PictureBoxSizeMode.Zoom };
     private readonly Label title = AppUi.Heading("ModernTubeDownloader", 21);
@@ -18,12 +22,17 @@ internal sealed class StartupUpdateForm : Form
     private bool finished;
 
     internal StartupUpdateForm(AppServices services, StartupCoordinator startup)
+        : this(services.Localization)
     {
-        this.services = services;
-        this.startup = startup;
+        Attach(services.Localization, startup);
+    }
+
+    internal StartupUpdateForm(LocalizationService text)
+    {
+        this.text = text;
         Text = "ModernTubeDownloader";
-        Size = new(510, 300);
-        MinimumSize = new(380, 250);
+        Size = new(478, 280);
+        MinimumSize = new(410, 265);
         StartPosition = FormStartPosition.CenterScreen;
         UseSystemDecorations = true;
         AccessibilityObject.AutomationId = "StartupUpdateWindow";
@@ -33,7 +42,7 @@ internal sealed class StartupUpdateForm : Form
         status.AccessibleAutomationId = "StartupUpdateStatus";
         progress.AccessibleAutomationId = "StartupUpdateProgress";
         title.Multiline = status.Multiline = detail.Multiline = true;
-        continueButton.Text = services.Localization["Startup.Continue"];
+        continueButton.Text = text["Startup.Continue"];
         continueButton.AccessibleAutomationId = "StartupUpdateContinue";
         ExperienceVisual.Action(continueButton, false);
         continueButton.Click += (_, _) => ContinueWithoutUpdating();
@@ -45,16 +54,37 @@ internal sealed class StartupUpdateForm : Form
         Shown += (_, _) => { if (AppearancePresentation.Current.Global.Animations) animation.Start(); };
         Closing += (_, e) => { if (!finished) { e.Cancel = true; ContinueWithoutUpdating(); } };
         animation.Tick += (_, _) => { if (progress.IsIndeterminate) progress.Invalidate(); };
-        startup.Changed += OnStartupChanged;
         AppTypography.CaptureRecipes(surface).Invoke();
         RefreshState();
+    }
+
+    internal void Attach(LocalizationService localization, StartupCoordinator coordinator)
+    {
+        text = localization;
+        startup = coordinator;
+        continueButton.Text = text["Startup.Continue"];
+        coordinator.Changed += OnStartupChanged;
+        RefreshState();
+    }
+
+    internal void Report(StartupPhase phase)
+    {
+        if (finished || startup is not null) return;
+        bootstrapPhase = phase;
+        RefreshState();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        firstPaint.TrySetResult();
     }
 
     private void ContinueWithoutUpdating()
     {
         if (!continueButton.Enabled) return;
         continueButton.Enabled = false;
-        startup.Cancellation.Cancel();
+        startup?.Cancellation.Cancel();
     }
 
     internal void Finish()
@@ -70,12 +100,15 @@ internal sealed class StartupUpdateForm : Form
 
     private void RefreshState()
     {
-        var text = services.Localization;
-        version.Text = startup.TargetVersion is { } target ? $"v{AppBranding.Version}  →  v{target}" : $"v{AppBranding.Version}";
-        var phase = startup.Phase;
+        version.Text = startup?.TargetVersion is { } target ? $"v{AppBranding.Version}  →  v{target}" : $"v{AppBranding.Version}";
+        var phase = startup?.Phase ?? bootstrapPhase;
         status.Text = text[phase switch
         {
-            StartupPhase.Check => "Updates.Checking",
+            StartupPhase.LoadSettings => "Startup.LoadSettings",
+            StartupPhase.LoadData => "Startup.LoadData",
+            StartupPhase.CreateServices or StartupPhase.ConstructUi => "Startup.Services",
+            StartupPhase.Tools => "Provisioning.Title",
+            StartupPhase.Check => "Startup.Checking",
             StartupPhase.Available => "Updates.Available",
             StartupPhase.Download => "Startup.Download",
             StartupPhase.Verify => "Startup.Verify",
@@ -86,26 +119,28 @@ internal sealed class StartupUpdateForm : Form
             StartupPhase.Ready => "Startup.Ready",
             _ => "Startup.Load"
         }];
-        var transfer = phase == StartupPhase.Download ? startup.Transfer : null;
+        var transfer = phase == StartupPhase.Download ? startup?.Transfer : null;
+        progress.Visible = phase != StartupPhase.Ready;
         progress.IsIndeterminate = transfer?.Percent is null;
         progress.Value = transfer?.Percent ?? 0;
         if (transfer?.Percent is int percent) status.Text += $"  {percent}%";
         progress.AccessibleName = status.Text;
-        if (phase is StartupPhase.PrepareInstall or StartupPhase.StartServices or StartupPhase.Ready)
-            continueButton.Enabled = false;
+        var canContinue = startup is not null && phase is StartupPhase.Initialize or StartupPhase.Check or StartupPhase.Download or StartupPhase.Verify or StartupPhase.Available;
+        continueButton.Visible = canContinue;
+        continueButton.Enabled = canContinue && startup?.Cancellation.IsCancellationRequested == false;
         detail.Text = transfer is { } bytes
             ? text.Get("Startup.Transfer", FormatBytes(bytes.Bytes), bytes.Total is { } total ? FormatBytes(total) : "—",
                 bytes.BytesPerSecond > 0 ? FormatBytes(bytes.BytesPerSecond) : "—")
             : phase switch
             {
-                StartupPhase.StartServices when startup.Outcome is StartupUpdateOutcome.TimedOut or StartupUpdateOutcome.Offline => text["Startup.Offline"],
-                StartupPhase.StartServices when startup.Outcome == StartupUpdateOutcome.Failed => text["Startup.UpdateFailed"],
-                _ => text["Startup.Detail"]
+                StartupPhase.StartServices when startup?.Outcome is StartupUpdateOutcome.TimedOut or StartupUpdateOutcome.Offline => text["Startup.Offline"],
+                StartupPhase.StartServices when startup?.Outcome == StartupUpdateOutcome.Failed => text["Startup.UpdateFailed"],
+                _ => continueButton.Visible ? text["Startup.Detail"] : ""
             };
         LayoutContent();
     }
 
-    private string FormatBytes(long bytes) => (bytes / 1024d / 1024d).ToString("0.0", services.Localization.Culture) + " MiB";
+    private string FormatBytes(long bytes) => (bytes / 1024d / 1024d).ToString("0.0", text.Culture) + " MiB";
 
     private void LayoutContent()
     {
@@ -125,7 +160,7 @@ internal sealed class StartupUpdateForm : Form
         if (disposing)
         {
             finished = true;
-            startup.Changed -= OnStartupChanged;
+            if (startup is not null) startup.Changed -= OnStartupChanged;
             animation.Dispose();
         }
         base.Dispose(disposing);

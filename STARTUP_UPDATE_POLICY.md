@@ -1,14 +1,18 @@
 # Optional installation at startup
 
 The development startup window runs above the existing worker-admission path.
-On eligible foreground launches, the saved **At startup, at most once a day**
-frequency permits a check before the main window opens. Daily and weekly checks
-stay with the monitor. Download and installation consent stays in Settings.
+On eligible foreground launches, **At every normal launch** checks once per process.
+**At startup, at most once a day** keeps the existing default cadence. Daily and
+weekly checks stay with the monitor when startup installation is off. Turn off
+automatic checks for manual checks only. Download and installation consent stays
+in Settings. An updater-initiated restart bypasses foreground preparation and
+uses the monitor's retry interval.
 
 The application checks for a pending or unreadable transaction before loading the
 shared services. It preserves the journal and shows the full-package repair path.
 The installer remains responsible for verifying and recovering the transaction.
-Progress across process exit is the next stage tracked in #22.
+The same window shows bootstrap and foreground update preparation. The updater
+keeps its own native status window across process exit.
 
 `UpdateSettings.InstallAtStartup` is an independent, opt-in Boolean. Its default is
 false, including deserialization of older profiles. New profiles retain automatic
@@ -20,14 +24,19 @@ from installation on exit. Settings shows the last startup preparation result.
 
 ## Admission sequence
 
-The application creates the existing shared services with worker admission deferred.
+The primary instance verifies the installation before opening the startup window.
+Settings, History and the stores needed for recovery and work admission load off
+the UI thread. The UI thread constructs the main form after those stores are
+ready. History cards are created when the user opens History.
+
+Shared services are created with worker admission deferred.
 Tools may initialize, but queue processing, LIVE scheduling and the remote mutation
 endpoint start only through `AppServices.StartWorkAsync`. This is also the normal
 startup path when the new preference is off; no second runtime is created.
 
 Only a manual foreground startup is eligible. Autostart, hidden/tray startup, an
-initial external URI, Classic recovery mode and the debug automation process are
-ineligible. New external activations or notification actions cancel preparation.
+initial external URI, Classic recovery mode, updater-driven restart and the debug
+automation process are ineligible. New external activations or notification actions cancel preparation.
 Any restored nonterminal queue/LIVE item (including a paused queue or interrupted
 recording), unfinished Batch session or unresolved organizer operation defers it.
 The scan of persisted Batch/journal state must be conservative, not restricted to
@@ -52,7 +61,7 @@ a parent crash before commitment cannot authorize installation. Manual and on-ex
 requests retain their previous contract. The updater retains the official
 repository/tag checks, HTTPS, SHA-256 integrity checks, archive containment, PID plus
 start-time ownership, transaction journal and rollback. SHA-256 is not a separate
-publisher signature. There is no elevation or new installer.
+publisher signature. The updater runs with the user's current privileges.
 
 If admission fails after launch, terminating the owned updater and removing its commit
 marker are independent cleanup attempts. If both fail, the pending request/process
@@ -66,6 +75,14 @@ installation or previously attempted startup version prevents an automatic repea
 Manual intervention remains available. Successful installation changes the running
 version, so that release is no longer offered. Skip, Later and explicit suppression
 continue to prevent installation. Corrupt updater state is retained and blocks it.
+
+During a visible install, the updater starts another instance of its own executable
+in presentation mode. A one-way current-user pipe carries a versioned status frame
+with an operation ID, sequence, stage and optional file counts. Both endpoints
+check the peer's process ID. Closing the window dismisses it and the worker
+continues independently. Without a language in the request, the worker runs
+headless. Download tools can continue preparing while the user works in History,
+Settings and other independent views.
 
 ## Verification boundaries
 

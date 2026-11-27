@@ -631,14 +631,14 @@ public sealed partial class ApplicationUpdateService : IDisposable
         }
     }
 
-    public Task LaunchInstallerAsync(bool restart, CancellationToken token = default, bool startup = false)
-        => LaunchInstallerCoreAsync(restart, token, startup, null, null);
+    public Task LaunchInstallerAsync(bool restart, CancellationToken token = default, bool startup = false, bool showProgress = false)
+        => LaunchInstallerCoreAsync(restart, token, startup, null, null, showProgress: showProgress);
 
-    internal Task LaunchStartupInstallerAsync(Func<bool> workStillAllowsInstallation, Action commitShutdown, CancellationToken token = default, Guid? operationId = null)
-        => LaunchInstallerCoreAsync(true, token, true, workStillAllowsInstallation, commitShutdown, operationId);
+    internal Task LaunchStartupInstallerAsync(Func<bool> workStillAllowsInstallation, Action commitShutdown, CancellationToken token = default, Guid? operationId = null, bool showProgress = false)
+        => LaunchInstallerCoreAsync(true, token, true, workStillAllowsInstallation, commitShutdown, operationId, showProgress);
 
     private async Task LaunchInstallerCoreAsync(bool restart, CancellationToken token, bool startup,
-        Func<bool>? workStillAllowsInstallation, Action? commitShutdown, Guid? operationId = null)
+        Func<bool>? workStillAllowsInstallation, Action? commitShutdown, Guid? operationId = null, bool showProgress = false)
     {
         await InitializeAsync(token); EnsureStateWritable();
         await gate.WaitAsync(token);
@@ -664,7 +664,7 @@ public sealed partial class ApplicationUpdateService : IDisposable
         foreach (var file in Directory.EnumerateFiles(source)) File.Copy(file, Path.Combine(runner, Path.GetFileName(file)));
         using var parent = Process.GetCurrentProcess();
         var request = new UpdaterRequest(AppContext.BaseDirectory, State.StagedArchive!, State.StagedHash!, parent.Id, parent.StartTime.ToUniversalTime().Ticks, restart,
-            startup ? Guid.NewGuid().ToString("N") : null, updateId);
+            startup ? Guid.NewGuid().ToString("N") : null, updateId, showProgress ? settings.Current.Language : null);
         var requestFile = Path.Combine(runner, "request.json");
         if (startup) startupCommitMarker = StartupUpdateAdmission.MarkerPath(requestFile);
         await File.WriteAllTextAsync(requestFile, JsonSerializer.Serialize(request), token);

@@ -17,25 +17,30 @@ public sealed partial class MainForm
         services.Queue.Snapshot().Any(item => item.Status is not (DownloadStatus.Completed or DownloadStatus.Failed or DownloadStatus.Cancelled)) ||
         services.Live.Snapshot().Any(item => item.State is not (LiveSessionState.Completed or LiveSessionState.Failed or LiveSessionState.Cancelled));
 
-    private async Task StartApplicationWorkAsync(bool autostart, bool hiddenArgument)
+    private async Task StartApplicationWorkAsync(bool autostart, bool hiddenArgument, StartupUpdateForm? earlyWindow, Guid? startupOperation)
     {
         if (services.WorkStarted || !startupUpdateEligible || autostart || hiddenArgument)
         {
+            earlyWindow?.Finish();
             tray.Start(autostart, hiddenArgument);
             await StartRuntimeWorkAsync();
+            if (startupOperation is { } operation)
+                services.Logger.Event(new(DiagnosticModule.Application, DiagnosticStage.Startup, DiagnosticOutcome.Completed, OperationId: operation));
             TryStartExperience();
             return;
         }
 
-        var operationId = Guid.NewGuid();
+        var operationId = startupOperation ?? Guid.NewGuid();
         using var startup = new StartupCoordinator(services.Updates, services.Logger, operationId);
-        using var window = new StartupUpdateForm(services, startup);
+        using var newWindow = earlyWindow is null ? new StartupUpdateForm(services, startup) : null;
+        earlyWindow?.Attach(services.Localization, startup);
+        var window = earlyWindow ?? newWindow!;
         startupUpdateCancellation = startup.Cancellation;
         try
         {
             try
             {
-                window.Show();
+                if (newWindow is not null) window.Show();
                 var policy = services.Settings.Current.Updates;
                 var outcome = await startup.PrepareAsync(policy.AutomaticChecks && policy.InstallAtStartup,
                     async token => await services.Batch.HasUnfinishedSessionsAsync(token) ||
@@ -49,7 +54,7 @@ public sealed partial class MainForm
                     {
                         startupInstallerLaunched = startupInstallRequested = updateInstallRequested = true;
                         BeginShutdown();
-                    }, handoff.Token, operationId);
+                    }, handoff.Token, operationId, showProgress: true);
                     return;
                 }
             }

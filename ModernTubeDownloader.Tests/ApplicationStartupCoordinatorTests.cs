@@ -32,6 +32,32 @@ public sealed partial class ApplicationUpdateTests
     }
 
     [Fact]
+    public async Task EveryStartupChecksOncePerLaunchAndDoesNotOfferOlderStableRelease()
+    {
+        using var fixture = new Fixture();
+        using var http = new HttpClient();
+        var paths = AppPaths.Create(Path.Combine(fixture.Root, "data"));
+        var logger = new NullAppLogger();
+        var settings = new SettingsService(paths, logger);
+        await settings.LoadAsync();
+        settings.Current.Updates.AutomaticChecks = true;
+        settings.Current.Updates.Frequency = UpdateCheckFrequency.EveryStartup;
+        settings.Current.Updates.Mode = UpdateInstallMode.NotifyOnly;
+        var feed = new StartupFeed(Release() with { Version = "1.3.2" });
+        using (var first = new ApplicationUpdateService(paths, settings, http, logger, feed, "1.4.0-dev.1"))
+        {
+            Assert.Equal(StartupUpdateOutcome.Current, await first.CheckForStartupAsync(default, Guid.NewGuid()));
+            Assert.Equal(StartupUpdateOutcome.Current, await first.CheckForStartupAsync(default, Guid.NewGuid()));
+            await first.RunAutomaticCycleAsync();
+            Assert.Equal(1, feed.Requests);
+            Assert.False(first.Ready);
+        }
+        using var next = new ApplicationUpdateService(paths, settings, http, logger, feed, "1.4.0-dev.1");
+        Assert.Equal(StartupUpdateOutcome.Current, await next.CheckForStartupAsync(default, Guid.NewGuid()));
+        Assert.Equal(2, feed.Requests);
+    }
+
+    [Fact]
     public async Task StartupLookupUsesExistingCadenceAndDoesNotPrepareAnInstallerWithoutConsent()
     {
         using var fixture = new Fixture();

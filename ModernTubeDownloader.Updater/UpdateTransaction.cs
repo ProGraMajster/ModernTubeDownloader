@@ -17,7 +17,7 @@ internal enum UpdateOperation
 {
     ValidateInstallation = 1, LockInstallation, PrepareInstallation, ReadJournal, RecoverPreviousTransaction,
     RetireJournal, InitializeJournal, PrepareFile, BackupFile, WriteJournal, ReplaceJournal, InstallFile, RestoreFile,
-    RemoveUnusedJournal, PublishResult, Restart, UnverifiedLegacyJournal
+    RemoveUnusedJournal, PublishResult, Restart, UnverifiedLegacyJournal, VerifyInstalledFile
 }
 
 internal sealed record UpdateFailure(UpdateOperation Operation, Exception Error);
@@ -88,7 +88,7 @@ public static class UpdateTransaction
 
             if (!prior.Completed)
             {
-                observe?.Invoke(DiagnosticStage.Recover, DiagnosticOutcome.Started, new(Files: prior.Files.Count), null);
+                observe?.Invoke(DiagnosticStage.Recover, DiagnosticOutcome.Started, new(Total: prior.Files.Count), null);
                 var recovery = RollBack(backup, prior, observe);
                 if (recovery.Status != UpdateRecoveryStatus.Restored)
                 {
@@ -109,7 +109,7 @@ public static class UpdateTransaction
         var operation = UpdateOperation.InstallFile;
         try
         {
-            observe?.Invoke(DiagnosticStage.Replace, DiagnosticOutcome.Started, new(Files: files.Count), null);
+            observe?.Invoke(DiagnosticStage.Replace, DiagnosticOutcome.Started, new(Files: files.Count, Total: files.Count), null);
             for (var index = 0; index < journal.Files.Count; index++)
             {
                 var entry = journal.Files[index];
@@ -141,10 +141,13 @@ public static class UpdateTransaction
                     MarkWrite(backup, index);
                     File.Move(staged, destination, overwrite: false);
                 }
-                if ((index + 1) % 100 == 0)
-                    observe?.Invoke(DiagnosticStage.Replace, DiagnosticOutcome.Progress, new(Files: index + 1), null);
+                if ((index + 1) % 16 == 0)
+                    observe?.Invoke(DiagnosticStage.Replace, DiagnosticOutcome.Progress, new(Files: index + 1, Total: files.Count), null);
             }
-            observe?.Invoke(DiagnosticStage.Replace, DiagnosticOutcome.Completed, new(Files: files.Count), null);
+            observe?.Invoke(DiagnosticStage.Replace, DiagnosticOutcome.Completed, new(Files: files.Count, Total: files.Count), null);
+
+            operation = UpdateOperation.VerifyInstalledFile;
+            VerifyInstallation(installation, extracted, files, observe);
             operation = UpdateOperation.ReplaceJournal;
             observe?.Invoke(DiagnosticStage.Commit, DiagnosticOutcome.Started, new(Files: files.Count), null);
             beforeCommit?.Invoke(JournalPath(backup));
@@ -154,13 +157,32 @@ public static class UpdateTransaction
         catch (Exception error)
         {
             var failure = Describe(operation, error);
-            observe?.Invoke(DiagnosticStage.Rollback, DiagnosticOutcome.Started, new(Files: journal.Files.Count, Code: (int)failure.Operation), null);
+            observe?.Invoke(DiagnosticStage.Rollback, DiagnosticOutcome.Started, new(Total: journal.Files.Count, Code: (int)failure.Operation), null);
             var recovered = RollBack(backup, journal, observe);
             observe?.Invoke(DiagnosticStage.Rollback,
                 recovered.Status == UpdateRecoveryStatus.Restored ? DiagnosticOutcome.Completed : DiagnosticOutcome.Failed,
                 new(Files: journal.Files.Count, Errors: recovered.Failures.Count, Context: (int)recovered.Status), null);
             throw new UpdateTransactionException(recovered.Status, failure, recovered.Failures);
         }
+    }
+
+    private static void VerifyInstallation(string installation, string extracted, IReadOnlyList<string> files,
+        Action<DiagnosticStage, DiagnosticOutcome, DiagnosticCounters?, Exception?>? observe)
+    {
+        observe?.Invoke(DiagnosticStage.VerifyInstallation, DiagnosticOutcome.Started, new(Total: files.Count), null);
+        for (var index = 0; index < files.Count; index++)
+        {
+            var source = FilePath(extracted, files[index]);
+            var destination = FilePath(installation, files[index]);
+            UpdatePackageSecurity.EnsureNoReparsePoints(source);
+            UpdatePackageSecurity.EnsureNoReparsePoints(destination);
+            using var expected = OpenRead(source);
+            if (!Matches(destination, Convert.ToHexString(SHA256.HashData(expected))))
+                throw new IOException("The installed file did not match the extracted update.");
+            if ((index + 1) % 16 == 0)
+                observe?.Invoke(DiagnosticStage.VerifyInstallation, DiagnosticOutcome.Progress, new(Files: index + 1, Total: files.Count), null);
+        }
+        observe?.Invoke(DiagnosticStage.VerifyInstallation, DiagnosticOutcome.Completed, new(Files: files.Count, Total: files.Count), null);
     }
 
     private static UpdateJournal PrepareBackup(string installation, string extracted, IReadOnlyList<string> files,
@@ -176,6 +198,7 @@ public static class UpdateTransaction
             owned = true;
             Directory.CreateDirectory(Path.Combine(staging, "started"));
             observe?.Invoke(DiagnosticStage.Journal, DiagnosticOutcome.Started, new(Files: files.Count), null);
+            observe?.Invoke(DiagnosticStage.Backup, DiagnosticOutcome.Started, new(Total: files.Count), null);
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var file in files)
             {
@@ -201,6 +224,8 @@ public static class UpdateTransaction
                     hash = Convert.ToHexString(SHA256.HashData(original));
                     original.Position = 0;
                     WriteDurably(original, saved, overwrite: false);
+                    if (journal.Files.Count % 16 == 0)
+                        observe?.Invoke(DiagnosticStage.VerifyBackup, DiagnosticOutcome.Progress, null, null);
                     if (!Matches(saved, hash)) throw new IOException("The backup did not match the original file.");
                 }
                 string? addedHash = null;
@@ -210,7 +235,10 @@ public static class UpdateTransaction
                     addedHash = Convert.ToHexString(SHA256.HashData(input));
                 }
                 journal.Files.Add(new(relative, attributes.HasValue, hash, addedHash));
+                if (journal.Files.Count % 16 == 0)
+                    observe?.Invoke(DiagnosticStage.Backup, DiagnosticOutcome.Progress, new(Files: journal.Files.Count, Total: files.Count), null);
             }
+            observe?.Invoke(DiagnosticStage.Backup, DiagnosticOutcome.Completed, new(Files: files.Count, Total: files.Count), null);
             operation = UpdateOperation.InitializeJournal;
             SaveJournal(staging, journal, observe);
             Directory.Move(staging, backup);
@@ -298,6 +326,12 @@ public static class UpdateTransaction
             catch (Exception error)
             {
                 failures.Add(new(UpdateOperation.RestoreFile, error));
+            }
+            finally
+            {
+                if ((journal.Files.Count - index) % 16 == 0)
+                    observe?.Invoke(DiagnosticStage.Rollback, DiagnosticOutcome.Progress,
+                        new(Files: verifiedFiles, Total: journal.Files.Count), null);
             }
         }
         if (failures.Count != 0)

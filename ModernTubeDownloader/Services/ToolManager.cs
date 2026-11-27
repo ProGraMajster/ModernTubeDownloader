@@ -69,6 +69,8 @@ public sealed class ToolManager
     };
     private ToolManagerState persistedState = new();
     private Task? initializationTask;
+    private readonly Guid? startupOperation;
+    private bool reportStartup;
     private Task? backgroundUpdateTask;
 
     public ToolManager(
@@ -78,7 +80,7 @@ public sealed class ToolManager
         ToolPackageInstaller installer,
         IToolBinaryValidator validator,
         IAppLogger logger,
-        Func<DateTimeOffset>? utcNow = null)
+        Func<DateTimeOffset>? utcNow = null, Guid? startupOperation = null)
     {
         this.paths = paths;
         this.settings = settings;
@@ -86,6 +88,7 @@ public sealed class ToolManager
         this.installer = installer;
         this.validator = validator;
         this.logger = logger;
+        this.startupOperation = startupOperation;
         this.utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
     }
 
@@ -255,6 +258,10 @@ public sealed class ToolManager
     private async Task InitializeAsync()
     {
         await operationGate.WaitAsync().ConfigureAwait(false);
+        reportStartup = startupOperation.HasValue;
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var outcome = DiagnosticOutcome.Completed;
+        if (reportStartup) logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Initialize, DiagnosticOutcome.Started, OperationId: startupOperation));
         try
         {
             try
@@ -276,13 +283,23 @@ public sealed class ToolManager
             await ProvisionIfMissingAsync(ExternalToolKind.Deno, cancellationToken).ConfigureAwait(false);
             await SaveStateAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested) { outcome = DiagnosticOutcome.Cancelled; }
         catch (Exception ex)
         {
+            outcome = DiagnosticOutcome.Failed;
             logger.Error("Tool manager initialization failed.", ex);
         }
         finally
         {
+            if (reportStartup)
+            {
+                if (outcome == DiagnosticOutcome.Completed && EngineStatus == DownloadEngineStatus.Failed)
+                    outcome = DiagnosticOutcome.Unavailable;
+                logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Initialize, outcome,
+                    OperationId: startupOperation, DurationMs: (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                    Counts: new(Code: (int)EngineStatus)));
+            }
+            reportStartup = false;
             operationGate.Release();
         }
 
@@ -328,6 +345,7 @@ public sealed class ToolManager
                     _ => throw new ArgumentOutOfRangeException(nameof(kind))
                 });
                 var ffprobe = kind == ExternalToolKind.Ffmpeg ? ResolveCustomFfprobe(executable, custom.Ffprobe) : null;
+                SetInfo(GetInfo(kind) with { Status = ToolStatus.Verifying });
                 var version = await validator.ValidateAsync(kind, executable, ffprobe, cancellationToken).ConfigureAwait(false);
                 SetInfo(new ToolInfo
                 {
@@ -363,6 +381,7 @@ public sealed class ToolManager
         {
             var executable = ResolveManagedPath(installation.ExecutableRelativePath);
             var ffprobe = installation.FfprobeRelativePath is { Length: > 0 } relative ? ResolveManagedPath(relative) : null;
+            SetInfo(GetInfo(kind) with { Status = ToolStatus.Verifying });
             var version = await validator.ValidateAsync(kind, executable, ffprobe, cancellationToken).ConfigureAwait(false);
             SetInfo(new ToolInfo
             {
@@ -641,12 +660,17 @@ public sealed class ToolManager
 
     private void SetInfo(ToolInfo info)
     {
+        bool changed;
         lock (stateLock)
         {
+            changed = GetInfo(info.Kind).Status != info.Status;
             if (info.Kind == ExternalToolKind.YtDlp) YtDlp = info;
             else if (info.Kind == ExternalToolKind.Ffmpeg) Ffmpeg = info;
             else Deno = info;
         }
+        if (reportStartup && changed)
+            logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Initialize, DiagnosticOutcome.Progress, OperationId: startupOperation,
+                Counts: new(Code: (int)info.Status, Context: (int)info.Kind)));
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

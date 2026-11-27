@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\ModernTubeDownloader\Assets\AppIcon.ico</ApplicationIcon>
     <TargetFramework>net11.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -10,6 +12,7 @@
     <PublishReadyToRun>false</PublishReadyToRun>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="InstallerMessages.json" LogicalName="InstallerMessages.json" />
     <Compile Include="..\ModernTubeDownloader\Infrastructure\DiagnosticEvent.cs" Link="Diagnostics\DiagnosticEvent.cs" />
   </ItemGroup>
 </Project>

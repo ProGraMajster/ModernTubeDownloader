@@ -119,7 +119,7 @@ internal sealed class DiagnosticsService : IDisposable
             .FirstOrDefault(value => value.Key == name)?.Value;
         return new(new
         {
-            version = AppBranding.Version, assemblyVersion = FileAppLogger.ApplicationVersion,
+            version = AppBranding.Version, assemblyVersion = assembly.GetName().Version?.ToString(),
             informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
             commit = Metadata("SourceCommit"), configuration = assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration,
             modernFormsNext = framework[0], modernFormsNextCommit = framework.Length == 2 ? framework[1] : null,

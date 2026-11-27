@@ -92,7 +92,8 @@ public static class UpdatePackageSecurity
                 throw new InvalidDataException("Reparse points are not permitted in update paths.");
     }
 
-    public static async Task<IReadOnlyList<string>> ExtractAsync(string archive, string destination, CancellationToken token = default)
+    public static async Task<IReadOnlyList<string>> ExtractAsync(string archive, string destination, CancellationToken token = default,
+        Action<int, int>? progress = null)
     {
         EnsureNoReparsePoints(destination);
         if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any()) throw new IOException("Extraction requires an empty directory.");
@@ -114,6 +115,8 @@ public static class UpdatePackageSecurity
         if (!files.Any(file => file.Relative.Equals("ModernTubeDownloader.exe", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("Application executable missing from update.");
         Directory.CreateDirectory(destination);
+        var done = 0;
+        progress?.Invoke(done, files.Count);
         foreach (var (entry, relative) in files)
         {
             token.ThrowIfCancellationRequested();
@@ -124,6 +127,7 @@ public static class UpdatePackageSecurity
             await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             await input.CopyToAsync(output, token);
             if (output.Length != entry.Length) throw new InvalidDataException("Truncated package entry.");
+            progress?.Invoke(++done, files.Count);
         }
         return files.Select(file => file.Relative).ToArray();
     }

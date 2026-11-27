@@ -5,8 +5,10 @@ using ModernTubeDownloader.Updates;
 
 internal static class Program
 {
+    [STAThread]
     private static async Task<int> Main(string[] args)
     {
+        if (args is ["--progress", ..]) return InstallerProgressWindow.Run(args);
         if (args.Length != 2 || args[0] != "--request" || !Path.IsPathFullyQualified(args[1])) return 2;
         var requestPath = args[1];
         var session = Guid.NewGuid();
@@ -15,7 +17,9 @@ internal static class Program
             Guid.TryParseExact(parentFolder[7..], "N", out var parsed) ? parsed : session;
         var stage = DiagnosticStage.Load;
         var elapsed = Stopwatch.StartNew();
-        var version = typeof(Program).Assembly.GetName().Version!.ToString();
+        var logGate = new object();
+        InstallerProgressChannel? progress = null;
+        var version = DiagnosticRecord.ExecutingVersion;
 
         void Record(DiagnosticStage current, DiagnosticOutcome outcome, DiagnosticCounters? counts = null, Exception? error = null)
         {
@@ -27,8 +31,11 @@ internal static class Program
                     DurationMs: elapsed.ElapsedMilliseconds, Exception: error, Counts: counts), session, version);
                 var file = requestPath + ".diagnostics.jsonl";
                 UpdatePackageSecurity.EnsureNoReparsePoints(file);
-                if (File.Exists(file) && new FileInfo(file).Length >= 64 * 1024) return;
-                File.AppendAllText(file, JsonSerializer.Serialize(entry, DiagnosticRecord.Json) + "\n");
+                lock (logGate)
+                {
+                    if (File.Exists(file) && new FileInfo(file).Length >= 64 * 1024) return;
+                    File.AppendAllText(file, JsonSerializer.Serialize(entry, DiagnosticRecord.Json) + "\n");
+                }
             }
             catch (Exception logError) when (logError is IOException or UnauthorizedAccessException or InvalidDataException)
             { /* Installation and recovery are independent of diagnostics. */ }
@@ -60,9 +67,17 @@ internal static class Program
                 ?? throw new InvalidDataException("Empty updater request.");
             id = request.OperationId ?? id;
             Record(stage, DiagnosticOutcome.Completed);
+            if (request.ProgressLanguage is { Length: > 0 and <= 16 } language && id != Guid.Empty && Environment.UserInteractive)
+            {
+                Record(DiagnosticStage.Presentation, DiagnosticOutcome.Started);
+                progress = new(id, language, outcome => Record(DiagnosticStage.Presentation, outcome));
+                progress.Report(InstallerPhase.Wait);
+                progress.Start();
+            }
             Record(stage = DiagnosticStage.WaitForParent, DiagnosticOutcome.Started);
             await WaitForParentAsync(request);
             Record(stage, DiagnosticOutcome.Completed);
+            progress?.Report(InstallerPhase.Check);
             Record(stage = DiagnosticStage.Validate, DiagnosticOutcome.Started);
             StartupUpdateAdmission.Validate(requestPath, request);
             Record(stage, DiagnosticOutcome.Completed);
@@ -71,10 +86,12 @@ internal static class Program
             Record(stage, DiagnosticOutcome.Completed);
             var extracted = Path.Combine(Path.GetDirectoryName(requestPath)!, "extracted-" + Guid.NewGuid().ToString("N"));
             Record(stage = DiagnosticStage.Extract, DiagnosticOutcome.Started);
-            var files = await UpdatePackageSecurity.ExtractAsync(request.Archive, extracted);
+            progress?.Report(InstallerPhase.Extract);
+            var files = await UpdatePackageSecurity.ExtractAsync(request.Archive, extracted,
+                progress: progress is null ? null : (done, total) => progress.Report(InstallerPhase.Extract, done, total));
             Record(stage, DiagnosticOutcome.Completed, new(Files: files.Count));
             stage = DiagnosticStage.Commit;
-            UpdateTransaction.Install(request.Installation, extracted, files, beforeCopy: null, observe: Record);
+            UpdateTransaction.Install(request.Installation, extracted, files, beforeCopy: null, observe: ObserveTransaction);
         }
         catch (Exception error)
         {
@@ -95,7 +112,7 @@ internal static class Program
                     => "The parent did not commit this startup installation.",
                 _ => "Update failed. Refer to the structured installer journal."
             };
-            PublishResult(new
+            var published = PublishResult(new
             {
                 success = false, operationId = id, stage = stage.ToString(),
                 recovery = recovery.ToString().ToLowerInvariant(), exceptionType = original.GetType().Name,
@@ -103,19 +120,34 @@ internal static class Program
                 failure = SafeFailure(primary), recoveryFailureCount = secondary.Count,
                 recoveryFailures = secondary.Take(16).Select(SafeFailure).ToArray()
             });
+            var recoveryRequired = recovery == UpdateRecoveryStatus.Partial ||
+                primary?.Operation is UpdateOperation.ReadJournal or UpdateOperation.RecoverPreviousTransaction ||
+                secondary.Count > 0 && primary?.Operation is UpdateOperation.InstallFile or UpdateOperation.VerifyInstalledFile or UpdateOperation.ReplaceJournal;
+            await Finish(published ? recovery == UpdateRecoveryStatus.Restored ? InstallerPhase.Restored
+                : recoveryRequired ? InstallerPhase.RecoveryRequired : InstallerPhase.Failed : InstallerPhase.Disconnected);
             return 1;
         }
 
         // Record the committed payload before attempting any launch. An old GUI still
         // understands the success flag. A new GUI can observe the terminal restart status.
-        if (!PublishResult(new { success = true, operationId = id, restartPending = request.Restart })) return 1;
-        if (!request.Restart) return 0;
+        if (!PublishResult(new { success = true, operationId = id, restartPending = request.Restart }))
+        {
+            await Finish(InstallerPhase.Disconnected);
+            return 1;
+        }
+        if (!request.Restart)
+        {
+            await Finish(InstallerPhase.Complete);
+            return 0;
+        }
+        progress?.Report(InstallerPhase.Restart);
         Record(DiagnosticStage.Restart, DiagnosticOutcome.Started);
         int? restartExitCode = null;
         try
         {
             var start = new ProcessStartInfo(Path.Combine(request.Installation, "ModernTubeDownloader.exe"))
             { UseShellExecute = false, WorkingDirectory = request.Installation };
+            start.Environment[UpdaterRequest.RestartEnvironmentKey] = id.ToString("N");
             using var restarted = Process.Start(start) ?? throw new IOException("The installed application process could not be started.");
             using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(1));
             try { await restarted.WaitForExitAsync(grace.Token); }
@@ -132,10 +164,38 @@ internal static class Program
             Record(DiagnosticStage.Restart, DiagnosticOutcome.Failed,
                 new(Code: (int)UpdateOperation.Restart, ExitCode: restartExitCode,
                     Context: error is System.ComponentModel.Win32Exception native ? native.NativeErrorCode : null), error);
-            PublishResult(new { success = true, operationId = id, restartError = SafeFailure(new(UpdateOperation.Restart, error)), restartExitCode });
+            var published = PublishResult(new { success = true, operationId = id,
+                restartError = SafeFailure(new(UpdateOperation.Restart, error)), restartExitCode });
+            await Finish(published ? InstallerPhase.RestartFailed : InstallerPhase.Disconnected);
             return 3;
         }
-        return PublishResult(new { success = true, operationId = id, restartPending = false }) ? 0 : 3;
+        var restartedSuccessfully = PublishResult(new { success = true, operationId = id, restartPending = false });
+        await Finish(restartedSuccessfully ? InstallerPhase.Complete : InstallerPhase.Disconnected);
+        return restartedSuccessfully ? 0 : 3;
+
+        Task Finish(InstallerPhase phase) => progress?.FinishAsync(phase) ?? Task.CompletedTask;
+
+        void ObserveTransaction(DiagnosticStage current, DiagnosticOutcome outcome, DiagnosticCounters? counts, Exception? error)
+        {
+            Record(current, outcome, counts, error);
+            if (outcome == DiagnosticOutcome.Failed) return;
+            var phase = current switch
+            {
+                DiagnosticStage.Backup => InstallerPhase.Backup,
+                DiagnosticStage.VerifyBackup => InstallerPhase.VerifyBackup,
+                DiagnosticStage.Replace => InstallerPhase.Replace,
+                DiagnosticStage.VerifyInstallation => InstallerPhase.VerifyInstallation,
+                DiagnosticStage.Commit => InstallerPhase.Commit,
+                DiagnosticStage.Rollback or DiagnosticStage.Recover => InstallerPhase.Rollback,
+                _ => (InstallerPhase)0
+            };
+            if (phase != 0 && progress is not null)
+            {
+                var total = (int)(counts?.Total ?? 0);
+                var done = total == 0 || outcome == DiagnosticOutcome.Started ? 0 : (int)(counts?.Files ?? 0);
+                progress.Report(phase, done, total);
+            }
+        }
     }
 
     private static object? SafeFailure(UpdateFailure? failure) => failure is null ? null : new
@@ -147,6 +207,7 @@ internal static class Program
 
     private static DiagnosticStage FailureStage(UpdateOperation? operation, DiagnosticStage fallback) => operation switch
     {
+        UpdateOperation.VerifyInstalledFile => DiagnosticStage.VerifyInstallation,
         UpdateOperation.InstallFile => DiagnosticStage.Replace,
         UpdateOperation.ReadJournal or UpdateOperation.RecoverPreviousTransaction => DiagnosticStage.Recover,
         UpdateOperation.InitializeJournal or UpdateOperation.WriteJournal or UpdateOperation.ReplaceJournal or
