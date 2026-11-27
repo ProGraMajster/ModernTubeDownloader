@@ -13,13 +13,13 @@ Build the Debug solution and the development-only CLI. Both restore the exact sa
 ```powershell
 dotnet build .\ModernTubeDownloader.slnx -c Debug -m:1 /p:UseSharedCompilation=false
 dotnet build .\qa\AutomationCli\AutomationCli.csproj -c Debug -m:1 /p:UseSharedCompilation=false
-.\ModernTubeDownloader\bin\Debug\net10.0-windows10.0.26100.0\ModernTubeDownloader.exe --automation
+.\ModernTubeDownloader\bin\Debug\net11.0-windows10.0.26100.0\ModernTubeDownloader.exe --automation
 ```
 
 In a second terminal:
 
 ```powershell
-$cli = '.\qa\AutomationCli\bin\Debug\net10.0-windows\AutomationCli.dll'
+$cli = '.\qa\AutomationCli\bin\Debug\net11.0-windows\AutomationCli.dll'
 dotnet $cli list --json
 dotnet $cli roots --pid <PID> --json
 dotnet $cli tree --pid <PID> --depth 8

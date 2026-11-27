@@ -63,7 +63,7 @@ Body routes to Downloads/History/LIVE. Downloads tries to select/reveal its curr
 ## Windows deployment
 
 - The official App SDK and WinRT NuGet packages use the application's shared `ModernFormsNextVersion` pin in `Directory.Build.props`.
-- Consumer TFM: `net10.0-windows10.0.26100.0`; minimum declared platform 17763. Supported operating systems must also satisfy actual .NET 10 requirements; old Windows versions are not certified by the TFM.
+- Consumer TFM: `net11.0-windows10.0.26100.0`; minimum declared platform 17763. Supported operating systems must also satisfy actual .NET 11 requirements; old Windows versions are not certified by the TFM.
 - `WindowsSdkPackageVersion=10.0.28000.87` is explicit in central props **before first restore**, avoiding first-restore projection mismatch/NETSDK1112.
 - Both providers restore with the application. Code-first MFN disables App SDK's default Content item glob to avoid making embedded AppIcon.png an unintended output Content item.
 - Distribution remains self-contained .NET win-x64, multi-file, untrimmed, no ReadyToRun/NativeAOT/single-file. It is **not** self-contained Windows App Runtime. App SDK runtime self-contained deployment and eager module initializers are disabled; no runtime installer is bundled/auto-run.

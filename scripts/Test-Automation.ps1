@@ -175,8 +175,8 @@ $repo = Split-Path -Parent $PSScriptRoot
 $appFramework = $buildProperties.SelectSingleNode('/Project/PropertyGroup/ModernTubeDownloaderTargetFramework').InnerText.Trim()
 $app = Join-Path $repo "ModernTubeDownloader/bin/Debug/$appFramework/ModernTubeDownloader.exe"
 if ($ApplicationPath) { $app = [IO.Path]::GetFullPath($ApplicationPath) }
-$cli = Join-Path $repo 'qa/AutomationCli/bin/Debug/net10.0-windows/AutomationCli.dll'
-$fake = Join-Path $repo 'ModernTubeDownloader.FakeTool/bin/Debug/net10.0'
+$cli = Join-Path $repo 'qa/AutomationCli/bin/Debug/net11.0-windows/AutomationCli.dll'
+$fake = Join-Path $repo 'ModernTubeDownloader.FakeTool/bin/Debug/net11.0'
 foreach ($required in @($app, $cli, (Join-Path $fake 'ModernTubeDownloader.FakeTool.exe'))) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Build Debug application, MFN Automation CLI and FakeTool first: $required" }
 }
