@@ -11,17 +11,6 @@ public sealed partial class MainForm
     private Task experienceTask = Task.CompletedTask;
     private int experienceGeneration;
 
-    private void WireExperienceActions()
-    {
-        settingsView.SetupRequested += (_, _) => OpenExperience(manualSetup: true);
-        settingsView.WhatsNewRequested += (_, _) => OpenExperience(manualNews: true);
-        foreach (var view in new[] { helpView, aboutView })
-        {
-            view.SetupRequested += (_, _) => OpenExperience(manualSetup: true);
-            view.WhatsNewRequested += (_, _) => OpenExperience(manualNews: true);
-        }
-    }
-
     private void TryStartExperience()
     {
         if (!experienceRuntimeStarted || automaticExperienceAttempted || shutdownStarted || preparationOverlay.Visible) return;
@@ -58,7 +47,7 @@ public sealed partial class MainForm
                 using var registration = automation?.RegisterWindow(wizard);
 #endif
                 await wizard.ShowDialog(this);
-                settingsView.ReloadAfterSetup();
+                if (settingsPage.IsValueCreated) settingsPage.Value.ReloadAfterSetup();
                 if (!wizard.Accepted || generation != experienceGeneration || suppressExperience && !manualSetup) return;
                 action = StartupExperience.WhatsNew;
             }
@@ -72,7 +61,7 @@ public sealed partial class MainForm
 #endif
                 await news.ShowDialog(this);
                 if (news.Destination is { } category)
-                { Navigate(Shell.AppPageId.Settings); settingsView.ShowCategory(category); }
+                { Navigate(Shell.AppPageId.Settings); settingsPage.Value.ShowCategory(category); }
             }
         }
         catch (Exception error)

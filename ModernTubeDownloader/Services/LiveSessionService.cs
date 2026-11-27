@@ -24,6 +24,8 @@ public sealed class LiveSessionService(LiveSessionPersistenceService persistence
     public bool StopAndSave(Guid id) => commands?.StopAndSave(id) == true;
     public bool Cancel(Guid id) => commands?.Cancel(id) ?? CancelPending(id);
 
+    internal bool HasActiveSessions { get { lock (sync) return sessions.Any(session => session.IsActive); } }
+
     public IReadOnlyList<LiveSession> Snapshot() { lock (sync) return sessions.Select(item => item.Copy()).ToArray(); }
     public LiveSession? Find(Guid id) { lock (sync) return sessions.Find(item => item.Id == id)?.Copy(); }
 

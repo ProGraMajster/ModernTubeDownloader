@@ -229,10 +229,10 @@ public sealed class DashboardShellTests
                 services.Appearance.Profile.Global.Animations = false;
                 services.Appearance.Profile.Typography.AppTextScale = scale;
                 using var form = new MainForm(services);
+                form.Navigate(AppPageId.History);
                 var historySearch = Find<TextBox>(form.Controls.OfType<AppShellHost>().Single(), "HistorySearch");
                 var processor = services.Processor; var queue = services.Queue; var scheduler = services.LiveScheduler;
                 var history = services.History; var batch = services.Batch; var remote = services.WebRemote;
-                form.Navigate(AppPageId.History);
                 for (var i = 0; i < 20; i++)
                 {
                     var p = services.Appearance.Profile.Copy(); p.InterfaceMode = AppInterfaceMode.ModernDashboard;
