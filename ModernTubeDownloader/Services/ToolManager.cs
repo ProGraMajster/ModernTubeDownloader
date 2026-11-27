@@ -292,9 +292,13 @@ public sealed class ToolManager
         finally
         {
             if (reportStartup)
+            {
+                if (outcome == DiagnosticOutcome.Completed && EngineStatus == DownloadEngineStatus.Failed)
+                    outcome = DiagnosticOutcome.Unavailable;
                 logger.Event(new(DiagnosticModule.Tools, DiagnosticStage.Initialize, outcome,
                     OperationId: startupOperation, DurationMs: (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds,
                     Counts: new(Code: (int)EngineStatus)));
+            }
             reportStartup = false;
             operationGate.Release();
         }
