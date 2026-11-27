@@ -18,8 +18,8 @@ public sealed partial class MainForm : Form
     private readonly LocalizationService text;
     private readonly DownloadsView downloadsView;
     private readonly LiveView liveView;
-    private readonly HistoryView historyView;
-    private readonly SettingsView settingsView;
+    private readonly Lazy<HistoryView> historyPage;
+    private readonly Lazy<SettingsView> settingsPage;
     private readonly OtherView otherView;
     private readonly AppShellHost shellHost;
     private readonly CaptionLabel caption = new();
@@ -29,9 +29,9 @@ public sealed partial class MainForm : Form
     private WindowsFileDrop? fileDrop;
     private bool fallbackNotice;
     private readonly Panel content;
-    private readonly BatchImportView batchView;
-    private readonly InformationView helpView;
-    private readonly InformationView aboutView;
+    private readonly Lazy<BatchImportView> batchPage;
+    private readonly Lazy<InformationView> helpPage;
+    private readonly Lazy<InformationView> aboutPage;
     private readonly Panel preparationOverlay;
     private readonly Panel preparationCard;
     private readonly Label preparationTitle;
@@ -98,13 +98,11 @@ public sealed partial class MainForm : Form
             downloadsView.RegisterAdvancedForAutomation = automation.RegisterWindow;
         }
 #endif
-        historyView = CreatePage(modern => new HistoryView(services, modern)); historyView.Visible = false;
-        historyView.RetryRequested += async (_, url) =>
-        {
-            ShowView(downloadsView);
-            try { await downloadsView.AcceptExternalRequestAsync(new(url, true, true, Source: "history", Intent: ExternalMediaIntent.QuickQueue)); }
-            catch (Exception error) { downloadsView.ShowExternalRequestError(error); }
-        };
+        historyPage = new(CreateHistoryPage);
+        settingsPage = new(CreateSettingsPage);
+        batchPage = new(CreateBatchPage);
+        helpPage = new(() => CreateInformationPage(about: false));
+        aboutPage = new(() => CreateInformationPage(about: true));
         liveView = new LiveView(services) { Visible = false };
 #if DEBUG
         if (automation is not null) liveView.RegisterDetailsForAutomation = automation.RegisterWindow;
@@ -112,38 +110,19 @@ public sealed partial class MainForm : Form
         downloadsView.LiveRequested += (_, request) => { ShowView(liveView); liveView.Present(request); };
         liveView.OpenDownloadsRequested += async (_, url) =>
         { ShowView(downloadsView); await downloadsView.AcceptDesktopUrlAsync(url); };
-        settingsView = new SettingsView(services) { Visible = false };
-#if DEBUG
-        if (automation is not null) settingsView.RegisterDialog = automation.RegisterWindow;
-#endif
         otherView = new OtherView(services) { Visible = false };
         otherView.RegisterTool("Batch", () => _ = OpenBatchAsync());
         otherView.RegisterTool("Organizer", () => _ = OpenOrganizerAsync());
         otherView.RegisterTool("Thumbnails", () => _ = OpenThumbnailToolAsync());
         otherView.ResumeBatch += (_, session) => _ = OpenBatchAsync(session);
-        settingsView.InstallUpdateRequested += (_, _) => _ = RequestUpdateInstallationAsync();
         downloadsView.SupportedSourcesRequested += OpenSupportedSources;
-        settingsView.SupportedSourcesRequested += OpenSupportedSources;
         liveView.SupportedSourcesRequested += OpenSupportedSources;
         otherView.NavigateRequested += (_, page) => Navigate(page);
-        batchView = new BatchImportView(services) { Visible = false };
-        batchView.OrganizeRequested += (_, _) => _ = OpenOrganizerAsync(batchView.CurrentSession);
-        otherView.PickBatchFileRequested += async (_, _) => { Navigate(AppPageId.Batch); await batchView.BrowseSourceAsync(); };
-#if DEBUG
-        if (automation is not null) batchView.RegisterDialog = automation.RegisterWindow;
-#endif
-        helpView = new InformationView(services, false) { Visible = false };
-        aboutView = new InformationView(services, true) { Visible = false };
-        WireExperienceActions();
-        helpView.NavigateRequested += (_, page) => Navigate(page);
-        helpView.SettingsRequested += (_, category) => { Navigate(AppPageId.Settings); settingsView.ShowCategory(category); };
-        helpView.BatchRequested += (_, _) => _ = OpenBatchAsync();
-        helpView.OrganizerRequested += (_, _) => _ = OpenOrganizerAsync();
-        content.Controls.AddRange([downloadsView, liveView, historyView, otherView, settingsView, batchView, helpView, aboutView]);
-        pages[downloadsView] = AppPageId.Downloads; pages[liveView] = AppPageId.Live;
-        pages[historyView] = AppPageId.History; pages[otherView] = AppPageId.Other;
-        pages[settingsView] = AppPageId.Settings; pages[batchView] = AppPageId.Batch;
-        pages[helpView] = AppPageId.Help; pages[aboutView] = AppPageId.About;
+        otherView.PickBatchFileRequested += async (_, _) => { Navigate(AppPageId.Batch); await batchPage.Value.BrowseSourceAsync(); };
+        content.Controls.AddRange([downloadsView, liveView, otherView]);
+        pages[downloadsView] = AppPageId.Downloads;
+        pages[liveView] = AppPageId.Live;
+        pages[otherView] = AppPageId.Other;
 
         preparationOverlay = new Panel { Dock = DockStyle.Fill, Visible = true };
         AppUi.BindBackground(preparationOverlay, AppThemeTokens.Background);
@@ -187,7 +166,7 @@ public sealed partial class MainForm : Form
         shellHost.Navigate += (_, page) => Navigate(page);
         shellHost.ThemeRequested += async (_, _) => await services.Appearance.SetModeAsync(
             services.Appearance.EffectiveVariant == ThemeVariant.Dark ? Settings.AppThemeMode.Light : Settings.AppThemeMode.Dark);
-        shellHost.UpdateRequested += (_, _) => { Navigate(AppPageId.Settings); settingsView.ShowCategory("Updates"); };
+        shellHost.UpdateRequested += (_, _) => { Navigate(AppPageId.Settings); settingsPage.Value.ShowCategory("Updates"); };
         shellHost.Fallback += (_, _) =>
         {
             services.Appearance.ForceClassicForSession();
@@ -272,7 +251,7 @@ public sealed partial class MainForm : Form
         {
             if (shellHost.Mode == AppInterfaceMode.ModernDashboard)
             {
-                if (session is not null) batchView.Present(session);
+                if (session is not null) batchPage.Value.Present(session);
                 Navigate(AppPageId.Batch); return;
             }
             using var window = new BatchImportForm(services, session);
@@ -309,7 +288,16 @@ public sealed partial class MainForm : Form
     public void Navigate(AppPageId page)
     {
         if (page == AppPageId.Batch && shellHost.Mode == AppInterfaceMode.Classic) { ShowView(otherView); _ = OpenBatchAsync(); return; }
-        if (pages.FirstOrDefault(pair => pair.Value == page).Key is { } view) ShowView(view);
+        var view = page switch
+        {
+            AppPageId.History => historyPage.Value,
+            AppPageId.Settings => settingsPage.Value,
+            AppPageId.Batch => batchPage.Value,
+            AppPageId.Help => helpPage.Value,
+            AppPageId.About => aboutPage.Value,
+            _ => pages.FirstOrDefault(pair => pair.Value == page).Key
+        };
+        if (view is not null) ShowView(view);
     }
 
     private void AppearanceChanged(object? sender, EventArgs e) => Application.RunOnUIThread(ApplyInterface);
@@ -338,8 +326,11 @@ public sealed partial class MainForm : Form
             var modern = mode == AppInterfaceMode.ModernDashboard;
             if (!modern) foreach (var view in pages.Keys) DashboardVisual.RestoreTree(view);
             downloadsView.SetDashboard(modern); liveView.SetDashboard(modern);
-            historyView.SetDashboard(modern); otherView.SetDashboard(modern); settingsView.SetDashboard(modern); batchView.SetDashboard(modern);
-            helpView.SetDashboard(modern);
+            otherView.SetDashboard(modern);
+            if (historyPage.IsValueCreated) historyPage.Value.SetDashboard(modern);
+            if (settingsPage.IsValueCreated) settingsPage.Value.SetDashboard(modern);
+            if (batchPage.IsValueCreated) batchPage.Value.SetDashboard(modern);
+            if (helpPage.IsValueCreated) helpPage.Value.SetDashboard(modern);
             Text = modern ? "ModernTubeDownloader   v" + AppBranding.Version : text["App.Title"];
             AppTypography.SetDashboardPresentation(TitleBar, modern);
             AppTypography.Bind(caption, modern ? 10.5f : 12, FontStyle.Bold);
@@ -347,7 +338,7 @@ public sealed partial class MainForm : Form
             TitleBar.Height = modern ? AppTypography.TextHeight(48) : 34;
             AppUi.BindBackground(TitleBar, modern ? AppThemeTokens.Background : AppThemeTokens.Surface);
             foreach (var view in pages.Keys) AppTypography.SetDashboardPresentation(view, modern);
-            if (!modern && currentView == batchView) ShowView(otherView);
+            if (!modern && batchPage.IsValueCreated && currentView == batchPage.Value) ShowView(otherView);
             LayoutCaption();
             UpdateLayout(); UpdateStatus();
         });
@@ -423,7 +414,7 @@ public sealed partial class MainForm : Form
     private void UpdateNavigationState()
     {
         if (currentView is not null) shellHost.Select(pages[currentView]);
-        if (fileDrop is not null) fileDrop.Enabled = shellHost.Mode == AppInterfaceMode.ModernDashboard && (currentView == batchView || currentView == otherView);
+        if (fileDrop is not null) fileDrop.Enabled = shellHost.Mode == AppInterfaceMode.ModernDashboard && shellHost.CurrentPage is AppPageId.Batch or AppPageId.Other;
     }
 
     private async Task InitializeAsync()
@@ -464,22 +455,13 @@ public sealed partial class MainForm : Form
 
     private void UpdateStatus()
     {
-        var items = services.Queue.Snapshot();
-        var queued = items.Count(item => item.Status is DownloadStatus.Queued or DownloadStatus.Waiting);
-        var active = items.Count(item =>
-            item.Status is (DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing));
-        var completed = items.Count(item => item.Status == DownloadStatus.Completed);
-        var segments = new List<string>
-        {
-            text.Get("Footer.Queue", queued),
-            text.Get("Footer.Downloading", active),
-            text.Get("Footer.Completed", completed)
-        };
-        shellHost.SetStatus(string.Join("  •  ", segments) +
+        var (waiting, active, completed) = services.Queue.StatusCounts();
+        var generalStatus = DashboardStatus.Read(services, active);
+        if (shellHost.Mode == AppInterfaceMode.ModernDashboard) shellHost.SetStatus(generalStatus.Text, generalStatus.Token);
+        else shellHost.SetStatus(string.Join("  •  ", text.Get("Footer.Queue", waiting),
+            text.Get("Footer.Downloading", active), text.Get("Footer.Completed", completed)) +
             (services.Queue.IsPaused ? $"  •  {text["Footer.Paused"]}" : string.Empty));
 
-        var generalStatus = DashboardStatus.Read(services);
-        if (shellHost.Mode == AppInterfaceMode.ModernDashboard) shellHost.SetStatus(generalStatus.Text, generalStatus.Token);
         downloadsView.SetDashboardStatus(generalStatus.Text, generalStatus.Token);
         UpdateToolPreparation();
     }
@@ -536,7 +518,7 @@ public sealed partial class MainForm : Form
                 fileDrop = new WindowsFileDrop(PlatformHandle.Handle, files =>
                 {
                     if (shutdownStarted || shellHost.Mode != AppInterfaceMode.ModernDashboard) return;
-                    Navigate(AppPageId.Batch); _ = batchView.ImportDroppedFilesAsync(files);
+                    Navigate(AppPageId.Batch); _ = batchPage.Value.ImportDroppedFilesAsync(files);
                 }, services.Logger);
                 UpdateNavigationState();
             }

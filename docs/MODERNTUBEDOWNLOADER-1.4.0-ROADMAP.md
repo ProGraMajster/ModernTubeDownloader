@@ -16,13 +16,21 @@ Punktem odniesienia jest stabilny [v1.3.2](https://github.com/ProGraMajster/Mode
 
 Aplikacja ma paginację Historii i kolejki, odwoływalne filtrowanie Historii poza wątkiem UI, ponowne użycie kart i ograniczony cache zdekodowanych miniatur. Koszt odczytu JSON i indeksowania danych przy starcie, czas zwalniania zasobów po zmianie widoku oraz długie plateau pamięci nadal wymagają pomiaru. Zgłoszenie o 20–30 s i 7,5 GB jest punktem dla reprodukcji, a nie wynikiem pomiaru obecnego kodu. [#9](https://github.com/ProGraMajster/ModernTubeDownloader/issues/9)
 
-Dla 1 000, 5 000, 10 000, 25 000 i 50 000 syntetycznych rekordów użyć tych samych zestawów i proporcji miniatur w obu interfejsach. Zmierzyć zimny i ciepły start, pierwszą Historię, kolejne strony, wyszukiwanie, filtrowanie, kolejkę, zmianę widoku, wygaszanie cache, zapis po zmianach i dłuższą sesję LIVE. Rejestrować medianę i zakres czasu, working set, prywatną i zarządzaną pamięć, uchwyty oraz osobny czas serializacji, dekodowania i aktualizacji UI. Ocenę wirtualizacji oprzeć na porównaniu z istniejącą paginacją. Nie ustalać budżetów wydajności przed zebraniem porównywalnych danych.
+W etapie 3 macierz obejmuje także 100 000 rekordów, duplikaty, długie metadane, playlisty, sesje Batch, brakujące pliki i niepoprawne ścieżki. Porównywać oba tryby na tym samym sprzęcie i profilu syntetycznym, z kolejką pasywną oraz osobną próbą z aktywnymi zadaniami. Śledzić odczyt i deserializację, pierwsze otwarcie Historii, kolejne strony, filtrowanie, alokacje, pamięć zarządzaną i natywną, uchwyty i opóźnienia UI. Utrzymać limit 40 kart Historii na stronę oraz budżet cache. Ewentualną zmianę magazynu danych lub mechanizmu paginacji oprzeć na osobnym porównaniu.
 
 ## Start i aktualizacje
 
 Etap 2 wprowadza wersję rozwojową 1.4.0-dev.1, wczesne okno startowe i odczyt profilu poza wątkiem UI. Opcja sprawdzania przy każdym normalnym uruchomieniu zachowuje dotychczasową politykę jako domyślną. Lekki, niezależny widok instalatora odbiera stany od procesu wykonującego transakcję. Testy kwalifikacyjne obejmują utratę obserwatora, awarię procesu roboczego, wynik restartu oraz Windows bez globalnego .NET. #22 wymaga zamknięcia pozostałych scenariuszy akceptacyjnych. [#22](https://github.com/ProGraMajster/ModernTubeDownloader/issues/22)
 
 Sprawdzić uczciwy ETA, kopiowanie wolnego dysku, błędną sumę, brak miejsca, odmowę dostępu, porzucony proces i wynik restartu. Obecne pobieranie zapisuje plik tymczasowy od początku. Wznowienie wymagałoby potwierdzenia aktualnego obiektu i kontynuacji walidacji całego SHA-256. Ocenić korzyść przed zmianą protokołu. #23 zachowuje własną analizę przyczyny odmowy zapisu. [#23](https://github.com/ProGraMajster/ModernTubeDownloader/issues/23)
+
+### Pozostała kwalifikacja etapu 2
+
+- Czysty Windows bez zainstalowanego globalnego .NET oraz Windows z samym .NET 10.
+- Minimalny obsługiwany Windows oraz Windows 11 build 22631.
+- Procesor x86-64-v2 bez obsługi v3 i konto spoza grupy administratorów.
+- Pełna macierz zachowania paska zadań oraz DPI w Classic i Modern, również przy zmianie monitora.
+- Ustalenie przyczyny odmowy zapisu zgłoszonej w #23. Test zgodności wersji paczki kwalifikuje osobny etap walidacji przed transakcją. [#23](https://github.com/ProGraMajster/ModernTubeDownloader/issues/23)
 
 ## Batch i diagnostyka
 

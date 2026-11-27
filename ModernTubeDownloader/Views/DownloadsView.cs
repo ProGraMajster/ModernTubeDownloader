@@ -1010,7 +1010,10 @@ internal sealed partial class DownloadsView : UserControl
             else if (e.ItemId is { } id && cards.TryGetValue(id, out var card) && services.Queue.Find(id) is { } item)
                 card.UpdateItem(item, selectedItemId == id);
             // Refreshed when opened, not recreated on every byte tick.
-            if (dashboard) { RefreshDashboardSelection(); queueTitle.Text = text.Get("Dashboard.QueueTitle", services.Queue.Snapshot().Count); }
+            if (!dashboard) return;
+            if (e.Kind == QueueChangeKind.Collection) queueTitle.Text = text.Get("Dashboard.QueueTitle", services.Queue.Count);
+            if (e.Kind is QueueChangeKind.Collection or QueueChangeKind.Order || e.ItemId is not null && e.ItemId == selectedItemId)
+                RefreshDashboardSelection();
         });
     }
 
@@ -1355,7 +1358,7 @@ internal sealed partial class DownloadsView : UserControl
     private void UpdateQueueSummary()
     {
         if (disposed) return;
-        var summary = QueueProgressSummary.Build(services.Queue.ProgressSnapshot(), services.Queue.IsPaused);
+        var summary = services.Queue.ReadProgressSummary();
         var showSummary = !dashboard && summary.Total > 0;
         var showPaging = !dashboard && summary.Total > QueueCardPage.Size;
         var layoutChanged = queueSummary.Visible != showSummary || queuePageText.Visible != showPaging;

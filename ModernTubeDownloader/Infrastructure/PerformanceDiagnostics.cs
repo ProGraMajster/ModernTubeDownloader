@@ -84,6 +84,8 @@ internal static class PerformanceDiagnostics
             Set("managedBytes", GC.GetTotalMemory(false)); Set("gcHeapBytes", gc.HeapSizeBytes);
             Set("lohBytes", gc.GenerationInfo.Length > 3 ? gc.GenerationInfo[3].SizeAfterBytes : 0);
             Set("allocatedTotalBytes", GC.GetTotalAllocatedBytes()); Set("handles", process.HandleCount);
+            Set("gcPauseTotalMs", GC.GetTotalPauseDuration().TotalMilliseconds);
+            Set("cpuTotalMs", process.TotalProcessorTime.TotalMilliseconds); Set("threads", process.Threads.Count);
             Set("gc0", GC.CollectionCount(0)); Set("gc1", GC.CollectionCount(1)); Set("gc2", GC.CollectionCount(2));
             Set("nativeBitmapBytes", BitmapBytes?.Invoke() ?? 0);
             SampleSources?.Invoke();

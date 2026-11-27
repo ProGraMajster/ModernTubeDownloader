@@ -73,6 +73,36 @@ public sealed class DownloadQueueService
             item.EstimatedSizeBytes, item.TotalBytes, item.DownloadedBytes, item.SpeedBytesPerSecond)).ToArray();
     }
 
+    internal (int Waiting, int Active, int Completed) StatusCounts()
+    {
+        lock (sync)
+        {
+            int waiting = 0, active = 0, completed = 0;
+            foreach (var item in items)
+            {
+                switch (item.Status)
+                {
+                    case DownloadStatus.Queued or DownloadStatus.Waiting: waiting++; break;
+                    case DownloadStatus.DownloadingVideo or DownloadStatus.DownloadingAudio or DownloadStatus.Merging or DownloadStatus.Finalizing:
+                        active++; break;
+                    case DownloadStatus.Completed: completed++; break;
+                }
+            }
+            return (waiting, active, completed);
+        }
+    }
+
+    internal QueueProgressSummary ReadProgressSummary()
+    {
+        lock (sync)
+        {
+            var accumulator = new QueueProgressSummary.Accumulator();
+            foreach (var item in items)
+                accumulator.Add(item.Status, item.EstimatedSizeBytes, item.TotalBytes, item.SpeedBytesPerSecond);
+            return accumulator.Complete(IsPaused);
+        }
+    }
+
     /// <summary>Copies only selected jobs. The canonical list is scanned once under its existing lock.</summary>
     public IReadOnlyList<QueueProgressItem> ProgressSnapshot(IReadOnlySet<Guid> selectedIds)
     {

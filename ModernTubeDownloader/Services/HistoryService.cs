@@ -10,18 +10,43 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
     private static readonly JsonSerializerOptions ReadOptions = new(JsonDefaults.Options) { AllowDuplicateProperties = false };
     private readonly object sync = new();
     private readonly SemaphoreSlim saveGate = new(1, 1);
-    private readonly List<DownloadHistoryEntry> entries = [];
+    // A committed list is immutable inside the service. Writers publish a new list only after durable save.
+    private List<DownloadHistoryEntry> entries = [];
+    private IReadOnlyList<DownloadHistoryEntry>? ordered;
     private bool hasObservedFile;
 
     public event EventHandler? Changed;
     public bool LoadFailed { get; private set; }
     internal int Count { get { lock (sync) return entries.Count; } }
 
-    public IReadOnlyList<DownloadHistoryEntry> Snapshot()
+    public IReadOnlyList<DownloadHistoryEntry> Snapshot() =>
+        OrderedForRead().Select(entry => entry.PersistenceCopy()).ToArray();
+
+    // Internal projection consumers read the records without changing their extension data.
+    // A stale sort remains a valid snapshot but cannot replace the current cached order.
+    internal IReadOnlyList<DownloadHistoryEntry> OrderedForRead(CancellationToken token = default)
     {
-        using var timing = PerformanceDiagnostics.Measure("history.snapshot.sort");
+        token.ThrowIfCancellationRequested();
+        List<DownloadHistoryEntry> captured;
         lock (sync)
-            return entries.OrderByDescending(entry => entry.CompletedAt).Select(entry => entry.PersistenceCopy()).ToArray();
+        {
+            if (ordered is not null) return ordered;
+            captured = entries;
+        }
+        using var timing = PerformanceDiagnostics.Measure("history.snapshot.sort");
+        var snapshot = Array.AsReadOnly(captured.OrderByDescending(entry => entry.CompletedAt).ToArray());
+        token.ThrowIfCancellationRequested();
+        lock (sync)
+            return ReferenceEquals(captured, entries) ? ordered ??= snapshot : snapshot;
+    }
+
+    private void Publish(List<DownloadHistoryEntry> committed)
+    {
+        lock (sync)
+        {
+            entries = committed;
+            ordered = null;
+        }
     }
 
     public async Task LoadAsync(CancellationToken cancellationToken = default)
@@ -34,24 +59,22 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
             if (LoadFailed) return;
             await using var stream = new FileStream(paths.HistoryFile, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
             hasObservedFile = true;
-            var loaded = await JsonSerializer.DeserializeAsync<List<DownloadHistoryEntry?>>(
-                stream, ReadOptions, cancellationToken).ConfigureAwait(false)
-                ?? throw new JsonException("The saved history is null, not a history collection.");
+            List<DownloadHistoryEntry> loaded;
+            using (PerformanceDiagnostics.Measure("history.deserialize"))
+                loaded = await JsonSerializer.DeserializeAsync<List<DownloadHistoryEntry>>(
+                    stream, ReadOptions, cancellationToken).ConfigureAwait(false)
+                    ?? throw new JsonException("The saved history is null, not a history collection.");
+            using var validation = PerformanceDiagnostics.Measure("history.validate");
             var identities = new HashSet<(Guid QueueItemId, int? LivePartIndex)>(loaded.Count);
-            var validated = new DownloadHistoryEntry[loaded.Count];
             for (var index = 0; index < loaded.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var entry = loaded[index] ?? throw new JsonException("The saved history contains a null row.");
                 if (entry.QueueItemId == Guid.Empty || !identities.Add((entry.QueueItemId, entry.LivePartIndex)))
                     throw new JsonException("The saved history contains an empty or duplicate canonical identity.");
-                validated[index] = Normalize(entry);
+                loaded[index] = Normalize(entry);
             }
-            lock (sync)
-            {
-                entries.Clear();
-                entries.AddRange(validated);
-            }
+            Publish(loaded);
         }
         catch (FileNotFoundException) when (!hasObservedFile) { /* A new profile has no history yet. */ }
         catch (DirectoryNotFoundException) when (!hasObservedFile) { /* A new profile directory may not exist yet. */ }
@@ -65,6 +88,11 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
 
     private static DownloadHistoryEntry Normalize(DownloadHistoryEntry entry)
     {
+        var duration = entry.DurationSeconds is > 0 and var seconds && double.IsFinite(seconds) ? seconds : (double?)null;
+        var size = entry.FileSizeBytes is >= 0 ? entry.FileSizeBytes : null;
+        if (entry.Title is not null && entry.SourceUrl is not null && entry.VideoId is not null && entry.Channel is not null &&
+            entry.Quality is not null && entry.FinalPath is not null && entry.Status is not null &&
+            duration == entry.DurationSeconds && size == entry.FileSizeBytes) return entry;
         return entry with
         {
             Title = entry.Title ?? string.Empty,
@@ -74,8 +102,8 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
             Quality = entry.Quality ?? string.Empty,
             FinalPath = entry.FinalPath ?? string.Empty,
             Status = entry.Status ?? string.Empty,
-            DurationSeconds = entry.DurationSeconds is > 0 and var duration && double.IsFinite(duration) ? duration : null,
-            FileSizeBytes = entry.FileSizeBytes is >= 0 ? entry.FileSizeBytes : null
+            DurationSeconds = duration,
+            FileSizeBytes = size
         };
     }
 
@@ -106,7 +134,7 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
             next.Add(updated.PersistenceCopy());
             await WriteHistoryAsync(next, cancellationToken).ConfigureAwait(false);
             hasObservedFile = true;
-            lock (sync) { entries.Clear(); entries.AddRange(next); }
+            Publish(next);
         }
         finally { saveGate.Release(); }
         Changed?.Invoke(this, EventArgs.Empty);
@@ -125,7 +153,7 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
                 ? entry with { FinalPath = path } : entry).ToList();
             await WriteHistoryAsync(next, cancellationToken).ConfigureAwait(false);
             hasObservedFile = true;
-            lock (sync) { entries.Clear(); entries.AddRange(next); }
+            Publish(next);
         }
         finally { saveGate.Release(); }
         Changed?.Invoke(this, EventArgs.Empty);
@@ -137,7 +165,7 @@ public sealed class HistoryService(AppPaths paths, IAppLogger logger)
         try
         {
             EnsureWritable();
-            await WriteHistoryAsync(Snapshot(), cancellationToken).ConfigureAwait(false);
+            await WriteHistoryAsync(OrderedForRead(cancellationToken), cancellationToken).ConfigureAwait(false);
             hasObservedFile = true;
         }
         finally

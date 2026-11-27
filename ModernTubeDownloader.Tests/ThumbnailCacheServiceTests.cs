@@ -33,6 +33,10 @@ public sealed class ThumbnailCacheServiceTests : IDisposable
             Assert.NotNull(preview);
             Assert.Equal((320, 180), (preview.Width, preview.Height));
         }
+        using var small = await cache.GetDisplayAsync(url, 96, default);
+        using var highDpi = await cache.GetDisplayAsync(url, 216, default);
+        Assert.NotNull(small); Assert.Equal((128, 72), (small.Width, small.Height));
+        Assert.NotNull(highDpi); Assert.Equal((256, 144), (highDpi.Width, highDpi.Height));
         using var shared = await cache.GetAsync(url);
         Assert.NotNull(shared);
         using (var second = await cache.GetPreviewCopyAsync(url, CancellationToken.None)) Assert.NotSame(shared, second);
@@ -159,6 +163,26 @@ public sealed class ThumbnailCacheServiceTests : IDisposable
         handler.Release.TrySetResult();
 
         Assert.NotNull(await second.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task ConcurrentDisplaySizesShareTheInitialDownload()
+    {
+        var handler = new DelayedImageHandler();
+        using var client = new HttpClient(handler);
+        using var cache = new ThumbnailCacheService(AppPaths.Create(root), new NullAppLogger(), client: client);
+        const string url = "https://example.test/image.png";
+        var small = cache.GetDisplayAsync(url, 128, default);
+        await handler.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var large = cache.GetDisplayAsync(url, 512, default);
+        handler.Release.TrySetResult();
+
+        using var first = await small.WaitAsync(TimeSpan.FromSeconds(5));
+        using var second = await large.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.NotSame(first, second);
         Assert.Equal(1, handler.RequestCount);
     }
 

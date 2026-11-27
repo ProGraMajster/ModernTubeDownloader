@@ -28,9 +28,10 @@ public sealed class SettingsVisibilityLifecycleTests
             using (var form = new MainForm(services, backgroundActivation: true))
             {
                 Ui(host, () => host.Show(form, 1536, 1024));
-                var settings = form.Controls.SelectMany(control => new[] { control }.Concat(Descendants(control)))
-                    .OfType<SettingsView>().Single();
-                Ui(host, () => { form.Navigate(AppPageId.Settings); settings.ShowCategory("Authentication"); });
+                Assert.Empty(SettingsPages(form));
+                Ui(host, () => form.Navigate(AppPageId.Settings));
+                var settings = Assert.Single(SettingsPages(form));
+                Ui(host, () => settings.ShowCategory("Authentication"));
                 var query = services.Localization["Settings.TemporaryDirectory"];
                 Assert.False(string.IsNullOrWhiteSpace(query));
                 if (language == "ja-JP") Assert.Equal("仮ファイル", query);
@@ -70,9 +71,10 @@ public sealed class SettingsVisibilityLifecycleTests
             using (var form = new MainForm(services, backgroundActivation: true))
             {
                 Ui(host, () => host.Show(form, 1536, 1024));
-                var settings = form.Controls.SelectMany(control => new[] { control }.Concat(Descendants(control)))
-                    .OfType<SettingsView>().Single();
-                Ui(host, () => { form.Navigate(AppPageId.Settings); settings.ShowCategory("Personalization"); });
+                Assert.Empty(SettingsPages(form));
+                Ui(host, () => form.Navigate(AppPageId.Settings));
+                var settings = Assert.Single(SettingsPages(form));
+                Ui(host, () => settings.ShowCategory("Personalization"));
                 AssertSettingsGeometry(settings);
                 var size = settings.ClientSize;
                 var retainedCategories = Descendants(settings).OfType<Button>()
@@ -153,6 +155,9 @@ public sealed class SettingsVisibilityLifecycleTests
         settings.Current.CustomDenoPath = Path.Combine(tools, "deno.exe"); File.Copy(CoreTests.FakeToolPath(), settings.Current.CustomDenoPath);
         await settings.SaveAsync(); var services = AppServices.Create(paths); await services.Tools.Initialization; return services;
     }
+
+    private static IEnumerable<SettingsView> SettingsPages(MainForm form) =>
+        form.Controls.SelectMany(control => new[] { control }.Concat(Descendants(control))).OfType<SettingsView>();
 
     private static T Find<T>(Control parent, string id) where T : Control => Assert.Single(Descendants(parent).OfType<T>(), control => control.AccessibleAutomationId == id);
     private static IEnumerable<Control> Descendants(Control parent)

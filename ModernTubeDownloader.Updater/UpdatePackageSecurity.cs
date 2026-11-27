@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -60,6 +61,17 @@ public static class UpdatePackageSecurity
         if (stream.Length is <= 0 or > MaximumArchiveBytes) throw new InvalidDataException("Archive size exceeds the update limit.");
         var hash = await SHA256.HashDataAsync(stream, token);
         if (!CryptographicOperations.FixedTimeEquals(hash, Convert.FromHexString(expectedHash))) throw new InvalidDataException("Update checksum mismatch.");
+    }
+
+    internal const string ProductVersionMismatch = "Update package product version does not match the declared release.";
+
+    internal static void VerifyProductVersion(string extracted, string expectedVersion)
+    {
+        var executable = Path.Combine(extracted, "ModernTubeDownloader.exe");
+        EnsureNoReparsePoints(executable);
+        if (!string.Equals(FileVersionInfo.GetVersionInfo(executable).ProductVersion, expectedVersion, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(expectedVersion))
+            throw new InvalidDataException(ProductVersionMismatch);
     }
 
     public static string ValidateRelativePath(string value)

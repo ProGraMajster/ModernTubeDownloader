@@ -314,6 +314,57 @@ public sealed partial class ApplicationUpdateTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RealUpdaterChecksDeclaredVersionBeforeWritingInstallation(bool matches)
+    {
+        using var fixture = new Fixture();
+        var installation = Directory.CreateDirectory(Path.Combine(fixture.Root, "installation")).FullName;
+        var executable = Path.Combine(installation, "ModernTubeDownloader.exe");
+        await File.WriteAllTextAsync(executable, "original executable");
+        var payload = CoreTests.FakeToolPath();
+        var productVersion = FileVersionInfo.GetVersionInfo(payload).ProductVersion;
+        Assert.False(string.IsNullOrWhiteSpace(productVersion));
+        var expectedVersion = matches ? productVersion : productVersion + ".different";
+        var archive = Path.Combine(fixture.Root, "versioned.zip");
+        using (var zip = System.IO.Compression.ZipFile.Open(archive, System.IO.Compression.ZipArchiveMode.Create))
+            System.IO.Compression.ZipFileExtensions.CreateEntryFromFile(zip, payload, "ModernTubeDownloader.exe");
+        var hash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(archive)));
+        var requestFile = Path.Combine(fixture.Root, "request.json");
+        await File.WriteAllTextAsync(requestFile, JsonSerializer.Serialize(new UpdaterRequest(
+            installation, archive, hash, int.MaxValue, 0, false, ExpectedProductVersion: expectedVersion)));
+        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "updater", "ModernTubeDownloader.Updater.exe"))
+            { UseShellExecute = false, CreateNoWindow = true };
+        start.ArgumentList.Add("--request");
+        start.ArgumentList.Add(requestFile);
+        using var updater = Process.Start(start)!;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await updater.WaitForExitAsync(timeout.Token);
+            using var result = JsonDocument.Parse(await File.ReadAllTextAsync(requestFile + ".result.json"));
+            Assert.Equal(matches ? 0 : 1, updater.ExitCode);
+            Assert.Equal(matches, result.RootElement.GetProperty("success").GetBoolean());
+            if (matches)
+            {
+                Assert.True(ReadJournal(installation).Completed);
+                Assert.Equal(await File.ReadAllBytesAsync(payload), await File.ReadAllBytesAsync(executable));
+            }
+            else
+            {
+                Assert.Equal("Validate", result.RootElement.GetProperty("stage").GetString());
+                Assert.Equal("Update package product version does not match the declared release.", result.RootElement.GetProperty("error").GetString());
+                Assert.False(Directory.Exists(Path.GetDirectoryName(JournalPath(installation))));
+                Assert.Equal("original executable", await File.ReadAllTextAsync(executable));
+            }
+        }
+        finally
+        {
+            if (!updater.HasExited) { updater.Kill(); await updater.WaitForExitAsync(); }
+        }
+    }
+
     private static string JournalPath(string installation) => Path.Combine(installation, ".mtd-update-backup", "journal.json");
 
     private static UpdateJournal ReadJournal(string installation) =>

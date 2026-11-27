@@ -72,9 +72,9 @@ public sealed class HistoryRowLifetimeTests
                 File.WriteAllBytes(Path.Combine(paths.ThumbnailCacheDirectory, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url))) + ".img"), bytes.ToArray());
             }
             using var cache = new ThumbnailCacheService(paths, new NullAppLogger());
-            using var warmed = await cache.GetAsync(url);
+            using var warmed = await cache.GetDisplayAsync(url, 128, default);
             using var host = ModernFormsTestHost.Create();
-            using var target = new PictureBox();
+            using var target = new PictureBox { Size = new System.Drawing.Size(96, 54) };
             var initial = ThumbnailImageBinding.OwnedBytes;
             var binding = ThumbnailImageBinding.For(target);
             await binding.LoadAsync(cache, url, default).WaitAsync(TimeSpan.FromSeconds(5));
