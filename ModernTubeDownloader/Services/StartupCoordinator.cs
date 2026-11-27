@@ -3,7 +3,7 @@ using ModernTubeDownloader.Infrastructure;
 
 namespace ModernTubeDownloader.Services;
 
-internal enum StartupPhase { Initialize, Check, Available, Download, Verify, PrepareInstall, Offline, UpdateFailed, StartServices, Ready }
+internal enum StartupPhase { Initialize, Check, Available, Download, Verify, PrepareInstall, Offline, UpdateFailed, StartServices, Ready, LoadSettings, CreateServices, LoadData, Tools, ConstructUi }
 
 internal sealed class StartupCoordinator(ApplicationUpdateService updates, IAppLogger logger, Guid operationId,
     TimeSpan? budget = null) : IDisposable

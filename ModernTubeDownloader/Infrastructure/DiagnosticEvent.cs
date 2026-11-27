@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -8,7 +10,7 @@ internal sealed record DiagnosticEnvironment(object Application, object System, 
 public enum DiagnosticLevel { Trace, Debug, Info, Warn, Error, Fatal }
 public enum DiagnosticModule { Application, Organizer, Updater, Batch, Downloads, History, Queue, Live, Settings, Appearance, Localization, Notifications, WebRemote, Tools, Storage, Migration, Network, Framework, NativeHost, Performance, Logging }
 public enum DiagnosticOutcome { Requested, Started, Progress, Completed, Failed, Cancelled, Denied, Unavailable, Skipped }
-public enum DiagnosticStage { None, Startup, Shutdown, Snapshot, Import, Validate, Scan, Match, Plan, Dispatcher, Preview, Controls, Move, Undo, Recover, Initialize, Check, Download, Checksum, Extract, WaitForParent, Journal, Replace, Rollback, Commit, Restart, Result, Load, Save, Run, Export, Retention, Sample }
+public enum DiagnosticStage { None, Startup, Shutdown, Snapshot, Import, Validate, Scan, Match, Plan, Dispatcher, Preview, Controls, Move, Undo, Recover, Initialize, Check, Download, Checksum, Extract, WaitForParent, Journal, Replace, Rollback, Commit, Restart, Result, Load, Save, Run, Export, Retention, Sample, Presentation, Backup, VerifyBackup, VerifyInstallation }
 
 public sealed record DiagnosticEvent(DiagnosticModule Module, DiagnosticStage Stage, DiagnosticOutcome Outcome,
     DiagnosticLevel Level = DiagnosticLevel.Info, Guid? OperationId = null, Guid? ParentOperationId = null,
@@ -33,6 +35,13 @@ internal sealed record DiagnosticRecord(DateTimeOffset Timestamp, DiagnosticLeve
     long? DurationMs, DiagnosticError? ExceptionType, int? HResult, string? CancellationReason,
     DiagnosticCounters? Counts, string? CallSite = null, DiagnosticEnvironment? Snapshot = null)
 {
+    internal static readonly string ExecutingVersion =
+        typeof(DiagnosticRecord).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? typeof(DiagnosticRecord).Assembly.GetName().Version!.ToString();
+
+    private static readonly Regex VersionPattern = new(@"\A[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?\z",
+        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -76,7 +85,7 @@ internal sealed record DiagnosticRecord(DateTimeOffset Timestamp, DiagnosticLeve
                 !Enum.IsDefined(value.Stage) || !Enum.IsDefined(value.Outcome) ||
                 value.ExceptionType is { } exception && !Enum.IsDefined(exception) ||
                 value.ApplicationSessionId == Guid.Empty || value.ApplicationVersion is not { Length: > 0 and <= 32 } version ||
-                !version.All(c => char.IsAsciiDigit(c) || c == '.') || !Version.TryParse(version, out _)) return null;
+                !VersionPattern.IsMatch(version)) return null;
             return value with
             {
                 EventId = Id(value.Module, value.Stage, value.Outcome),

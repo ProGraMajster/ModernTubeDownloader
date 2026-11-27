@@ -79,17 +79,22 @@ public sealed class AppServices : IDisposable
 
     internal static AppServices CreateCore(AppPaths paths, HttpClient? httpClient,
         IToolReleaseSource? releaseSource, IToolBinaryValidator? toolValidator,
-        ModernFormsNext.Notifications.ISystemNotificationService? notifications, bool deferWorkStart, string experienceVersion)
+        ModernFormsNext.Notifications.ISystemNotificationService? notifications, bool deferWorkStart, string experienceVersion,
+        FileAppLogger? startupLogger = null, Guid? startupOperation = null, Action<StartupPhase>? report = null)
     {
         using var createTiming = PerformanceDiagnostics.Measure("services.create");
         var startup = System.Diagnostics.Stopwatch.StartNew();
         paths.EnsureCreated();
-        var logger = new FileAppLogger(paths.LogDirectory);
-        logger.Event(new(DiagnosticModule.Application, DiagnosticStage.Startup, DiagnosticOutcome.Started));
+        var logger = startupLogger ?? new FileAppLogger(paths.LogDirectory);
+        report?.Invoke(StartupPhase.LoadSettings);
+        logger.Event(new(DiagnosticModule.Settings, DiagnosticStage.Load, DiagnosticOutcome.Started, OperationId: startupOperation));
         var experience = UserExperienceService.OpenAsync(paths, logger, experienceVersion).GetAwaiter().GetResult();
         var settings = new SettingsService(paths, logger);
         using (PerformanceDiagnostics.Measure("settings.load")) settings.LoadAsync().GetAwaiter().GetResult();
         logger.SetDetail(settings.Current.Diagnostics.Advanced, settings.Current.Diagnostics.IncludeTrace);
+        logger.Event(new(DiagnosticModule.Settings, DiagnosticStage.Load, DiagnosticOutcome.Completed, OperationId: startupOperation,
+            DurationMs: startup.ElapsedMilliseconds));
+        report?.Invoke(StartupPhase.CreateServices);
         if (experience.State.ExistingProfile && !experience.SettingsExisted) settings.PreserveLegacyUpdatePolicyWithoutSettings();
         else if (!experience.State.ExistingProfile && !experience.SettingsExisted) settings.Current.Updates.PolicyVersion = 1;
         var localization = new LocalizationService(settings.Current.Language);
@@ -101,18 +106,19 @@ public sealed class AppServices : IDisposable
         releaseSource ??= new GitHubToolReleaseSource(httpClient);
         toolValidator ??= new ProcessToolBinaryValidator(processRunner);
         var packageInstaller = new ToolPackageInstaller(paths, new ToolDownloadService(httpClient), toolValidator);
-        var tools = new ToolManager(paths, settings, releaseSource, packageInstaller, toolValidator, logger);
+        var tools = new ToolManager(paths, settings, releaseSource, packageInstaller, toolValidator, logger, startupOperation: startupOperation);
         ModernTubeDownloader.Authentication.CookieJarLease.CleanupAbandoned(Path.Combine(paths.AuthenticationDirectory, "tmp"));
         var authentication = new YtDlpAuthenticationProvider(paths, settings);
         var ytDlpRunner = new YtDlpProcessRunner(processRunner, tools, logger, authentication);
         var metadata = new YtDlpMetadataService(ytDlpRunner, settings, logger);
+        report?.Invoke(StartupPhase.LoadData);
         var history = new HistoryService(paths, logger);
         var stageClock = System.Diagnostics.Stopwatch.StartNew();
         using (PerformanceDiagnostics.Measure("history.load")) history.LoadAsync().GetAwaiter().GetResult();
         logger.Event(new(DiagnosticModule.History, DiagnosticStage.Load,
             history.LoadFailed ? DiagnosticOutcome.Failed : DiagnosticOutcome.Completed,
             history.LoadFailed ? DiagnosticLevel.Warn : DiagnosticLevel.Info,
-            DurationMs: stageClock.ElapsedMilliseconds, Counts: new(Items: history.Count)));
+            OperationId: startupOperation, DurationMs: stageClock.ElapsedMilliseconds, Counts: new(Items: history.Count)));
         var queueStore = new QueuePersistenceService(paths, logger);
         var liveStore = new LiveSessionPersistenceService(paths, logger);
         // A damaged shared History makes this a diagnostic runtime. Do not
@@ -160,7 +166,7 @@ public sealed class AppServices : IDisposable
         }
         if (PerformanceDiagnostics.Enabled)
         {
-            PerformanceDiagnostics.Set("history.records", history.Snapshot().Count);
+            PerformanceDiagnostics.Set("history.records", history.Count);
             PerformanceDiagnostics.Set("queue.records", queue.Snapshot().Count);
             PerformanceDiagnostics.BitmapBytes = () => thumbnails.DecodedBytes + Views.ThumbnailImageBinding.OwnedBytes;
             PerformanceDiagnostics.SampleSources = () =>
@@ -172,6 +178,7 @@ public sealed class AppServices : IDisposable
                 PerformanceDiagnostics.Set("thumbnail.displayCopiesBytes", Views.ThumbnailImageBinding.OwnedBytes);
             };
         }
+        report?.Invoke(StartupPhase.Tools);
         tools.Start();
         services.Sources = new SupportedSourcesService(tools, processRunner, logger);
         services.SourceCheck = new SourceCheckService(metadata, logger);
@@ -186,7 +193,8 @@ public sealed class AppServices : IDisposable
         services.Batch.AnalysisCompleted += (_, counts) => services.Notifications?.BatchCompleted(counts.Analyzed, counts.Total);
         services.WebRemote = new WebRemoteHost(services);
         services.Diagnostics = new(services, logger, startup.ElapsedMilliseconds);
-        logger.Event(new(DiagnosticModule.Application, DiagnosticStage.Startup, DiagnosticOutcome.Completed, DurationMs: startup.ElapsedMilliseconds));
+        logger.Event(new(DiagnosticModule.Application, DiagnosticStage.Initialize, DiagnosticOutcome.Completed,
+            OperationId: startupOperation, DurationMs: startup.ElapsedMilliseconds));
         if (!deferWorkStart) services.StartWorkAsync().GetAwaiter().GetResult();
         return services;
     }

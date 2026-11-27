@@ -104,7 +104,7 @@ internal sealed class UpdateSettingsPanel : Panel
         frequencyLabel.Text = text["Updates.Frequency"]; modeLabel.Text = text["Updates.Mode"];
         var frequencyIndex = frequency.SelectedIndex; var modeIndex = mode.SelectedIndex;
         frequency.Items.Clear(); mode.Items.Clear();
-        foreach (var key in new[] { "StartupDaily", "Daily", "Weekly" }) frequency.Items.Add(text["Updates." + key]);
+        foreach (var key in new[] { "StartupDaily", "Daily", "Weekly", "EveryStartup" }) frequency.Items.Add(text["Updates." + key]);
         foreach (var key in new[] { "NotifyOnly", "AutoDownload", "InstallOnExit" }) mode.Items.Add(text["Updates." + key]);
         frequency.SelectedIndex = Math.Max(0, frequencyIndex); mode.SelectedIndex = Math.Max(0, modeIndex);
         save.Text = text["Updates.Save"]; check.Text = text["Updates.Check"]; download.Text = text["Updates.Download"];

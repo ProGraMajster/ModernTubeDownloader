@@ -13,6 +13,9 @@ public sealed partial class ApplicationUpdateService
 {
     private string? pendingStartupResultKey;
     private DateTimeOffset lastStartupCheckAttempt;
+    private int everyStartupCheckAttempted;
+
+    internal void RecordUpdaterRestart() => lastStartupCheckAttempt = DateTimeOffset.UtcNow;
     internal StartupTransfer? StartupProgress { get; private set; }
     internal string? StartupTargetVersion => IsDeferred ? null : State.Available?.Version;
 
@@ -22,12 +25,15 @@ public sealed partial class ApplicationUpdateService
     internal async Task<StartupUpdateOutcome> CheckForStartupAsync(CancellationToken token, Guid operationId)
     {
         var policy = settings.Current.Updates;
-        if (!policy.AutomaticChecks || policy.Frequency != UpdateCheckFrequency.StartupDaily)
+        if (!policy.AutomaticChecks || policy.Frequency is not (UpdateCheckFrequency.StartupDaily or UpdateCheckFrequency.EveryStartup))
             return StartupUpdateOutcome.NotRequested;
         await InitializeAsync(token).ConfigureAwait(false);
         if (StateUnavailable) return StartupUpdateOutcome.Failed;
         if (InstallationPending || State.InstallationFailed) return StartupUpdateOutcome.Deferred;
-        if (!CheckIsDue(TimeSpan.FromDays(1)))
+        var due = policy.Frequency == UpdateCheckFrequency.EveryStartup
+            ? Interlocked.Exchange(ref everyStartupCheckAttempted, 1) == 0
+            : CheckIsDue(TimeSpan.FromDays(1));
+        if (!due)
             return State.Available is null || IsDeferred ? StartupUpdateOutcome.Current : StartupUpdateOutcome.Available;
         lastStartupCheckAttempt = DateTimeOffset.UtcNow;
         var outcome = await CheckForUpdateAsync(token, operationId).ConfigureAwait(false);

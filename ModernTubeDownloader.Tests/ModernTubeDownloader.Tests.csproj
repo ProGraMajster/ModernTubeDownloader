@@ -20,6 +20,7 @@
   <ItemGroup>
     <None Include="..\docs\releases\v1.3.0.md" Link="OfficialReleaseNotes.md" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="..\ModernTubeDownloader\ModernTubeDownloader.csproj" />
+    <Compile Include="..\ModernTubeDownloader.Updater\InstallerProgressFrame.cs" Link="Updates\InstallerProgressFrame.cs" />
     <Compile Include="..\ModernTubeDownloader.Updater\UpdateTransaction.cs" Link="Updates\UpdateTransaction.cs" />
     <ProjectReference Include="..\ModernTubeDownloader.FakeTool\ModernTubeDownloader.FakeTool.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\ModernTubeDownloader.NativeHost\ModernTubeDownloader.NativeHost.csproj" ReferenceOutputAssembly="false" />
