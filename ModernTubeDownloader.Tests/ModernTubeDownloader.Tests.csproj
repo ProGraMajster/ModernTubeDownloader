@@ -18,7 +18,7 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\docs\releases\v$(Version).md" Link="OfficialReleaseNotes.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\docs\releases\v1.3.0.md" Link="OfficialReleaseNotes.md" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="..\ModernTubeDownloader\ModernTubeDownloader.csproj" />
     <Compile Include="..\ModernTubeDownloader.Updater\UpdateTransaction.cs" Link="Updates\UpdateTransaction.cs" />
     <ProjectReference Include="..\ModernTubeDownloader.FakeTool\ModernTubeDownloader.FakeTool.csproj" ReferenceOutputAssembly="false" />

@@ -12,7 +12,7 @@ namespace ModernTubeDownloader.Tests;
 
 public sealed partial class ExperiencePresentationTests
 {
-    private static readonly string NotesVersion = ReleaseNotesCatalog.NormalizeVersion(AppBranding.Version)!;
+    private const string NotesVersion = "1.3.0";
 
     [Theory]
     [InlineData("en", 100, false)] [InlineData("pl", 150, false)] [InlineData("ja-JP", 200, false)]

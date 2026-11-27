@@ -27,7 +27,8 @@ internal static class ReleaseNotesCatalog
 
     internal static bool Supports(string version) => NormalizeVersion(version) is { } normalized && Entries.Value.ContainsKey(normalized);
     internal static IReadOnlyList<string> AvailableVersions => Entries.Value.Keys.ToArray();
-    internal static Uri? OfficialReleaseUrl(string version) => NormalizeVersion(version) is { } normalized ? new(OfficialPrefix + normalized) : null;
+    internal static Uri? OfficialReleaseUrl(string version) => NormalizeVersion(version) is { } normalized && !normalized.Contains("-dev.", StringComparison.Ordinal)
+        ? new(OfficialPrefix + normalized) : null;
 
     internal static string? NormalizeVersion(string value)
     {
