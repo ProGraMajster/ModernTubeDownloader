@@ -25,9 +25,9 @@ internal sealed class StartupUpdateForm : Form
         Size = new(510, 300);
         MinimumSize = new(380, 250);
         StartPosition = FormStartPosition.CenterScreen;
+        UseSystemDecorations = true;
         AccessibilityObject.AutomationId = "StartupUpdateWindow";
         AppBranding.Apply(this);
-        ExperienceVisual.ApplyWindow(this);
         ExperienceVisual.Surface(surface);
         AppTypography.SetDashboardPresentation(surface, true);
         status.AccessibleAutomationId = "StartupUpdateStatus";
@@ -42,7 +42,7 @@ internal sealed class StartupUpdateForm : Form
         surface.Controls.AddRange([logo, title, version, status, detail, progress, continueButton]);
         surface.SizeChanged += (_, _) => LayoutContent();
         AppTypography.RegisterLayout(surface, LayoutContent);
-        Shown += (_, _) => animation.Start();
+        Shown += (_, _) => { if (AppearancePresentation.Current.Global.Animations) animation.Start(); };
         Closing += (_, e) => { if (!finished) { e.Cancel = true; ContinueWithoutUpdating(); } };
         animation.Tick += (_, _) => { if (progress.IsIndeterminate) progress.Invalidate(); };
         startup.Changed += OnStartupChanged;
