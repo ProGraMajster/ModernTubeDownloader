@@ -1458,5 +1458,16 @@
   "Experience.RefreshNotes": "Atualizar novidades",
   "Experience.GitHubNotes": "Fonte: versão oficial do GitHub para esta versão instalada.",
   "Experience.CachedNotes": "Fonte: cópia salva da versão oficial do GitHub para esta versão instalada. Disponível offline.",
-  "Experience.OnlineEnglishNotes": "As notas oficiais estão em inglês. O resumo local offline está disponível em polonês e inglês."
+  "Experience.OnlineEnglishNotes": "As notas oficiais estão em inglês. O resumo local offline está disponível em polonês e inglês.",
+  "Startup.Load": "Iniciando o aplicativo…",
+  "Startup.Services": "Iniciando os serviços em segundo plano…",
+  "Startup.Ready": "Pronto",
+  "Startup.Continue": "Continuar para o aplicativo",
+  "Startup.Detail": "Você pode continuar sem atualizar na inicialização.",
+  "Startup.Download": "Baixando a atualização…",
+  "Startup.Verify": "Verificando a atualização…",
+  "Startup.Offline": "Não foi possível acessar o serviço de atualizações. O aplicativo iniciará offline.",
+  "Startup.UpdateFailed": "Não foi possível preparar a atualização. O aplicativo continuará.",
+  "Startup.Transfer": "{0} de {1} · {2}/s",
+  "Startup.Recovery": "Esta instalação tem uma atualização incompleta ou um registro ilegível. Guarde os arquivos de recuperação e extraia o pacote completo para uma nova pasta antes de abrir o aplicativo."
 }

@@ -1458,5 +1458,16 @@
   "Experience.RefreshNotes": "Sürüm notlarını yenile",
   "Experience.GitHubNotes": "Kaynak: yüklü sürüm için resmî GitHub yayını.",
   "Experience.CachedNotes": "Kaynak: yüklü sürüm için kaydedilmiş resmî GitHub yayını. Çevrimdışı kullanılabilir.",
-  "Experience.OnlineEnglishNotes": "Resmî sürüm notları İngilizcedir. Yerel çevrimdışı özet Lehçe ve İngilizce olarak sunulur."
+  "Experience.OnlineEnglishNotes": "Resmî sürüm notları İngilizcedir. Yerel çevrimdışı özet Lehçe ve İngilizce olarak sunulur.",
+  "Startup.Load": "Uygulama başlatılıyor…",
+  "Startup.Services": "Arka plan hizmetleri başlatılıyor…",
+  "Startup.Ready": "Hazır",
+  "Startup.Continue": "Uygulamaya devam et",
+  "Startup.Detail": "Başlangıçta güncelleme yapmadan devam edebilirsiniz.",
+  "Startup.Download": "Güncelleme indiriliyor…",
+  "Startup.Verify": "Güncelleme doğrulanıyor…",
+  "Startup.Offline": "Güncelleme hizmetine ulaşılamadı. Uygulama çevrimdışı başlatılacak.",
+  "Startup.UpdateFailed": "Güncelleme hazırlanamadı. Uygulamanın başlatılması devam edecek.",
+  "Startup.Transfer": "{0} / {1} · {2}/sn",
+  "Startup.Recovery": "Bu kurulumda tamamlanmamış bir güncelleme veya okunamayan bir günlük var. Kurtarma dosyalarını saklayın ve uygulamayı açmadan önce tam paketi yeni bir klasöre çıkarın."
 }

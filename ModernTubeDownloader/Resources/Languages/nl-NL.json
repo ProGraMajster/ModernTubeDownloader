@@ -1458,5 +1458,16 @@
   "Experience.RefreshNotes": "Versie-informatie vernieuwen",
   "Experience.GitHubNotes": "Bron: officiële GitHub-release voor deze geïnstalleerde versie.",
   "Experience.CachedNotes": "Bron: opgeslagen officiële GitHub-release voor deze geïnstalleerde versie. Offline beschikbaar.",
-  "Experience.OnlineEnglishNotes": "De officiële release-informatie is in het Engels. De lokale offline samenvatting is beschikbaar in het Pools en Engels."
+  "Experience.OnlineEnglishNotes": "De officiële release-informatie is in het Engels. De lokale offline samenvatting is beschikbaar in het Pools en Engels.",
+  "Startup.Load": "Toepassing wordt gestart…",
+  "Startup.Services": "Achtergrondservices worden gestart…",
+  "Startup.Ready": "Gereed",
+  "Startup.Continue": "Doorgaan naar de toepassing",
+  "Startup.Detail": "U kunt doorgaan zonder update bij het opstarten.",
+  "Startup.Download": "Update downloaden…",
+  "Startup.Verify": "Update verifiëren…",
+  "Startup.Offline": "De updateservice is niet bereikbaar. De toepassing start offline.",
+  "Startup.UpdateFailed": "De update kon niet worden voorbereid. De toepassing wordt gestart.",
+  "Startup.Transfer": "{0} van {1} · {2}/s",
+  "Startup.Recovery": "Deze installatie heeft een onvoltooide update of een onleesbaar logboek. Bewaar de herstelbestanden en pak het volledige pakket uit in een nieuwe map voordat u de toepassing opent."
 }

@@ -1458,5 +1458,16 @@
   "Experience.RefreshNotes": "Versionshinweise aktualisieren",
   "Experience.GitHubNotes": "Quelle: offizielles GitHub-Release für diese installierte Version.",
   "Experience.CachedNotes": "Quelle: gespeichertes offizielles GitHub-Release für diese installierte Version. Offline verfügbar.",
-  "Experience.OnlineEnglishNotes": "Die offiziellen Versionshinweise sind auf Englisch. Die lokale Offline-Zusammenfassung ist auf Polnisch und Englisch verfügbar."
+  "Experience.OnlineEnglishNotes": "Die offiziellen Versionshinweise sind auf Englisch. Die lokale Offline-Zusammenfassung ist auf Polnisch und Englisch verfügbar.",
+  "Startup.Load": "Anwendung wird gestartet…",
+  "Startup.Services": "Hintergrunddienste werden gestartet…",
+  "Startup.Ready": "Bereit",
+  "Startup.Continue": "Zur Anwendung",
+  "Startup.Detail": "Sie können ohne Aktualisierung beim Start fortfahren.",
+  "Startup.Download": "Aktualisierung wird heruntergeladen…",
+  "Startup.Verify": "Aktualisierung wird geprüft…",
+  "Startup.Offline": "Der Aktualisierungsdienst ist nicht erreichbar. Die Anwendung startet offline.",
+  "Startup.UpdateFailed": "Die Aktualisierung konnte nicht vorbereitet werden. Die Anwendung wird gestartet.",
+  "Startup.Transfer": "{0} von {1} · {2}/s",
+  "Startup.Recovery": "Diese Installation hat eine unvollständige Aktualisierung oder ein nicht lesbares Protokoll. Bewahren Sie die Wiederherstellungsdateien auf und entpacken Sie das vollständige Paket vor dem Start in einen neuen Ordner."
 }
